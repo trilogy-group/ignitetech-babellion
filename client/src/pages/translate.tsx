@@ -429,7 +429,7 @@ export default function Translate() {
               <p className="mb-4 text-xs text-muted-foreground">Create your first translation to get started</p>
             </div>
           ) : (
-            <div className="space-y-1 p-2 overflow-x-hidden">
+            <div className="space-y-1 p-2 w-full overflow-x-hidden">
               {translations.map((translation) => (
                 <Card
                   key={translation.id}

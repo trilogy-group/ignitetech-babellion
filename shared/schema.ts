@@ -46,6 +46,7 @@ export const translations = pgTable("translations", {
   title: varchar("title", { length: 255 }).notNull(),
   sourceText: text("source_text").notNull(),
   isPrivate: boolean("is_private").default(false).notNull(),
+  selectedLanguages: text("selected_languages").array(),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });

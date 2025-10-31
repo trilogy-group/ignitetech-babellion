@@ -36,10 +36,12 @@ export default function Translate() {
   const [sourceText, setSourceText] = useState("");
   const [title, setTitle] = useState("Untitled Translation");
   const [selectedLanguages, setSelectedLanguages] = useState<string[]>([]);
+  const [tempSelectedLanguages, setTempSelectedLanguages] = useState<string[]>([]);
   const [selectedModel, setSelectedModel] = useState<string>("");
   const [isRenaming, setIsRenaming] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const [isNewDialogOpen, setIsNewDialogOpen] = useState(false);
+  const [isLanguageDialogOpen, setIsLanguageDialogOpen] = useState(false);
   const [copiedOutputId, setCopiedOutputId] = useState<string | null>(null);
   const [activeLanguageTab, setActiveLanguageTab] = useState<string>("");
   const [editedOutputs, setEditedOutputs] = useState<Record<string, string>>({});
@@ -176,6 +178,7 @@ export default function Translate() {
     setSelectedTranslationId(translation.id);
     setSourceText(translation.sourceText);
     setTitle(translation.title);
+    setSelectedLanguages(translation.selectedLanguages || []);
     setEditedOutputs({});
   };
 
@@ -199,9 +202,31 @@ export default function Translate() {
     if (selectedTranslationId) {
       updateMutation.mutate({
         id: selectedTranslationId,
-        data: { sourceText, title },
+        data: { sourceText, title, selectedLanguages },
       });
     }
+  };
+
+  const handleOpenLanguageDialog = () => {
+    setTempSelectedLanguages([...selectedLanguages]);
+    setIsLanguageDialogOpen(true);
+  };
+
+  const handleSaveLanguages = () => {
+    setSelectedLanguages(tempSelectedLanguages);
+    setIsLanguageDialogOpen(false);
+    // Save to backend if translation exists
+    if (selectedTranslationId) {
+      updateMutation.mutate({
+        id: selectedTranslationId,
+        data: { selectedLanguages: tempSelectedLanguages },
+      });
+    }
+  };
+
+  const handleCancelLanguages = () => {
+    setTempSelectedLanguages([...selectedLanguages]);
+    setIsLanguageDialogOpen(false);
   };
 
   const handleTranslate = () => {
@@ -235,7 +260,7 @@ export default function Translate() {
   };
 
   const handleLanguageToggle = (languageCode: string) => {
-    setSelectedLanguages(prev =>
+    setTempSelectedLanguages(prev =>
       prev.includes(languageCode)
         ? prev.filter(l => l !== languageCode)
         : [...prev, languageCode]
@@ -427,9 +452,9 @@ export default function Translate() {
           {/* Language Multi-Select */}
           <div className="flex items-center gap-2">
             <Label className="text-sm font-medium whitespace-nowrap">Languages:</Label>
-            <Dialog>
+            <Dialog open={isLanguageDialogOpen} onOpenChange={setIsLanguageDialogOpen}>
               <DialogTrigger asChild>
-                <Button variant="outline" className="min-w-64" data-testid="button-select-languages">
+                <Button variant="outline" className="min-w-64" onClick={handleOpenLanguageDialog} data-testid="button-select-languages">
                   {selectedLanguages.length === 0
                     ? "Select languages..."
                     : `${selectedLanguages.length} selected`}
@@ -445,7 +470,7 @@ export default function Translate() {
                       <div key={lang.code} className="flex items-center gap-2">
                         <Checkbox
                           id={`lang-${lang.code}`}
-                          checked={selectedLanguages.includes(lang.code)}
+                          checked={tempSelectedLanguages.includes(lang.code)}
                           onCheckedChange={() => handleLanguageToggle(lang.code)}
                           data-testid={`checkbox-lang-${lang.code}`}
                         />
@@ -456,6 +481,14 @@ export default function Translate() {
                     ))}
                   </div>
                 </ScrollArea>
+                <DialogFooter>
+                  <Button variant="outline" onClick={handleCancelLanguages} data-testid="button-cancel-languages">
+                    Cancel
+                  </Button>
+                  <Button onClick={handleSaveLanguages} data-testid="button-save-languages">
+                    Save
+                  </Button>
+                </DialogFooter>
               </DialogContent>
             </Dialog>
           </div>

@@ -425,14 +425,14 @@ export default function Translate() {
               {translations.map((translation) => (
                 <Card
                   key={translation.id}
-                  className={`group cursor-pointer p-4 hover-elevate ${
+                  className={`group cursor-pointer p-4 hover-elevate overflow-hidden ${
                     selectedTranslationId === translation.id ? "bg-sidebar-accent" : ""
                   }`}
                   onClick={() => handleSelectTranslation(translation)}
                   data-testid={`card-translation-${translation.id}`}
                 >
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="flex-1 min-w-0 overflow-hidden">
+                  <div className="flex items-start justify-between gap-2 min-w-0">
+                    <div className="flex-1 min-w-0">
                       {isRenamingId === translation.id ? (
                         <Input
                           value={renameValue}
@@ -454,7 +454,7 @@ export default function Translate() {
                         />
                       ) : (
                         <div 
-                          className={`flex items-center gap-2 overflow-hidden ${canEdit(translation) ? 'cursor-text' : ''}`}
+                          className={`flex items-center gap-2 min-w-0 ${canEdit(translation) ? 'cursor-text' : ''}`}
                           onClick={(e) => {
                             if (canEdit(translation)) {
                               e.stopPropagation();
@@ -463,7 +463,7 @@ export default function Translate() {
                             }
                           }}
                         >
-                          <h3 className="font-medium truncate flex-shrink">{translation.title}</h3>
+                          <h3 className="font-medium truncate flex-1 min-w-0">{translation.title}</h3>
                           {translation.isPrivate && (
                             <Lock className="h-3 w-3 text-muted-foreground flex-shrink-0" data-testid={`icon-private-${translation.id}`} />
                           )}

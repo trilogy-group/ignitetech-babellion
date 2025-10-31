@@ -170,6 +170,10 @@ export default function Translate() {
     setSourceText(translation.sourceText);
     setTitle(translation.title);
     setSelectedLanguages(translation.selectedLanguages || []);
+    // Pre-select the last used model if available
+    if (translation.lastUsedModelId) {
+      setSelectedModel(translation.lastUsedModelId);
+    }
     setEditedOutputs({});
     setTranslatingLanguages(new Set());
   };
@@ -250,6 +254,12 @@ export default function Translate() {
       });
       return;
     }
+
+    // Save the model used for this translation
+    updateMutation.mutate({
+      id: selectedTranslationId,
+      data: { lastUsedModelId: selectedModel },
+    });
 
     // Mark all languages as translating
     setTranslatingLanguages(new Set(selectedLanguages));

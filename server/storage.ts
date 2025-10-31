@@ -41,6 +41,7 @@ export interface IStorage {
   getTranslationOutputs(translationId: string): Promise<TranslationOutput[]>;
   createTranslationOutput(output: InsertTranslationOutput): Promise<TranslationOutput>;
   updateTranslationOutput(id: string, text: string): Promise<TranslationOutput>;
+  deleteTranslationOutput(id: string): Promise<void>;
   deleteTranslationOutputsByTranslationId(translationId: string): Promise<void>;
 
   // AI Model operations
@@ -159,6 +160,10 @@ export class DatabaseStorage implements IStorage {
       .where(eq(translationOutputs.id, id))
       .returning();
     return updated;
+  }
+
+  async deleteTranslationOutput(id: string): Promise<void> {
+    await db.delete(translationOutputs).where(eq(translationOutputs.id, id));
   }
 
   async deleteTranslationOutputsByTranslationId(translationId: string): Promise<void> {

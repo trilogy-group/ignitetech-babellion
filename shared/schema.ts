@@ -47,6 +47,7 @@ export const translations = pgTable("translations", {
   sourceText: text("source_text").notNull(),
   isPrivate: boolean("is_private").default(false).notNull(),
   selectedLanguages: text("selected_languages").array(),
+  lastUsedModelId: varchar("last_used_model_id").references(() => aiModels.id),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
@@ -57,6 +58,10 @@ export const translationsRelations = relations(translations, ({ one, many }) => 
     references: [users.id],
   }),
   outputs: many(translationOutputs),
+  lastUsedModel: one(aiModels, {
+    fields: [translations.lastUsedModelId],
+    references: [aiModels.id],
+  }),
 }));
 
 export const insertTranslationSchema = createInsertSchema(translations).omit({

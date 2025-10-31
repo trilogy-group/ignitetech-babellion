@@ -215,11 +215,16 @@ export default function Settings() {
                 <Input
                   id="openai-key"
                   type="password"
-                  placeholder="sk-..."
+                  placeholder={apiKeysStatus?.openai ? "••••••••••••••••" : "sk-..."}
                   value={openaiKey}
                   onChange={(e) => setOpenaiKey(e.target.value)}
                   data-testid="input-openai-key"
                 />
+                {apiKeysStatus?.openai && !openaiKey && (
+                  <p className="text-xs text-muted-foreground">
+                    Key is configured. Enter a new key to update it.
+                  </p>
+                )}
               </div>
               <Button
                 onClick={() => saveApiKeyMutation.mutate({ provider: "openai", key: openaiKey })}
@@ -227,7 +232,7 @@ export default function Settings() {
                 data-testid="button-save-openai-key"
               >
                 {saveApiKeyMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                Save OpenAI Key
+                {apiKeysStatus?.openai && !openaiKey ? "Update" : "Save"} OpenAI Key
               </Button>
             </CardContent>
           </Card>
@@ -248,11 +253,16 @@ export default function Settings() {
                 <Input
                   id="anthropic-key"
                   type="password"
-                  placeholder="sk-ant-..."
+                  placeholder={apiKeysStatus?.anthropic ? "••••••••••••••••" : "sk-ant-..."}
                   value={anthropicKey}
                   onChange={(e) => setAnthropicKey(e.target.value)}
                   data-testid="input-anthropic-key"
                 />
+                {apiKeysStatus?.anthropic && !anthropicKey && (
+                  <p className="text-xs text-muted-foreground">
+                    Key is configured. Enter a new key to update it.
+                  </p>
+                )}
               </div>
               <Button
                 onClick={() => saveApiKeyMutation.mutate({ provider: "anthropic", key: anthropicKey })}
@@ -260,7 +270,7 @@ export default function Settings() {
                 data-testid="button-save-anthropic-key"
               >
                 {saveApiKeyMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                Save Anthropic Key
+                {apiKeysStatus?.anthropic && !anthropicKey ? "Update" : "Save"} Anthropic Key
               </Button>
             </CardContent>
           </Card>

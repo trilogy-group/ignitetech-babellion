@@ -448,15 +448,15 @@ export default function Translate() {
 
       {/* Middle Panel - Input */}
       <div className="flex flex-1 flex-col">
-        <div className="flex flex-wrap items-center gap-4 border-b p-4">
+        <div className="flex items-center gap-2 border-b p-4">
           {/* Language Multi-Select */}
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-shrink-0">
             <Label className="text-sm font-medium whitespace-nowrap">Languages:</Label>
             <Dialog open={isLanguageDialogOpen} onOpenChange={setIsLanguageDialogOpen}>
               <DialogTrigger asChild>
-                <Button variant="outline" className="min-w-64" onClick={handleOpenLanguageDialog} data-testid="button-select-languages">
+                <Button variant="outline" className="w-32" onClick={handleOpenLanguageDialog} data-testid="button-select-languages">
                   {selectedLanguages.length === 0
-                    ? "Select languages..."
+                    ? "Select..."
                     : `${selectedLanguages.length} selected`}
                 </Button>
               </DialogTrigger>
@@ -494,10 +494,10 @@ export default function Translate() {
           </div>
 
           {/* Model Selection */}
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-1 min-w-0">
             <Label className="text-sm font-medium whitespace-nowrap">Model:</Label>
             <Select value={selectedModel} onValueChange={setSelectedModel}>
-              <SelectTrigger className="min-w-48" data-testid="select-model">
+              <SelectTrigger className="w-full max-w-xs" data-testid="select-model">
                 <SelectValue placeholder="Select model..." />
               </SelectTrigger>
               <SelectContent>
@@ -514,7 +514,7 @@ export default function Translate() {
           <Button
             onClick={handleTranslate}
             disabled={!selectedTranslationId || translateMutation.isPending || selectedLanguages.length === 0}
-            className="ml-auto"
+            className="flex-shrink-0"
             data-testid="button-translate"
           >
             {translateMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}

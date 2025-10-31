@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { Plus, Edit2, Trash2, Loader2, Copy, Check } from "lucide-react";
+import { Plus, Edit2, Trash2, Loader2, Copy, Check, Lock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -28,6 +28,7 @@ import { queryClient, apiRequest } from "@/lib/queryClient";
 import type { Translation, TranslationOutput, AiModel, Language } from "@shared/schema";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 
 export default function Translate() {
   const { toast } = useToast();
@@ -42,6 +43,7 @@ export default function Translate() {
   const [copiedOutputId, setCopiedOutputId] = useState<string | null>(null);
   const [activeLanguageTab, setActiveLanguageTab] = useState<string>("");
   const [editedOutputs, setEditedOutputs] = useState<Record<string, string>>({});
+  const [isPrivate, setIsPrivate] = useState(false);
 
   // Fetch translations
   const { data: translations = [], isLoading: translationsLoading } = useQuery<Translation[]>({
@@ -78,8 +80,9 @@ export default function Translate() {
       const response = await apiRequest("POST", "/api/translations", {
         title: title || "Untitled Translation",
         sourceText: sourceText || "",
+        isPrivate: isPrivate,
       });
-      return response;
+      return await response.json() as Translation;
     },
     onSuccess: (data: Translation) => {
       queryClient.invalidateQueries({ queryKey: ["/api/translations"] });
@@ -179,6 +182,7 @@ export default function Translate() {
   const handleNewTranslation = () => {
     setTitle("Untitled Translation");
     setSourceText("");
+    setIsPrivate(false);
     setIsNewDialogOpen(true);
   };
 
@@ -299,6 +303,22 @@ export default function Translate() {
                     data-testid="textarea-new-source"
                   />
                 </div>
+                <div className="flex items-center justify-between gap-4">
+                  <div className="space-y-0.5">
+                    <Label htmlFor="private-toggle" className="text-sm font-medium">
+                      Private Translation
+                    </Label>
+                    <p className="text-sm text-muted-foreground">
+                      Only you can see this translation
+                    </p>
+                  </div>
+                  <Switch
+                    id="private-toggle"
+                    checked={isPrivate}
+                    onCheckedChange={setIsPrivate}
+                    data-testid="switch-private"
+                  />
+                </div>
               </div>
               <DialogFooter>
                 <Button
@@ -355,7 +375,12 @@ export default function Translate() {
                           data-testid="input-rename-translation"
                         />
                       ) : (
-                        <h3 className="font-medium truncate">{translation.title}</h3>
+                        <div className="flex items-center gap-2">
+                          <h3 className="font-medium truncate">{translation.title}</h3>
+                          {translation.isPrivate && (
+                            <Lock className="h-3 w-3 text-muted-foreground flex-shrink-0" data-testid={`icon-private-${translation.id}`} />
+                          )}
+                        </div>
                       )}
                       <p className="text-xs text-muted-foreground mt-1">
                         {new Date(translation.updatedAt!).toLocaleDateString()}
@@ -487,7 +512,7 @@ export default function Translate() {
                   Source Text
                 </Label>
                 <span className="text-xs text-muted-foreground">
-                  {sourceText.length} characters
+                  {(sourceText || "").length} characters
                 </span>
               </div>
               <Textarea

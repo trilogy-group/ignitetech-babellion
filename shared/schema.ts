@@ -45,6 +45,7 @@ export const translations = pgTable("translations", {
   userId: varchar("user_id").notNull().references(() => users.id, { onDelete: 'cascade' }),
   title: varchar("title", { length: 255 }).notNull(),
   sourceText: text("source_text").notNull(),
+  isPrivate: boolean("is_private").default(false).notNull(),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
@@ -59,6 +60,7 @@ export const translationsRelations = relations(translations, ({ one, many }) => 
 
 export const insertTranslationSchema = createInsertSchema(translations).omit({
   id: true,
+  userId: true,
   createdAt: true,
   updatedAt: true,
 });

@@ -62,7 +62,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const userId = req.user.claims.sub;
       const data = insertTranslationSchema.parse(req.body);
-      const translation = await storage.createTranslation({ ...data, userId });
+      const translation = await storage.createTranslation({ 
+        userId,
+        title: data.title,
+        sourceText: data.sourceText,
+        isPrivate: data.isPrivate ?? false,
+      });
       res.json(translation);
     } catch (error) {
       console.error("Error creating translation:", error);

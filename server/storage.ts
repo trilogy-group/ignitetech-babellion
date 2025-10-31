@@ -23,7 +23,7 @@ import {
   type InsertApiKey,
 } from "@shared/schema";
 import { db } from "./db";
-import { eq, and, desc } from "drizzle-orm";
+import { eq, and, or, desc } from "drizzle-orm";
 
 export interface IStorage {
   // User operations (REQUIRED for Replit Auth)
@@ -33,7 +33,7 @@ export interface IStorage {
   // Translation operations
   getTranslations(userId: string): Promise<Translation[]>;
   getTranslation(id: string): Promise<Translation | undefined>;
-  createTranslation(translation: InsertTranslation): Promise<Translation>;
+  createTranslation(translation: InsertTranslation & { userId: string }): Promise<Translation>;
   updateTranslation(id: string, data: Partial<Translation>): Promise<Translation>;
   deleteTranslation(id: string): Promise<void>;
 
@@ -92,10 +92,18 @@ export class DatabaseStorage implements IStorage {
 
   // Translation operations
   async getTranslations(userId: string): Promise<Translation[]> {
+    // Return all public translations + user's private translations
     return await db
       .select()
       .from(translations)
-      .where(eq(translations.userId, userId))
+      .where(
+        or(
+          // Either it's public
+          eq(translations.isPrivate, false),
+          // OR it's the user's own translation (can be public or private)
+          eq(translations.userId, userId)
+        )
+      )
       .orderBy(desc(translations.updatedAt));
   }
 
@@ -107,7 +115,7 @@ export class DatabaseStorage implements IStorage {
     return translation;
   }
 
-  async createTranslation(translation: InsertTranslation): Promise<Translation> {
+  async createTranslation(translation: InsertTranslation & { userId: string }): Promise<Translation> {
     const [newTranslation] = await db
       .insert(translations)
       .values(translation)

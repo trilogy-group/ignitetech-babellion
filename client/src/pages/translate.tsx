@@ -23,6 +23,16 @@ import {
   DialogTrigger,
   DialogFooter,
 } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import type { Translation, TranslationOutput, AiModel, Language } from "@shared/schema";
@@ -43,11 +53,13 @@ export default function Translate() {
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [editedTitle, setEditedTitle] = useState("");
   const [isLanguageDialogOpen, setIsLanguageDialogOpen] = useState(false);
+  const [isEscapePressed, setIsEscapePressed] = useState(false);
   const [copiedOutputId, setCopiedOutputId] = useState<string | null>(null);
   const [activeLanguageTab, setActiveLanguageTab] = useState<string>("");
   const [editedOutputs, setEditedOutputs] = useState<Record<string, string>>({});
   const [isPrivate, setIsPrivate] = useState(false);
   const [translatingLanguages, setTranslatingLanguages] = useState<Set<string>>(new Set());
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
 
   // Fetch translations
   const { data: translations = [], isLoading: translationsLoading } = useQuery<Translation[]>({
@@ -121,16 +133,24 @@ export default function Translate() {
     mutationFn: async (id: string) => {
       return await apiRequest("DELETE", `/api/translations/${id}`, {});
     },
-    onSuccess: () => {
+    onSuccess: (_, deletedId) => {
       queryClient.invalidateQueries({ queryKey: ["/api/translations"] });
-      if (selectedTranslationId === deleteMutation.variables) {
+      if (selectedTranslationId === deletedId) {
         setSelectedTranslationId(null);
         setSourceText("");
         setTitle("Untitled Translation");
       }
+      setDeleteConfirmId(null);
       toast({
         title: "Translation deleted",
         description: "The translation has been removed.",
+      });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Failed to delete",
+        description: error.message || "You don't have permission to delete this translation.",
+        variant: "destructive",
       });
     },
   });
@@ -186,10 +206,11 @@ export default function Translate() {
   };
 
   const handleRenameInList = (id: string, newTitle: string) => {
-    if (newTitle.trim()) {
+    if (!isEscapePressed && newTitle.trim()) {
       updateMutation.mutate({ id, data: { title: newTitle.trim() } });
     }
     setIsRenamingId(null);
+    setIsEscapePressed(false);
   };
 
   const handleStartEditingTitle = () => {
@@ -399,7 +420,7 @@ export default function Translate() {
                   data-testid={`card-translation-${translation.id}`}
                 >
                   <div className="flex items-start justify-between gap-2">
-                    <div className="flex-1 min-w-0">
+                    <div className="flex-1 min-w-0 overflow-hidden">
                       {isRenamingId === translation.id ? (
                         <Input
                           value={renameValue}
@@ -407,8 +428,10 @@ export default function Translate() {
                           onBlur={() => handleRenameInList(translation.id, renameValue)}
                           onKeyDown={(e) => {
                             if (e.key === "Enter") {
+                              setIsEscapePressed(false);
                               handleRenameInList(translation.id, renameValue);
                             } else if (e.key === "Escape") {
+                              setIsEscapePressed(true);
                               setIsRenamingId(null);
                             }
                           }}
@@ -419,31 +442,31 @@ export default function Translate() {
                         />
                       ) : (
                         <div 
-                          className="cursor-text flex items-center gap-2 min-w-0"
+                          className="cursor-text flex items-center gap-2 overflow-hidden"
                           onClick={(e) => {
                             e.stopPropagation();
                             setIsRenamingId(translation.id);
                             setRenameValue(translation.title);
                           }}
                         >
-                          <h3 className="font-medium truncate flex-1 min-w-0">{translation.title}</h3>
+                          <h3 className="font-medium truncate flex-shrink">{translation.title}</h3>
                           {translation.isPrivate && (
                             <Lock className="h-3 w-3 text-muted-foreground flex-shrink-0" data-testid={`icon-private-${translation.id}`} />
                           )}
                         </div>
                       )}
-                      <p className="text-xs text-muted-foreground mt-1">
+                      <p className="text-xs text-muted-foreground mt-1 truncate">
                         {new Date(translation.updatedAt!).toLocaleDateString()}
                       </p>
                     </div>
-                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
                       <Button
                         variant="ghost"
                         size="icon"
                         className="h-6 w-6 text-destructive"
                         onClick={(e) => {
                           e.stopPropagation();
-                          deleteMutation.mutate(translation.id);
+                          setDeleteConfirmId(translation.id);
                         }}
                         data-testid={`button-delete-${translation.id}`}
                       >
@@ -712,6 +735,30 @@ export default function Translate() {
           )}
         </div>
       </div>
+
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={!!deleteConfirmId} onOpenChange={(open) => !open && setDeleteConfirmId(null)}>
+        <AlertDialogContent data-testid="dialog-delete-confirm">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Translation</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete this translation? This action cannot be undone and will remove all associated translation outputs.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel data-testid="button-cancel-delete">Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => deleteConfirmId && deleteMutation.mutate(deleteConfirmId)}
+              disabled={deleteMutation.isPending}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              data-testid="button-confirm-delete"
+            >
+              {deleteMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

@@ -552,12 +552,22 @@ export default function Translate() {
                 id="source-text"
                 value={sourceText}
                 onChange={(e) => setSourceText(e.target.value)}
-                onBlur={handleSaveSource}
                 placeholder="Enter text to translate..."
                 className="flex-1 min-h-0 resize-none"
                 disabled={!selectedTranslationId}
                 data-testid="textarea-source"
               />
+              <div className="mt-2 flex justify-end flex-shrink-0">
+                <Button
+                  onClick={handleSaveSource}
+                  disabled={!selectedTranslationId || updateMutation.isPending}
+                  size="sm"
+                  data-testid="button-save-source"
+                >
+                  {updateMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                  Save
+                </Button>
+              </div>
             </div>
           </div>
         </div>

@@ -291,7 +291,7 @@ export default function Translate() {
   }
 
   return (
-    <div className="flex h-screen overflow-hidden">
+    <div className="flex h-full overflow-hidden">
       {/* Left Sidebar - Translation History */}
       <div className="flex w-80 flex-col border-r bg-sidebar">
         <div className="flex items-center justify-between gap-4 border-b p-4">

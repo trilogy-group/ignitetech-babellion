@@ -429,17 +429,17 @@ export default function Translate() {
               <p className="mb-4 text-xs text-muted-foreground">Create your first translation to get started</p>
             </div>
           ) : (
-            <div className="space-y-1 p-2 max-w-full">
+            <div className="space-y-1 p-2">
               {translations.map((translation) => (
                 <Card
                   key={translation.id}
-                  className={`group cursor-pointer p-4 hover-elevate max-w-full ${
+                  className={`group cursor-pointer p-4 hover-elevate w-full overflow-hidden ${
                     selectedTranslationId === translation.id ? "bg-sidebar-accent" : ""
                   }`}
                   onClick={() => handleSelectTranslation(translation)}
                   data-testid={`card-translation-${translation.id}`}
                 >
-                  <div className="flex items-start justify-between gap-2 min-w-0">
+                  <div className="flex items-start gap-2 min-w-0">
                     <div className="flex-1 min-w-0">
                       {isRenamingId === translation.id ? (
                         <Input

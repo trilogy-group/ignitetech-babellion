@@ -524,7 +524,7 @@ export default function Translate() {
 
         <div className="flex-1 overflow-hidden p-6">
           <div className="flex h-full flex-col gap-4">
-            <div>
+            <div className="flex-shrink-0">
               <Label htmlFor="title" className="mb-2 block text-sm font-medium">
                 Translation Title
               </Label>
@@ -539,8 +539,8 @@ export default function Translate() {
               />
             </div>
 
-            <div className="flex flex-1 flex-col">
-              <div className="mb-2 flex items-center justify-between">
+            <div className="flex flex-1 flex-col min-h-0">
+              <div className="mb-2 flex items-center justify-between flex-shrink-0">
                 <Label htmlFor="source-text" className="text-sm font-medium">
                   Source Text
                 </Label>
@@ -554,7 +554,7 @@ export default function Translate() {
                 onChange={(e) => setSourceText(e.target.value)}
                 onBlur={handleSaveSource}
                 placeholder="Enter text to translate..."
-                className="flex-1 resize-none"
+                className="flex-1 min-h-0 resize-none"
                 disabled={!selectedTranslationId}
                 data-testid="textarea-source"
               />

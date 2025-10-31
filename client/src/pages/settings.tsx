@@ -182,13 +182,15 @@ export default function Settings() {
   });
 
   return (
-    <div className="container max-w-5xl py-8 px-4 sm:px-6 lg:px-8">
-      <div className="mb-8">
+    <div className="flex h-screen flex-col">
+      <div className="border-b px-4 py-6 sm:px-6 lg:px-8">
         <h1 className="text-3xl font-bold">Settings</h1>
         <p className="text-muted-foreground mt-2">Manage your translation platform configuration</p>
       </div>
 
-      <Tabs defaultValue="api-keys" className="space-y-6">
+      <ScrollArea className="flex-1">
+        <div className="container max-w-5xl py-8 px-4 sm:px-6 lg:px-8">
+          <Tabs defaultValue="api-keys" className="space-y-6">
         <TabsList>
           <TabsTrigger value="api-keys" data-testid="tab-api-keys">API Keys</TabsTrigger>
           <TabsTrigger value="translation" data-testid="tab-translation">Translation</TabsTrigger>
@@ -543,6 +545,8 @@ export default function Settings() {
           </Card>
         </TabsContent>
       </Tabs>
+        </div>
+      </ScrollArea>
     </div>
   );
 }

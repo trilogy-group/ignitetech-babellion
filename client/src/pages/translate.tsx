@@ -606,37 +606,39 @@ export default function Translate() {
                 <TabsContent
                   key={output.id}
                   value={output.languageCode}
-                  className="flex-1 overflow-hidden p-6"
+                  className="flex-1 overflow-hidden"
                 >
-                  <div className="flex h-full flex-col gap-4">
-                    <div className="flex items-center justify-between">
-                      <Label className="text-sm font-medium">{output.languageName}</Label>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => handleCopyOutput(editedOutputs[output.id] ?? output.translatedText, output.id)}
-                        data-testid={`button-copy-${output.id}`}
-                      >
-                        {copiedOutputId === output.id ? (
-                          <Check className="h-4 w-4" />
-                        ) : (
-                          <Copy className="h-4 w-4" />
-                        )}
-                      </Button>
-                    </div>
+                  <ScrollArea className="h-full">
+                    <div className="flex flex-col gap-4 p-6">
+                      <div className="flex items-center justify-between">
+                        <Label className="text-sm font-medium">{output.languageName}</Label>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleCopyOutput(editedOutputs[output.id] ?? output.translatedText, output.id)}
+                          data-testid={`button-copy-${output.id}`}
+                        >
+                          {copiedOutputId === output.id ? (
+                            <Check className="h-4 w-4" />
+                          ) : (
+                            <Copy className="h-4 w-4" />
+                          )}
+                        </Button>
+                      </div>
 
-                    <Textarea
-                      value={editedOutputs[output.id] ?? output.translatedText}
-                      onChange={(e) => setEditedOutputs(prev => ({ ...prev, [output.id]: e.target.value }))}
-                      onBlur={() => handleSaveOutput(output.id)}
-                      className="flex-1 resize-none"
-                      data-testid={`textarea-output-${output.id}`}
-                    />
+                      <Textarea
+                        value={editedOutputs[output.id] ?? output.translatedText}
+                        onChange={(e) => setEditedOutputs(prev => ({ ...prev, [output.id]: e.target.value }))}
+                        onBlur={() => handleSaveOutput(output.id)}
+                        className="min-h-96 resize-none"
+                        data-testid={`textarea-output-${output.id}`}
+                      />
 
-                    <div className="text-xs text-muted-foreground">
-                      Model: {models.find(m => m.id === output.modelId)?.name || "Unknown"}
+                      <div className="text-xs text-muted-foreground">
+                        Model: {models.find(m => m.id === output.modelId)?.name || "Unknown"}
+                      </div>
                     </div>
-                  </div>
+                  </ScrollArea>
                 </TabsContent>
               ))}
             </Tabs>

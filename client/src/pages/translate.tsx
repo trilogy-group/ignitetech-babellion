@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Plus, Trash2, Loader2, Copy, Check, Lock } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -91,6 +91,14 @@ export default function Translate() {
   if (!selectedModel && defaultModel) {
     setSelectedModel(defaultModel.id);
   }
+
+  // Auto-select first translation on load
+  useEffect(() => {
+    if (!translationsLoading && translations.length > 0 && !selectedTranslationId) {
+      const firstTranslation = translations[0];
+      handleSelectTranslation(firstTranslation);
+    }
+  }, [translations, translationsLoading, selectedTranslationId]);
 
   // Create new translation mutation
   const createMutation = useMutation({

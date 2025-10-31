@@ -402,7 +402,7 @@ export default function Translate() {
   return (
     <div className="flex h-full overflow-hidden">
       {/* Left Sidebar - Translation History */}
-      <div className="flex w-80 flex-col border-r bg-sidebar">
+      <div className="flex w-80 flex-col border-r bg-sidebar flex-shrink-0">
         <div className="flex items-center justify-between gap-4 border-b p-4">
           <h2 className="text-lg font-semibold">Translation History</h2>
           <Button size="sm" onClick={handleNewTranslation} disabled={createMutation.isPending} data-testid="button-new-translation">
@@ -410,7 +410,7 @@ export default function Translate() {
           </Button>
         </div>
 
-        <ScrollArea className="flex-1">
+        <ScrollArea className="flex-1 overflow-x-hidden">
           {translationsLoading ? (
             <div className="flex items-center justify-center p-8">
               <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
@@ -425,7 +425,7 @@ export default function Translate() {
               {translations.map((translation) => (
                 <Card
                   key={translation.id}
-                  className={`group cursor-pointer p-4 hover-elevate overflow-hidden ${
+                  className={`group cursor-pointer p-4 hover-elevate ${
                     selectedTranslationId === translation.id ? "bg-sidebar-accent" : ""
                   }`}
                   onClick={() => handleSelectTranslation(translation)}

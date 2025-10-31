@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { Plus, Edit2, Trash2, Loader2, Copy, Check, Lock } from "lucide-react";
+import { Plus, Trash2, Loader2, Copy, Check, Lock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -38,9 +38,10 @@ export default function Translate() {
   const [selectedLanguages, setSelectedLanguages] = useState<string[]>([]);
   const [tempSelectedLanguages, setTempSelectedLanguages] = useState<string[]>([]);
   const [selectedModel, setSelectedModel] = useState<string>("");
-  const [isRenaming, setIsRenaming] = useState<string | null>(null);
+  const [isRenamingId, setIsRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
-  const [isNewDialogOpen, setIsNewDialogOpen] = useState(false);
+  const [isEditingTitle, setIsEditingTitle] = useState(false);
+  const [editedTitle, setEditedTitle] = useState("");
   const [isLanguageDialogOpen, setIsLanguageDialogOpen] = useState(false);
   const [copiedOutputId, setCopiedOutputId] = useState<string | null>(null);
   const [activeLanguageTab, setActiveLanguageTab] = useState<string>("");
@@ -81,18 +82,19 @@ export default function Translate() {
   const createMutation = useMutation({
     mutationFn: async () => {
       const response = await apiRequest("POST", "/api/translations", {
-        title: title || "Untitled Translation",
-        sourceText: sourceText || "",
-        isPrivate: isPrivate,
+        title: "Untitled Translation",
+        sourceText: "",
+        isPrivate: false,
       });
       return await response.json() as Translation;
     },
     onSuccess: (data: Translation) => {
       queryClient.invalidateQueries({ queryKey: ["/api/translations"] });
       setSelectedTranslationId(data.id);
-      setIsNewDialogOpen(false);
-      setSourceText(data.sourceText);
+      setSourceText("");
       setTitle(data.title);
+      setSelectedLanguages([]);
+      setIsEditingTitle(false);
       toast({
         title: "Translation created",
         description: "Your new translation project has been created.",
@@ -179,19 +181,37 @@ export default function Translate() {
   };
 
   const handleNewTranslation = () => {
-    setTitle("Untitled Translation");
-    setSourceText("");
-    setIsPrivate(false);
-    setIsNewDialogOpen(true);
-  };
-
-  const handleCreateNew = () => {
+    // Create immediately
     createMutation.mutate();
   };
 
-  const handleRename = (id: string, newTitle: string) => {
-    updateMutation.mutate({ id, data: { title: newTitle } });
-    setIsRenaming(null);
+  const handleRenameInList = (id: string, newTitle: string) => {
+    if (newTitle.trim()) {
+      updateMutation.mutate({ id, data: { title: newTitle.trim() } });
+    }
+    setIsRenamingId(null);
+  };
+
+  const handleStartEditingTitle = () => {
+    setEditedTitle(title);
+    setIsEditingTitle(true);
+  };
+
+  const handleSaveTitle = () => {
+    const trimmedTitle = editedTitle.trim();
+    if (trimmedTitle && trimmedTitle !== title && selectedTranslationId) {
+      setTitle(trimmedTitle);
+      updateMutation.mutate({
+        id: selectedTranslationId,
+        data: { title: trimmedTitle },
+      });
+    }
+    setIsEditingTitle(false);
+  };
+
+  const handleCancelEditingTitle = () => {
+    setEditedTitle(title);
+    setIsEditingTitle(false);
   };
 
   const handleSaveSource = () => {
@@ -352,67 +372,9 @@ export default function Translate() {
       <div className="flex w-80 flex-col border-r bg-sidebar">
         <div className="flex items-center justify-between gap-4 border-b p-4">
           <h2 className="text-lg font-semibold">Translation History</h2>
-          <Dialog open={isNewDialogOpen} onOpenChange={setIsNewDialogOpen}>
-            <DialogTrigger asChild>
-              <Button size="sm" onClick={handleNewTranslation} data-testid="button-new-translation">
-                <Plus className="h-4 w-4" />
-              </Button>
-            </DialogTrigger>
-            <DialogContent data-testid="dialog-new-translation">
-              <DialogHeader>
-                <DialogTitle>Create New Translation</DialogTitle>
-              </DialogHeader>
-              <div className="space-y-4 py-4">
-                <div className="space-y-2">
-                  <Label htmlFor="new-title">Title</Label>
-                  <Input
-                    id="new-title"
-                    placeholder="Enter translation title..."
-                    value={title}
-                    onChange={(e) => setTitle(e.target.value)}
-                    data-testid="input-new-title"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="new-source">Source Text</Label>
-                  <Textarea
-                    id="new-source"
-                    placeholder="Enter text to translate..."
-                    value={sourceText}
-                    onChange={(e) => setSourceText(e.target.value)}
-                    className="min-h-32"
-                    data-testid="textarea-new-source"
-                  />
-                </div>
-                <div className="flex items-center justify-between gap-4">
-                  <div className="space-y-0.5">
-                    <Label htmlFor="private-toggle" className="text-sm font-medium">
-                      Private Translation
-                    </Label>
-                    <p className="text-sm text-muted-foreground">
-                      Only you can see this translation
-                    </p>
-                  </div>
-                  <Switch
-                    id="private-toggle"
-                    checked={isPrivate}
-                    onCheckedChange={setIsPrivate}
-                    data-testid="switch-private"
-                  />
-                </div>
-              </div>
-              <DialogFooter>
-                <Button
-                  onClick={handleCreateNew}
-                  disabled={createMutation.isPending}
-                  data-testid="button-create-translation"
-                >
-                  {createMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                  Create
-                </Button>
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
+          <Button size="sm" onClick={handleNewTranslation} disabled={createMutation.isPending} data-testid="button-new-translation">
+            {createMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+          </Button>
         </div>
 
         <ScrollArea className="flex-1">
@@ -438,16 +400,16 @@ export default function Translate() {
                 >
                   <div className="flex items-start justify-between gap-2">
                     <div className="flex-1 min-w-0">
-                      {isRenaming === translation.id ? (
+                      {isRenamingId === translation.id ? (
                         <Input
                           value={renameValue}
                           onChange={(e) => setRenameValue(e.target.value)}
-                          onBlur={() => handleRename(translation.id, renameValue)}
+                          onBlur={() => handleRenameInList(translation.id, renameValue)}
                           onKeyDown={(e) => {
                             if (e.key === "Enter") {
-                              handleRename(translation.id, renameValue);
+                              handleRenameInList(translation.id, renameValue);
                             } else if (e.key === "Escape") {
-                              setIsRenaming(null);
+                              setIsRenamingId(null);
                             }
                           }}
                           autoFocus
@@ -456,8 +418,15 @@ export default function Translate() {
                           data-testid="input-rename-translation"
                         />
                       ) : (
-                        <div className="flex items-center gap-2">
-                          <h3 className="font-medium truncate">{translation.title}</h3>
+                        <div 
+                          className="cursor-text flex items-center gap-2 min-w-0"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setIsRenamingId(translation.id);
+                            setRenameValue(translation.title);
+                          }}
+                        >
+                          <h3 className="font-medium truncate flex-1 min-w-0">{translation.title}</h3>
                           {translation.isPrivate && (
                             <Lock className="h-3 w-3 text-muted-foreground flex-shrink-0" data-testid={`icon-private-${translation.id}`} />
                           )}
@@ -468,19 +437,6 @@ export default function Translate() {
                       </p>
                     </div>
                     <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-6 w-6"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setIsRenaming(translation.id);
-                          setRenameValue(translation.title);
-                        }}
-                        data-testid={`button-rename-${translation.id}`}
-                      >
-                        <Edit2 className="h-3 w-3" />
-                      </Button>
                       <Button
                         variant="ghost"
                         size="icon"
@@ -581,18 +537,35 @@ export default function Translate() {
         <div className="flex-1 overflow-hidden p-6">
           <div className="flex h-full flex-col gap-4">
             <div className="flex-shrink-0">
-              <Label htmlFor="title" className="mb-2 block text-sm font-medium">
+              <Label className="mb-2 block text-sm font-medium">
                 Translation Title
               </Label>
-              <Input
-                id="title"
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                onBlur={handleSaveSource}
-                placeholder="Enter translation title..."
-                disabled={!selectedTranslationId}
-                data-testid="input-translation-title"
-              />
+              {isEditingTitle ? (
+                <Input
+                  value={editedTitle}
+                  onChange={(e) => setEditedTitle(e.target.value)}
+                  onBlur={handleSaveTitle}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      handleSaveTitle();
+                    } else if (e.key === "Escape") {
+                      handleCancelEditingTitle();
+                    }
+                  }}
+                  autoFocus
+                  placeholder="Enter translation title..."
+                  disabled={!selectedTranslationId}
+                  data-testid="input-translation-title"
+                />
+              ) : (
+                <div
+                  className="cursor-text rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background hover:border-accent-foreground/20 min-h-9"
+                  onClick={selectedTranslationId ? handleStartEditingTitle : undefined}
+                  data-testid="text-translation-title"
+                >
+                  {title || "Enter translation title..."}
+                </div>
+              )}
             </div>
 
             <div className="flex flex-1 flex-col min-h-0">

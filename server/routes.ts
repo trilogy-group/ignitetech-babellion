@@ -83,7 +83,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!translation) {
         return res.status(404).json({ message: "Translation not found" });
       }
-      if (translation.userId !== req.user.claims.sub) {
+      // Check if user owns the translation or is admin
+      const user = await storage.getUser(req.user.claims.sub);
+      const canEdit = user && (user.isAdmin || translation.userId === req.user.claims.sub);
+      if (!canEdit) {
         return res.status(403).json({ message: "Forbidden" });
       }
       const updated = await storage.updateTranslation(req.params.id, req.body);
@@ -100,7 +103,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!translation) {
         return res.status(404).json({ message: "Translation not found" });
       }
-      if (translation.userId !== req.user.claims.sub) {
+      // Check if user owns the translation or is admin
+      const user = await storage.getUser(req.user.claims.sub);
+      const canDelete = user && (user.isAdmin || translation.userId === req.user.claims.sub);
+      if (!canDelete) {
         return res.status(403).json({ message: "Forbidden" });
       }
       await storage.deleteTranslation(req.params.id);
@@ -135,6 +141,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.patch("/api/translation-outputs/:id", isAuthenticated, async (req: any, res) => {
     try {
       const { translatedText } = req.body;
+      // Get the output to find its parent translation
+      const output = await storage.getTranslationOutput(req.params.id);
+      if (!output) {
+        return res.status(404).json({ message: "Translation output not found" });
+      }
+      
+      // Get the parent translation to check permissions
+      const translation = await storage.getTranslation(output.translationId);
+      if (!translation) {
+        return res.status(404).json({ message: "Translation not found" });
+      }
+      
+      // Check if user owns the translation or is admin
+      const user = await storage.getUser(req.user.claims.sub);
+      const canEdit = user && (user.isAdmin || translation.userId === req.user.claims.sub);
+      if (!canEdit) {
+        return res.status(403).json({ message: "Forbidden" });
+      }
+      
       const updated = await storage.updateTranslationOutput(req.params.id, translatedText);
       res.json(updated);
     } catch (error) {
@@ -148,12 +173,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const { translationId, languageCode, modelId } = req.body;
 
-      // Verify user owns the translation
+      // Verify user owns the translation or is admin
       const translation = await storage.getTranslation(translationId);
       if (!translation) {
         return res.status(404).json({ message: "Translation not found" });
       }
-      if (translation.userId !== req.user.claims.sub) {
+      const user = await storage.getUser(req.user.claims.sub);
+      const canTranslate = user && (user.isAdmin || translation.userId === req.user.claims.sub);
+      if (!canTranslate) {
         return res.status(403).json({ message: "Forbidden" });
       }
 

@@ -34,6 +34,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/hooks/useAuth";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import type { Translation, TranslationOutput, AiModel, Language } from "@shared/schema";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -42,6 +43,7 @@ import { Switch } from "@/components/ui/switch";
 
 export default function Translate() {
   const { toast } = useToast();
+  const { user } = useAuth();
   const [selectedTranslationId, setSelectedTranslationId] = useState<string | null>(null);
   const [sourceText, setSourceText] = useState("");
   const [title, setTitle] = useState("Untitled Translation");
@@ -387,6 +389,16 @@ export default function Translate() {
     setActiveLanguageTab(outputs[0].languageCode);
   }
 
+  // Permission helper - check if user can edit a translation
+  const canEdit = (translation: Translation | null) => {
+    if (!user || !translation) return false;
+    return user.isAdmin || translation.userId === user.id;
+  };
+
+  // Get currently selected translation
+  const selectedTranslation = translations.find(t => t.id === selectedTranslationId) || null;
+  const canEditSelected = canEdit(selectedTranslation);
+
   return (
     <div className="flex h-full overflow-hidden">
       {/* Left Sidebar - Translation History */}
@@ -442,11 +454,13 @@ export default function Translate() {
                         />
                       ) : (
                         <div 
-                          className="cursor-text flex items-center gap-2 overflow-hidden"
+                          className={`flex items-center gap-2 overflow-hidden ${canEdit(translation) ? 'cursor-text' : ''}`}
                           onClick={(e) => {
-                            e.stopPropagation();
-                            setIsRenamingId(translation.id);
-                            setRenameValue(translation.title);
+                            if (canEdit(translation)) {
+                              e.stopPropagation();
+                              setIsRenamingId(translation.id);
+                              setRenameValue(translation.title);
+                            }
                           }}
                         >
                           <h3 className="font-medium truncate flex-shrink">{translation.title}</h3>
@@ -459,20 +473,22 @@ export default function Translate() {
                         {new Date(translation.updatedAt!).toLocaleDateString()}
                       </p>
                     </div>
-                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-6 w-6 text-destructive"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setDeleteConfirmId(translation.id);
-                        }}
-                        data-testid={`button-delete-${translation.id}`}
-                      >
-                        <Trash2 className="h-3 w-3" />
-                      </Button>
-                    </div>
+                    {canEdit(translation) && (
+                      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-6 w-6 text-destructive"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setDeleteConfirmId(translation.id);
+                          }}
+                          data-testid={`button-delete-${translation.id}`}
+                        >
+                          <Trash2 className="h-3 w-3" />
+                        </Button>
+                      </div>
+                    )}
                   </div>
                 </Card>
               ))}
@@ -489,7 +505,13 @@ export default function Translate() {
             <Label className="text-sm font-medium whitespace-nowrap">Languages:</Label>
             <Dialog open={isLanguageDialogOpen} onOpenChange={setIsLanguageDialogOpen}>
               <DialogTrigger asChild>
-                <Button variant="outline" className="w-32" onClick={handleOpenLanguageDialog} data-testid="button-select-languages">
+                <Button 
+                  variant="outline" 
+                  className="w-32" 
+                  onClick={handleOpenLanguageDialog}
+                  disabled={!canEditSelected}
+                  data-testid="button-select-languages"
+                >
                   {selectedLanguages.length === 0
                     ? "Select..."
                     : `${selectedLanguages.length} selected`}
@@ -531,7 +553,7 @@ export default function Translate() {
           {/* Model Selection */}
           <div className="flex items-center gap-2 flex-1 min-w-0">
             <Label className="text-sm font-medium whitespace-nowrap">Model:</Label>
-            <Select value={selectedModel} onValueChange={setSelectedModel}>
+            <Select value={selectedModel} onValueChange={setSelectedModel} disabled={!canEditSelected}>
               <SelectTrigger className="w-full max-w-xs" data-testid="select-model">
                 <SelectValue placeholder="Select model..." />
               </SelectTrigger>
@@ -548,7 +570,7 @@ export default function Translate() {
           {/* Translate Button */}
           <Button
             onClick={handleTranslate}
-            disabled={!selectedTranslationId || translatingLanguages.size > 0 || selectedLanguages.length === 0}
+            disabled={!selectedTranslationId || !canEditSelected || translatingLanguages.size > 0 || selectedLanguages.length === 0}
             className="flex-shrink-0"
             data-testid="button-translate"
           >
@@ -577,13 +599,13 @@ export default function Translate() {
                   }}
                   autoFocus
                   placeholder="Enter translation title..."
-                  disabled={!selectedTranslationId}
+                  disabled={!selectedTranslationId || !canEditSelected}
                   data-testid="input-translation-title"
                 />
               ) : (
                 <div
-                  className="cursor-text rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background hover:border-accent-foreground/20 min-h-9"
-                  onClick={selectedTranslationId ? handleStartEditingTitle : undefined}
+                  className={`rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background min-h-9 ${canEditSelected ? 'cursor-text hover:border-accent-foreground/20' : 'cursor-default'}`}
+                  onClick={selectedTranslationId && canEditSelected ? handleStartEditingTitle : undefined}
                   data-testid="text-translation-title"
                 >
                   {title || "Enter translation title..."}
@@ -606,13 +628,13 @@ export default function Translate() {
                 onChange={(e) => setSourceText(e.target.value)}
                 placeholder="Enter text to translate..."
                 className="flex-1 min-h-0 resize-none"
-                disabled={!selectedTranslationId}
+                disabled={!selectedTranslationId || !canEditSelected}
                 data-testid="textarea-source"
               />
               <div className="mt-2 flex justify-end flex-shrink-0">
                 <Button
                   onClick={handleSaveSource}
-                  disabled={!selectedTranslationId || updateMutation.isPending}
+                  disabled={!selectedTranslationId || !canEditSelected || updateMutation.isPending}
                   size="sm"
                   data-testid="button-save-source"
                 >
@@ -711,6 +733,7 @@ export default function Translate() {
                           onChange={(e) => setEditedOutputs(prev => ({ ...prev, [output.id]: e.target.value }))}
                           onBlur={() => handleSaveOutput(output.id)}
                           className="min-h-96 resize-none"
+                          disabled={!canEditSelected}
                           data-testid={`textarea-output-${output.id}`}
                         />
 

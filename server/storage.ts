@@ -38,6 +38,7 @@ export interface IStorage {
   deleteTranslation(id: string): Promise<void>;
 
   // Translation output operations
+  getTranslationOutput(id: string): Promise<TranslationOutput | undefined>;
   getTranslationOutputs(translationId: string): Promise<TranslationOutput[]>;
   createTranslationOutput(output: InsertTranslationOutput): Promise<TranslationOutput>;
   updateTranslationOutput(id: string, text: string): Promise<TranslationOutput>;
@@ -138,6 +139,14 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Translation output operations
+  async getTranslationOutput(id: string): Promise<TranslationOutput | undefined> {
+    const [output] = await db
+      .select()
+      .from(translationOutputs)
+      .where(eq(translationOutputs.id, id));
+    return output;
+  }
+
   async getTranslationOutputs(translationId: string): Promise<TranslationOutput[]> {
     return await db
       .select()

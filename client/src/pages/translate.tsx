@@ -418,7 +418,7 @@ export default function Translate() {
           </Button>
         </div>
 
-        <ScrollArea className="flex-1 overflow-x-hidden">
+        <ScrollArea className="flex-1">
           {translationsLoading ? (
             <div className="flex items-center justify-center p-8">
               <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
@@ -429,7 +429,7 @@ export default function Translate() {
               <p className="mb-4 text-xs text-muted-foreground">Create your first translation to get started</p>
             </div>
           ) : (
-            <div className="space-y-1 p-2">
+            <div className="space-y-1 p-2 overflow-x-hidden">
               {translations.map((translation) => (
                 <Card
                   key={translation.id}

@@ -47,8 +47,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!translation) {
         return res.status(404).json({ message: "Translation not found" });
       }
-      // Verify user owns this translation
-      if (translation.userId !== req.user.claims.sub) {
+      // Check if user can access this translation (owner OR public translation)
+      const isOwner = translation.userId === req.user.claims.sub;
+      const isPublic = !translation.isPrivate;
+      if (!isOwner && !isPublic) {
         return res.status(403).json({ message: "Forbidden" });
       }
       res.json(translation);
@@ -116,7 +118,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!translation) {
         return res.status(404).json({ message: "Translation not found" });
       }
-      if (translation.userId !== req.user.claims.sub) {
+      // Check if user can access this translation (owner OR public translation)
+      const isOwner = translation.userId === req.user.claims.sub;
+      const isPublic = !translation.isPrivate;
+      if (!isOwner && !isPublic) {
         return res.status(403).json({ message: "Forbidden" });
       }
       const outputs = await storage.getTranslationOutputs(req.params.id);

@@ -46,6 +46,7 @@ export default function Translate() {
   const [activeLanguageTab, setActiveLanguageTab] = useState<string>("");
   const [editedOutputs, setEditedOutputs] = useState<Record<string, string>>({});
   const [isPrivate, setIsPrivate] = useState(false);
+  const [translatingLanguages, setTranslatingLanguages] = useState<Set<string>>(new Set());
 
   // Fetch translations
   const { data: translations = [], isLoading: translationsLoading } = useQuery<Translation[]>({
@@ -132,31 +133,21 @@ export default function Translate() {
     },
   });
 
-  // Translate mutation
-  const translateMutation = useMutation({
-    mutationFn: async () => {
-      if (!selectedTranslationId || !selectedModel || selectedLanguages.length === 0) {
+  // Individual language translation mutation
+  const translateSingleMutation = useMutation({
+    mutationFn: async ({ languageCode }: { languageCode: string }) => {
+      if (!selectedTranslationId || !selectedModel) {
         throw new Error("Missing required fields");
       }
-      return await apiRequest("POST", "/api/translate", {
+      const response = await apiRequest("POST", "/api/translate-single", {
         translationId: selectedTranslationId,
-        languageCodes: selectedLanguages,
+        languageCode,
         modelId: selectedModel,
       });
+      return await response.json();
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/translations", selectedTranslationId, "outputs"] });
-      toast({
-        title: "Translation complete",
-        description: `Successfully translated to ${selectedLanguages.length} language${selectedLanguages.length > 1 ? 's' : ''}.`,
-      });
-    },
-    onError: (error: Error) => {
-      toast({
-        title: "Translation failed",
-        description: error.message || "Failed to translate. Please check your API keys in settings.",
-        variant: "destructive",
-      });
     },
   });
 
@@ -180,6 +171,7 @@ export default function Translate() {
     setTitle(translation.title);
     setSelectedLanguages(translation.selectedLanguages || []);
     setEditedOutputs({});
+    setTranslatingLanguages(new Set());
   };
 
   const handleNewTranslation = () => {
@@ -215,6 +207,10 @@ export default function Translate() {
   const handleSaveLanguages = () => {
     setSelectedLanguages(tempSelectedLanguages);
     setIsLanguageDialogOpen(false);
+    // Set active tab to first language if not set
+    if (tempSelectedLanguages.length > 0 && !activeLanguageTab) {
+      setActiveLanguageTab(tempSelectedLanguages[0]);
+    }
     // Save to backend if translation exists
     if (selectedTranslationId) {
       updateMutation.mutate({
@@ -229,7 +225,7 @@ export default function Translate() {
     setIsLanguageDialogOpen(false);
   };
 
-  const handleTranslate = () => {
+  const handleTranslate = async () => {
     if (!selectedTranslationId) {
       toast({
         title: "No translation selected",
@@ -246,7 +242,57 @@ export default function Translate() {
       });
       return;
     }
-    translateMutation.mutate();
+    if (!selectedModel) {
+      toast({
+        title: "No model selected",
+        description: "Please select an AI model.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    // Mark all languages as translating
+    setTranslatingLanguages(new Set(selectedLanguages));
+    
+    // Set active tab to first language
+    if (selectedLanguages.length > 0) {
+      setActiveLanguageTab(selectedLanguages[0]);
+    }
+
+    // Translate all languages in parallel
+    const promises = selectedLanguages.map(async (langCode) => {
+      try {
+        await translateSingleMutation.mutateAsync({ languageCode: langCode });
+        // Remove from translating set when done
+        setTranslatingLanguages(prev => {
+          const newSet = new Set(prev);
+          newSet.delete(langCode);
+          return newSet;
+        });
+      } catch (error) {
+        console.error(`Failed to translate to ${langCode}:`, error);
+        setTranslatingLanguages(prev => {
+          const newSet = new Set(prev);
+          newSet.delete(langCode);
+          return newSet;
+        });
+        throw error;
+      }
+    });
+
+    try {
+      await Promise.all(promises);
+      toast({
+        title: "Translation complete",
+        description: `Successfully translated to ${selectedLanguages.length} language${selectedLanguages.length > 1 ? 's' : ''}.`,
+      });
+    } catch (error) {
+      toast({
+        title: "Translation failed",
+        description: error instanceof Error ? error.message : "Failed to translate. Please check your API keys in settings.",
+        variant: "destructive",
+      });
+    }
   };
 
   const handleCopyOutput = (text: string, outputId: string) => {
@@ -513,11 +559,11 @@ export default function Translate() {
           {/* Translate Button */}
           <Button
             onClick={handleTranslate}
-            disabled={!selectedTranslationId || translateMutation.isPending || selectedLanguages.length === 0}
+            disabled={!selectedTranslationId || translatingLanguages.size > 0 || selectedLanguages.length === 0}
             className="flex-shrink-0"
             data-testid="button-translate"
           >
-            {translateMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+            {translatingLanguages.size > 0 && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
             Translate
           </Button>
         </div>
@@ -589,14 +635,10 @@ export default function Translate() {
                 </p>
               </div>
             </div>
-          ) : outputsLoading || translateMutation.isPending ? (
-            <div className="flex h-full items-center justify-center">
-              <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-            </div>
-          ) : outputs.length === 0 ? (
+          ) : selectedLanguages.length === 0 ? (
             <div className="flex h-full items-center justify-center p-8 text-center">
               <div>
-                <p className="mb-2 text-sm font-medium">No translations yet</p>
+                <p className="mb-2 text-sm font-medium">No languages selected</p>
                 <p className="text-xs text-muted-foreground">
                   Select languages and click Translate to generate translations
                 </p>
@@ -605,52 +647,84 @@ export default function Translate() {
           ) : (
             <Tabs value={activeLanguageTab} onValueChange={setActiveLanguageTab} className="flex h-full flex-col">
               <TabsList className="mx-4 mt-4 w-auto justify-start overflow-x-auto">
-                {outputs.map((output) => (
-                  <TabsTrigger key={output.id} value={output.languageCode} data-testid={`tab-${output.languageCode}`}>
-                    {output.languageName}
-                  </TabsTrigger>
-                ))}
+                {selectedLanguages.map((langCode) => {
+                  const language = activeLanguages.find(l => l.code === langCode);
+                  const isTranslating = translatingLanguages.has(langCode);
+                  const output = outputs.find(o => o.languageCode === langCode);
+                  const isCompleted = !isTranslating && output;
+                  
+                  return (
+                    <TabsTrigger key={langCode} value={langCode} data-testid={`tab-${langCode}`} className="gap-2">
+                      {language?.name || langCode}
+                      {isTranslating && <Loader2 className="h-3 w-3 animate-spin" />}
+                      {isCompleted && <Check className="h-3 w-3 text-green-600" />}
+                    </TabsTrigger>
+                  );
+                })}
               </TabsList>
 
-              {outputs.map((output) => (
-                <TabsContent
-                  key={output.id}
-                  value={output.languageCode}
+              {selectedLanguages.map((langCode) => {
+                const output = outputs.find(o => o.languageCode === langCode);
+                const language = activeLanguages.find(l => l.code === langCode);
+                const isTranslating = translatingLanguages.has(langCode);
+                
+                return <TabsContent
+                  key={langCode}
+                  value={langCode}
                   className="flex-1 overflow-hidden"
                 >
-                  <ScrollArea className="h-full">
-                    <div className="flex flex-col gap-4 p-6">
-                      <div className="flex items-center justify-between">
-                        <Label className="text-sm font-medium">{output.languageName}</Label>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleCopyOutput(editedOutputs[output.id] ?? output.translatedText, output.id)}
-                          data-testid={`button-copy-${output.id}`}
-                        >
-                          {copiedOutputId === output.id ? (
-                            <Check className="h-4 w-4" />
-                          ) : (
-                            <Copy className="h-4 w-4" />
-                          )}
-                        </Button>
-                      </div>
-
-                      <Textarea
-                        value={editedOutputs[output.id] ?? output.translatedText}
-                        onChange={(e) => setEditedOutputs(prev => ({ ...prev, [output.id]: e.target.value }))}
-                        onBlur={() => handleSaveOutput(output.id)}
-                        className="min-h-96 resize-none"
-                        data-testid={`textarea-output-${output.id}`}
-                      />
-
-                      <div className="text-xs text-muted-foreground">
-                        Model: {models.find(m => m.id === output.modelId)?.name || "Unknown"}
+                  {isTranslating ? (
+                    <div className="flex h-full items-center justify-center p-8">
+                      <div className="text-center">
+                        <Loader2 className="h-8 w-8 animate-spin text-primary mx-auto mb-4" />
+                        <p className="text-sm font-medium">Translating to {language?.name || langCode}...</p>
+                        <p className="text-xs text-muted-foreground mt-1">Please wait</p>
                       </div>
                     </div>
-                  </ScrollArea>
-                </TabsContent>
-              ))}
+                  ) : output ? (
+                    <ScrollArea className="h-full">
+                      <div className="flex flex-col gap-4 p-6">
+                        <div className="flex items-center justify-between">
+                          <Label className="text-sm font-medium">{output.languageName}</Label>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleCopyOutput(editedOutputs[output.id] ?? output.translatedText, output.id)}
+                            data-testid={`button-copy-${output.id}`}
+                          >
+                            {copiedOutputId === output.id ? (
+                              <Check className="h-4 w-4" />
+                            ) : (
+                              <Copy className="h-4 w-4" />
+                            )}
+                          </Button>
+                        </div>
+
+                        <Textarea
+                          value={editedOutputs[output.id] ?? output.translatedText}
+                          onChange={(e) => setEditedOutputs(prev => ({ ...prev, [output.id]: e.target.value }))}
+                          onBlur={() => handleSaveOutput(output.id)}
+                          className="min-h-96 resize-none"
+                          data-testid={`textarea-output-${output.id}`}
+                        />
+
+                        <div className="text-xs text-muted-foreground">
+                          Model: {models.find(m => m.id === output.modelId)?.name || "Unknown"}
+                        </div>
+                      </div>
+                    </ScrollArea>
+                  ) : (
+                    <div className="flex h-full items-center justify-center p-8 text-center">
+                      <div>
+                        <p className="mb-2 text-sm font-medium">Not yet translated</p>
+                        <p className="text-xs text-muted-foreground">
+                          Click Translate to generate translation for {language?.name || langCode}
+                        </p>
+                      </div>
+                    </div>
+                  )}
+                </TabsContent>;
+              })}
             </Tabs>
           )}
         </div>

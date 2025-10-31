@@ -143,10 +143,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // ===== TRANSLATE ENDPOINT (Parallel translation calls) =====
-  app.post("/api/translate", isAuthenticated, async (req: any, res) => {
+  // ===== TRANSLATE ENDPOINT (Single language) =====
+  app.post("/api/translate-single", isAuthenticated, async (req: any, res) => {
     try {
-      const { translationId, languageCodes, modelId } = req.body;
+      const { translationId, languageCode, modelId } = req.body;
 
       // Verify user owns the translation
       const translation = await storage.getTranslation(translationId);
@@ -163,39 +163,41 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ message: "Model not found" });
       }
 
+      // Get language details
+      const language = await storage.getLanguageByCode(languageCode);
+      if (!language) {
+        return res.status(404).json({ message: `Language not found: ${languageCode}` });
+      }
+
       // Get system prompt
       const promptSetting = await storage.getSetting('translation_system_prompt');
       const systemPrompt = promptSetting?.value;
 
-      // Delete existing outputs for this translation
-      await storage.deleteTranslationOutputsByTranslationId(translationId);
+      // Delete existing output for this language
+      const existingOutputs = await storage.getTranslationOutputs(translationId);
+      const existingOutput = existingOutputs.find(o => o.languageCode === languageCode);
+      if (existingOutput) {
+        await storage.deleteTranslationOutput(existingOutput.id);
+      }
 
-      // Translate to all languages in parallel
-      const translationPromises = languageCodes.map(async (langCode: string) => {
-        const language = await storage.getLanguageByCode(langCode);
-        if (!language) {
-          throw new Error(`Language not found: ${langCode}`);
-        }
-
-        const translatedText = await translationService.translate({
-          text: translation.sourceText,
-          targetLanguage: language.name,
-          modelIdentifier: model.modelIdentifier,
-          provider: model.provider as 'openai' | 'anthropic',
-          systemPrompt,
-        });
-
-        return storage.createTranslationOutput({
-          translationId,
-          languageCode: language.code,
-          languageName: language.name,
-          translatedText,
-          modelId: model.id,
-        });
+      // Translate
+      const translatedText = await translationService.translate({
+        text: translation.sourceText,
+        targetLanguage: language.name,
+        modelIdentifier: model.modelIdentifier,
+        provider: model.provider as 'openai' | 'anthropic',
+        systemPrompt,
       });
 
-      const results = await Promise.all(translationPromises);
-      res.json(results);
+      const result = await storage.createTranslationOutput({
+        translationId,
+        languageCode: language.code,
+        languageName: language.name,
+        translatedText,
+        modelId: model.id,
+      });
+
+      res.json(result);
     } catch (error) {
       console.error("Error translating:", error);
       res.status(500).json({ message: error instanceof Error ? error.message : "Translation failed" });

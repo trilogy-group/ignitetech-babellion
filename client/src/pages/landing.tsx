@@ -10,7 +10,7 @@ export default function Landing() {
         <div className="container flex h-16 items-center justify-between px-4 sm:px-6 lg:px-8">
           <div className="flex items-center gap-2">
             <Globe className="h-6 w-6 text-primary" />
-            <span className="text-xl font-semibold">TranslatePro</span>
+            <span className="text-xl font-semibold">Babellion</span>
           </div>
           <Button 
             onClick={() => window.location.href = '/api/login'}
@@ -137,7 +137,7 @@ export default function Landing() {
             <CardContent className="flex flex-col items-center gap-6 p-12 text-center">
               <h2 className="text-3xl font-bold">Ready to get started?</h2>
               <p className="max-w-xl text-muted-foreground">
-                Join thousands of businesses using TranslatePro for their translation needs.
+                Join thousands of businesses using Babellion for their translation needs.
               </p>
               <Button
                 size="lg"
@@ -154,7 +154,7 @@ export default function Landing() {
       {/* Footer */}
       <footer className="border-t py-8">
         <div className="container px-4 text-center text-sm text-muted-foreground sm:px-6 lg:px-8">
-          <p>&copy; 2025 TranslatePro. Professional AI Translation Platform.</p>
+          <p>&copy; 2025 Babellion. Professional AI Translation Platform.</p>
         </div>
       </footer>
     </div>

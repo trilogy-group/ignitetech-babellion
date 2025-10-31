@@ -1,8 +1,8 @@
-# TranslatePro - AI Translation Platform
+# Babellion - AI Translation Platform
 
 ## Overview
 
-TranslatePro is a professional AI-powered translation platform that enables users to translate marketing content and other text into multiple languages using various AI models (GPT-5, Claude, etc.). The application features a modern SaaS dashboard aesthetic with a three-panel layout for efficient translation workflows, translation history management, and multi-language output handling.
+Babellion is a professional AI-powered translation platform that enables users to translate marketing content and other text into multiple languages using various AI models (GPT-5, Claude, etc.). The application features a modern SaaS dashboard aesthetic with a three-panel layout for efficient translation workflows, translation history management, and multi-language output handling.
 
 ## User Preferences
 

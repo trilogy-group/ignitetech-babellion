@@ -28,7 +28,7 @@ export function AppHeader() {
         <div className="flex items-center gap-6">
           <div className="flex items-center gap-2">
             <Globe className="h-6 w-6 text-primary" />
-            <span className="text-xl font-semibold">TranslatePro</span>
+            <span className="text-xl font-semibold">Babellion</span>
           </div>
 
           <nav className="flex items-center gap-1">

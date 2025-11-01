@@ -45,25 +45,41 @@ export async function setupAuth(app: Express) {
   app.use(passport.initialize());
   app.use(passport.session());
 
-  // Google OAuth Strategy
-  passport.use(
-    new GoogleStrategy(
-      {
-        clientID: process.env.GOOGLE_CLIENT_ID!,
-        clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
-        callbackURL: "/api/auth/google/callback",
-        passReqToCallback: true,
-      },
-      async (req: any, accessToken: string, refreshToken: string, profile: any, done: any) => {
-        try {
-          const user = await upsertUser(profile);
-          done(null, { id: user.id, profile });
-        } catch (error) {
-          done(error, null);
-        }
-      }
-    )
-  );
+  // Track registered strategies
+  const registeredStrategies = new Set<string>();
+  
+  // Dynamic Google OAuth Strategy setup per request
+  const setupGoogleStrategy = (hostname: string, protocol: string) => {
+    const strategyName = `google-${hostname}`;
+    
+    // Check if strategy already exists for this domain
+    if (!registeredStrategies.has(strategyName)) {
+      const callbackURL = `${protocol}://${hostname}/api/auth/google/callback`;
+      
+      passport.use(
+        strategyName,
+        new GoogleStrategy(
+          {
+            clientID: process.env.GOOGLE_CLIENT_ID!,
+            clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
+            callbackURL,
+            passReqToCallback: true,
+          },
+          async (req: any, accessToken: string, refreshToken: string, profile: any, done: any) => {
+            try {
+              const user = await upsertUser(profile);
+              done(null, { id: user.id, profile });
+            } catch (error) {
+              done(error, null);
+            }
+          }
+        )
+      );
+      registeredStrategies.add(strategyName);
+    }
+    
+    return strategyName;
+  };
 
   passport.serializeUser((user: any, cb) => cb(null, user.id));
   passport.deserializeUser(async (id: string, cb) => {
@@ -75,19 +91,21 @@ export async function setupAuth(app: Express) {
     }
   });
 
-  app.get("/api/login", passport.authenticate("google", {
-    scope: ["profile", "email"],
-  }));
+  app.get("/api/login", (req, res, next) => {
+    const strategyName = setupGoogleStrategy(req.hostname, req.protocol);
+    passport.authenticate(strategyName, {
+      scope: ["profile", "email"],
+    })(req, res, next);
+  });
 
-  app.get(
-    "/api/auth/google/callback",
-    passport.authenticate("google", {
+  app.get("/api/auth/google/callback", (req, res, next) => {
+    const strategyName = setupGoogleStrategy(req.hostname, req.protocol);
+    passport.authenticate(strategyName, {
       failureRedirect: "/",
-    }),
-    (req, res) => {
-      res.redirect("/");
-    }
-  );
+    })(req, res, next);
+  }, (req, res) => {
+    res.redirect("/");
+  });
 
   app.get("/api/logout", (req, res) => {
     req.logout(() => {

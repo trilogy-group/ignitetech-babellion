@@ -1,4 +1,4 @@
-import { Globe, Settings as SettingsIcon, LogOut, User } from "lucide-react";
+import { Settings as SettingsIcon, LogOut, User } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import { Button } from "./ui/button";
 import { ThemeToggle } from "./theme-toggle";
@@ -27,29 +27,40 @@ export function AppHeader() {
         {/* Logo and Navigation */}
         <div className="flex items-center gap-6">
           <Link href="/translate">
-            <div className="flex items-center gap-2 cursor-pointer">
-              <Globe className="h-6 w-6 text-primary" />
+            <div className="flex items-center gap-3 cursor-pointer">
+              <img src="/favicon.png" alt="Babellion" className="h-8 w-8" />
               <span className="text-xl font-semibold">Babellion</span>
             </div>
           </Link>
 
-          <nav className="flex items-center gap-1">
+          <nav className="flex items-center gap-6">
             <Link href="/translate">
-              <Button
-                variant={isTranslate ? "secondary" : "ghost"}
+              <button
                 data-testid="nav-translate"
+                className={`
+                  relative px-1 py-2 text-sm font-medium transition-all
+                  ${isTranslate 
+                    ? "text-foreground" 
+                    : "text-muted-foreground hover:text-foreground"
+                  }
+                `}
               >
                 Translate
-              </Button>
+                {isTranslate && (
+                  <div 
+                    className="absolute bottom-0 left-0 right-0 h-1 bg-purple-600 rounded-full"
+                    style={{ boxShadow: '0 0 8px rgba(147, 51, 234, 0.6)' }}
+                  />
+                )}
+              </button>
             </Link>
-            <Button
-              variant="ghost"
+            <button
               disabled
               data-testid="nav-proofread"
-              className="text-muted-foreground"
+              className="relative px-1 py-2 text-sm font-medium text-muted-foreground/50 cursor-not-allowed"
             >
               Proofread
-            </Button>
+            </button>
           </nav>
         </div>
 

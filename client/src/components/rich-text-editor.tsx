@@ -222,8 +222,14 @@ export function RichTextEditor({
       attributes: {
         class: cn(
           'prose prose-sm max-w-none focus:outline-none min-h-[150px] p-4',
+          'dark:prose-invert',
           'prose-headings:font-semibold prose-h1:text-2xl prose-h2:text-xl prose-h3:text-lg',
           'prose-p:my-2 prose-ul:my-2 prose-ol:my-2',
+          'prose-strong:text-foreground prose-em:text-foreground',
+          'prose-a:text-primary hover:prose-a:text-primary/80',
+          'prose-code:text-foreground',
+          'prose-pre:bg-muted prose-pre:text-foreground',
+          'text-foreground',
           !editable && 'cursor-default'
         ),
       },
@@ -251,7 +257,18 @@ export function RichTextEditor({
   }, [content, editor]);
 
   return (
-    <div className={cn('border rounded-md bg-background', className)}>
+    <div className={cn('border rounded-md bg-background rich-text-wrapper', className)}>
+      <style jsx>{`
+        .rich-text-wrapper .ProseMirror * {
+          color: inherit !important;
+        }
+        .rich-text-wrapper .ProseMirror {
+          color: hsl(var(--foreground));
+        }
+        .rich-text-wrapper .ProseMirror a {
+          color: hsl(var(--primary)) !important;
+        }
+      `}</style>
       {editable && <MenuBar editor={editor} />}
       <EditorContent editor={editor} />
     </div>

@@ -573,7 +573,13 @@ export default function Translate() {
       <div className="flex w-80 flex-col border-r bg-sidebar flex-none">
         <div className="flex items-center justify-between gap-4 border-b p-4">
           <h2 className="text-lg font-semibold">Translation History</h2>
-          <Button size="sm" onClick={handleNewTranslation} disabled={createMutation.isPending} data-testid="button-new-translation">
+          <Button 
+            size="sm" 
+            onClick={handleNewTranslation} 
+            disabled={createMutation.isPending} 
+            data-testid="button-new-translation"
+            variant="outline"
+          >
             {createMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
           </Button>
         </div>
@@ -763,6 +769,7 @@ export default function Translate() {
                     disabled={!selectedTranslationId || !canEditSelected || translatingLanguages.size > 0 || selectedLanguages.length === 0}
                     className="flex-shrink-0"
                     data-testid="button-translate"
+                    variant="outline"
                   >
                     {translatingLanguages.size > 0 && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                     Translate
@@ -779,6 +786,7 @@ export default function Translate() {
               disabled={!selectedTranslationId || !canEditSelected || translatingLanguages.size > 0 || selectedLanguages.length === 0}
               className="flex-shrink-0"
               data-testid="button-translate"
+              variant="outline"
             >
               {translatingLanguages.size > 0 && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               Translate

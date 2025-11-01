@@ -6,6 +6,7 @@ import { setupAuth, isAuthenticated, isAdmin } from "./replitAuth";
 import { z } from "zod";
 import { encrypt } from "./encryption";
 import { translationService } from "./translationService";
+import { getGoogleAuth, listGoogleDocs, getGoogleDocContent } from "./googleDocsService";
 import {
   insertTranslationSchema,
   insertAiModelSchema,
@@ -363,6 +364,84 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Error deleting language:", error);
       res.status(500).json({ message: "Failed to delete language" });
+    }
+  });
+
+  // Users (Admin)
+  app.get("/api/admin/users", isAuthenticated, isAdmin, async (req, res) => {
+    try {
+      const users = await storage.getAllUsers();
+      // Don't send sensitive data
+      const sanitizedUsers = users.map(u => ({
+        id: u.id,
+        email: u.email,
+        firstName: u.firstName,
+        lastName: u.lastName,
+        profileImageUrl: u.profileImageUrl,
+        isAdmin: u.isAdmin,
+        createdAt: u.createdAt,
+        updatedAt: u.updatedAt,
+      }));
+      res.json(sanitizedUsers);
+    } catch (error) {
+      console.error("Error fetching users:", error);
+      res.status(500).json({ message: "Failed to fetch users" });
+    }
+  });
+
+  app.patch("/api/admin/users/:id/role", isAuthenticated, isAdmin, async (req: any, res) => {
+    try {
+      const { isAdmin } = req.body;
+      const targetUserId = req.params.id;
+      const currentUserId = req.user.id;
+
+      // Prevent admin from changing their own role
+      if (targetUserId === currentUserId) {
+        return res.status(403).json({ message: "You cannot change your own role" });
+      }
+
+      if (typeof isAdmin !== 'boolean') {
+        return res.status(400).json({ message: "isAdmin must be a boolean" });
+      }
+
+      const updated = await storage.updateUserRole(targetUserId, isAdmin);
+      res.json({
+        id: updated.id,
+        email: updated.email,
+        firstName: updated.firstName,
+        lastName: updated.lastName,
+        isAdmin: updated.isAdmin,
+      });
+    } catch (error) {
+      console.error("Error updating user role:", error);
+      res.status(500).json({ message: "Failed to update user role" });
+    }
+  });
+
+  // ===== GOOGLE DOCS ROUTES =====
+  app.get("/api/google/docs", isAuthenticated, async (req: any, res) => {
+    try {
+      const auth = await getGoogleAuth(req);
+      const searchQuery = req.query.search as string | undefined;
+      const docs = await listGoogleDocs(auth, searchQuery);
+      res.json(docs);
+    } catch (error: unknown) {
+      console.error("Error fetching Google Docs:", error);
+      const message = (error as Error)?.message || "Failed to fetch Google Docs";
+      res.status(500).json({ message });
+    }
+  });
+
+  app.get("/api/google/docs/:documentId", isAuthenticated, async (req: any, res) => {
+    try {
+      const auth = await getGoogleAuth(req);
+      const { documentId } = req.params;
+      const docContent = await getGoogleDocContent(auth, documentId);
+      res.json(docContent);
+    } catch (error: unknown) {
+      console.error("Error fetching Google Doc content:", error);
+      const message = (error as Error)?.message || "Failed to fetch Google Doc content";
+      res.status(500).json({ message });
     }
   });
 

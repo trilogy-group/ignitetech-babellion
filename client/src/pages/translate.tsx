@@ -1,10 +1,13 @@
 import { useState, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { Plus, Trash2, Loader2, Copy, Check, Lock, Globe, Pencil } from "lucide-react";
+import { Plus, Trash2, Loader2, Copy, Check, Lock, Globe, Pencil, FileText } from "lucide-react";
+import { formatDistanceToNow } from "date-fns";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Card } from "@/components/ui/card";
+import { RichTextEditor } from "@/components/rich-text-editor";
+import { GoogleDocsPicker } from "@/components/google-docs-picker";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -69,6 +72,8 @@ export default function Translate() {
   const [translatingLanguages, setTranslatingLanguages] = useState<Set<string>>(new Set());
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [translationRuntimes, setTranslationRuntimes] = useState<Record<string, number>>({});
+  const [isGoogleDocsPickerOpen, setIsGoogleDocsPickerOpen] = useState(false);
+  const [isLoadingGoogleDoc, setIsLoadingGoogleDoc] = useState(false);
 
   // Fetch translations
   const { data: translations = [], isLoading: translationsLoading } = useQuery<Translation[]>({
@@ -217,6 +222,13 @@ export default function Translate() {
     setEditedOutputs({});
     setTranslatingLanguages(new Set());
     setTranslationRuntimes({});
+    
+    // Auto-select first language tab if languages exist
+    if (translation.selectedLanguages && translation.selectedLanguages.length > 0) {
+      setActiveLanguageTab(translation.selectedLanguages[0]);
+    } else {
+      setActiveLanguageTab("");
+    }
   };
 
   const handleNewTranslation = () => {
@@ -260,6 +272,54 @@ export default function Translate() {
         id: selectedTranslationId,
         data: { sourceText, title, selectedLanguages, isPrivate },
       });
+    }
+  };
+
+  const handleLoadGoogleDoc = async (documentId: string, docTitle: string) => {
+    setIsLoadingGoogleDoc(true);
+    try {
+      const response = await apiRequest("GET", `/api/google/docs/${documentId}`);
+      const data = await response.json() as { title: string; html: string };
+
+      // Update the source text with the document content
+      setSourceText(data.html);
+      
+      // Optionally update the translation title
+      if (!title || title === "Untitled Translation") {
+        setTitle(docTitle);
+        setEditedTitle(docTitle);
+      }
+
+      // Save the changes if a translation is selected
+      if (selectedTranslationId) {
+        updateMutation.mutate({
+          id: selectedTranslationId,
+          data: { 
+            sourceText: data.html, 
+            title: !title || title === "Untitled Translation" ? docTitle : title 
+          },
+        });
+      }
+
+      // Calculate character count
+      const tempDiv = document.createElement('div');
+      tempDiv.innerHTML = data.html;
+      const charCount = tempDiv.textContent?.length || 0;
+
+      toast({
+        title: "✓ Document loaded successfully",
+        description: `"${docTitle}" (${charCount.toLocaleString()} characters)`,
+      });
+    } catch (error: unknown) {
+      const message = (error as Error)?.message || "Failed to load Google Doc";
+      toast({
+        title: "Error",
+        description: message,
+        variant: "destructive",
+      });
+      throw error;
+    } finally {
+      setIsLoadingGoogleDoc(false);
     }
   };
 
@@ -388,14 +448,33 @@ export default function Translate() {
     }
   };
 
-  const handleCopyOutput = (text: string, outputId: string) => {
-    navigator.clipboard.writeText(text);
-    setCopiedOutputId(outputId);
-    setTimeout(() => setCopiedOutputId(null), 2000);
-    toast({
-      title: "Copied to clipboard",
-      description: "Translation text has been copied.",
-    });
+  const handleCopyOutput = async (html: string, outputId: string) => {
+    try {
+      // Create a blob with both HTML and plain text
+      const plainText = new DOMParser().parseFromString(html, 'text/html').body.textContent || '';
+      
+      // Use the modern Clipboard API to copy rich HTML
+      const clipboardItem = new ClipboardItem({
+        'text/html': new Blob([html], { type: 'text/html' }),
+        'text/plain': new Blob([plainText], { type: 'text/plain' }),
+      });
+      
+      await navigator.clipboard.write([clipboardItem]);
+      
+      setCopiedOutputId(outputId);
+      setTimeout(() => setCopiedOutputId(null), 2000);
+      toast({
+        title: "Copied to clipboard",
+        description: "Rich formatted text has been copied. You can paste it into Google Docs!",
+      });
+    } catch (error) {
+      console.error('Failed to copy:', error);
+      toast({
+        title: "Copy failed",
+        description: "Could not copy to clipboard.",
+        variant: "destructive",
+      });
+    }
   };
 
   const handleLanguageToggle = (languageCode: string) => {
@@ -579,10 +658,11 @@ export default function Translate() {
       </div>
 
       {/* Middle Panel - Input */}
-      <div className="flex flex-1 flex-col">
-        <div className="flex items-center gap-2 border-b p-4">
-          {/* Language Multi-Select */}
-          <div className="flex items-center gap-2 flex-shrink-0">
+      <div className="flex flex-1 w-0 flex-col">
+        <TooltipProvider delayDuration={100}>
+          <div className="flex items-center gap-2 border-b p-4">
+            {/* Language Multi-Select */}
+            <div className="flex items-center gap-2 flex-shrink-0">
             <Label className="text-sm font-medium whitespace-nowrap">Languages:</Label>
             <Dialog open={isLanguageDialogOpen} onOpenChange={setIsLanguageDialogOpen}>
               <DialogTrigger asChild>
@@ -649,16 +729,38 @@ export default function Translate() {
           </div>
 
           {/* Translate Button */}
-          <Button
-            onClick={handleTranslate}
-            disabled={!selectedTranslationId || !canEditSelected || translatingLanguages.size > 0 || selectedLanguages.length === 0}
-            className="flex-shrink-0"
-            data-testid="button-translate"
-          >
-            {translatingLanguages.size > 0 && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-            Translate
-          </Button>
-        </div>
+          {selectedLanguages.length === 0 && selectedTranslationId ? (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span tabIndex={0}>
+                  <Button
+                    onClick={handleTranslate}
+                    disabled={!selectedTranslationId || !canEditSelected || translatingLanguages.size > 0 || selectedLanguages.length === 0}
+                    className="flex-shrink-0"
+                    data-testid="button-translate"
+                  >
+                    {translatingLanguages.size > 0 && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                    Translate
+                  </Button>
+                </span>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>Please select at least one language to translate</p>
+              </TooltipContent>
+            </Tooltip>
+          ) : (
+            <Button
+              onClick={handleTranslate}
+              disabled={!selectedTranslationId || !canEditSelected || translatingLanguages.size > 0 || selectedLanguages.length === 0}
+              className="flex-shrink-0"
+              data-testid="button-translate"
+            >
+              {translatingLanguages.size > 0 && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Translate
+            </Button>
+          )}
+          </div>
+        </TooltipProvider>
 
         <div className="flex-1 overflow-hidden p-6">
           <div className="flex h-full flex-col gap-4">
@@ -713,21 +815,41 @@ export default function Translate() {
 
             <div className="flex flex-1 flex-col min-h-0">
               <div className="mb-2 flex items-center justify-between flex-shrink-0">
-                <Label htmlFor="source-text" className="text-sm font-medium">
-                  Source Text
-                </Label>
+                <div className="flex items-center gap-2">
+                  <Label className="text-sm font-medium">
+                    Source Text
+                  </Label>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setIsGoogleDocsPickerOpen(true)}
+                    disabled={!selectedTranslationId || !canEditSelected || isLoadingGoogleDoc}
+                    className="h-7"
+                  >
+                    {isLoadingGoogleDoc ? (
+                      <>
+                        <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                        Loading...
+                      </>
+                    ) : (
+                      <>
+                        <FileText className="mr-1 h-3 w-3" />
+                        Load Google Doc
+                      </>
+                    )}
+                  </Button>
+                </div>
                 <span className="text-xs text-muted-foreground">
-                  {(sourceText || "").length} characters
+                  {sourceText ? new DOMParser().parseFromString(sourceText, 'text/html').body.textContent?.length || 0 : 0} characters
                 </span>
               </div>
-              <Textarea
-                id="source-text"
-                value={sourceText}
-                onChange={(e) => setSourceText(e.target.value)}
+              <RichTextEditor
+                content={sourceText}
+                onChange={setSourceText}
                 placeholder="Enter text to translate..."
-                className="flex-1 min-h-0 resize-none"
-                disabled={!selectedTranslationId || !canEditSelected}
-                data-testid="textarea-source"
+                editable={!!selectedTranslationId && canEditSelected}
+                className="flex-1 overflow-auto"
+                editorKey={`source-${selectedTranslationId || 'none'}`}
               />
               <div className="mt-2 flex justify-end flex-shrink-0">
                 <Button
@@ -746,7 +868,7 @@ export default function Translate() {
       </div>
 
       {/* Right Panel - Output */}
-      <div className="flex w-full max-w-3xl flex-col border-l">
+      <div className="flex flex-1 w-0 flex-col border-l">
         <div className="border-b p-4">
           <h2 className="text-lg font-semibold">Translations</h2>
         </div>
@@ -826,22 +948,28 @@ export default function Translate() {
                           </Button>
                         </div>
 
-                        <Textarea
-                          value={editedOutputs[output.id] ?? output.translatedText}
-                          onChange={(e) => setEditedOutputs(prev => ({ ...prev, [output.id]: e.target.value }))}
+                        <RichTextEditor
+                          content={editedOutputs[output.id] ?? output.translatedText}
+                          onChange={(html) => setEditedOutputs(prev => ({ ...prev, [output.id]: html }))}
                           onBlur={() => handleSaveOutput(output.id)}
-                          className="min-h-96 resize-none"
-                          disabled={!canEditSelected}
-                          data-testid={`textarea-output-${output.id}`}
+                          placeholder="Translation will appear here..."
+                          editable={canEditSelected}
+                          className="min-h-96"
+                          editorKey={`output-${output.id}`}
                         />
 
-                        <div className="text-xs text-muted-foreground">
-                          Model: {models.find(m => m.id === output.modelId)?.name || "Unknown"}
-                          {translationRuntimes[langCode] && (
-                            <span className="ml-1">
-                              ({translationRuntimes[langCode].toFixed(1)}s)
-                            </span>
-                          )}
+                        <div className="text-xs text-muted-foreground space-y-0.5">
+                          <div>
+                            Model: {models.find(m => m.id === output.modelId)?.name || "Unknown"}
+                            {translationRuntimes[langCode] && (
+                              <span className="ml-1">
+                                ({translationRuntimes[langCode].toFixed(1)}s)
+                              </span>
+                            )}
+                          </div>
+                          <div>
+                            Last Updated: {formatDistanceToNow(new Date(output.updatedAt), { addSuffix: true })}
+                          </div>
                         </div>
                       </div>
                     </ScrollArea>
@@ -861,6 +989,13 @@ export default function Translate() {
           )}
         </div>
       </div>
+
+      {/* Google Docs Picker */}
+      <GoogleDocsPicker
+        open={isGoogleDocsPickerOpen}
+        onOpenChange={setIsGoogleDocsPickerOpen}
+        onDocumentSelect={handleLoadGoogleDoc}
+      />
 
       {/* Delete Confirmation Dialog */}
       <AlertDialog open={!!deleteConfirmId} onOpenChange={(open) => !open && setDeleteConfirmId(null)}>

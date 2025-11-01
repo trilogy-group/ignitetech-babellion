@@ -28,7 +28,10 @@ import { eq, and, or, desc } from "drizzle-orm";
 export interface IStorage {
   // User operations (REQUIRED for Replit Auth)
   getUser(id: string): Promise<User | undefined>;
+  getAllUsers(): Promise<User[]>;
   upsertUser(user: UpsertUser): Promise<User>;
+  updateUserRole(userId: string, isAdmin: boolean): Promise<User>;
+  updateUserGoogleTokens(userId: string, accessToken: string, refreshToken: string): Promise<void>;
 
   // Translation operations
   getTranslations(userId: string): Promise<Translation[]>;
@@ -77,6 +80,33 @@ export class DatabaseStorage implements IStorage {
     return user;
   }
 
+  async getAllUsers(): Promise<User[]> {
+    return await db.select().from(users).orderBy(users.createdAt);
+  }
+
+  async updateUserRole(userId: string, isAdmin: boolean): Promise<User> {
+    const [updated] = await db
+      .update(users)
+      .set({
+        isAdmin,
+        updatedAt: new Date(),
+      })
+      .where(eq(users.id, userId))
+      .returning();
+    return updated;
+  }
+
+  async updateUserGoogleTokens(userId: string, accessToken: string, refreshToken: string): Promise<void> {
+    await db
+      .update(users)
+      .set({
+        googleAccessToken: accessToken,
+        googleRefreshToken: refreshToken,
+        updatedAt: new Date(),
+      })
+      .where(eq(users.id, userId));
+  }
+
   async upsertUser(userData: UpsertUser): Promise<User> {
     // Check if user exists by email first
     if (userData.email) {
@@ -93,6 +123,8 @@ export class DatabaseStorage implements IStorage {
             firstName: userData.firstName,
             lastName: userData.lastName,
             profileImageUrl: userData.profileImageUrl,
+            googleAccessToken: userData.googleAccessToken,
+            googleRefreshToken: userData.googleRefreshToken,
             updatedAt: new Date(),
           })
           .where(eq(users.email, userData.email))

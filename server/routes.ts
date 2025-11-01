@@ -20,7 +20,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // ===== AUTH ROUTES =====
   app.get('/api/auth/user', isAuthenticated, async (req: any, res) => {
     try {
-      const userId = req.user.claims.sub;
+      const userId = req.user.id;
       const user = await storage.getUser(userId);
       res.json(user);
     } catch (error) {
@@ -32,7 +32,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // ===== TRANSLATION ROUTES =====
   app.get("/api/translations", isAuthenticated, async (req: any, res) => {
     try {
-      const userId = req.user.claims.sub;
+      const userId = req.user.id;
       const translations = await storage.getTranslations(userId);
       res.json(translations);
     } catch (error) {
@@ -48,7 +48,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ message: "Translation not found" });
       }
       // Check if user can access this translation (owner OR public translation)
-      const isOwner = translation.userId === req.user.claims.sub;
+      const isOwner = translation.userId === req.user.id;
       const isPublic = !translation.isPrivate;
       if (!isOwner && !isPublic) {
         return res.status(403).json({ message: "Forbidden" });
@@ -62,7 +62,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/translations", isAuthenticated, async (req: any, res) => {
     try {
-      const userId = req.user.claims.sub;
+      const userId = req.user.id;
       const data = insertTranslationSchema.parse(req.body);
       const translation = await storage.createTranslation({ 
         userId,
@@ -84,8 +84,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ message: "Translation not found" });
       }
       // Check if user owns the translation or is admin
-      const user = await storage.getUser(req.user.claims.sub);
-      const canEdit = user && (user.isAdmin || translation.userId === req.user.claims.sub);
+      const user = await storage.getUser(req.user.id);
+      const canEdit = user && (user.isAdmin || translation.userId === req.user.id);
       if (!canEdit) {
         return res.status(403).json({ message: "Forbidden" });
       }
@@ -104,8 +104,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ message: "Translation not found" });
       }
       // Check if user owns the translation or is admin
-      const user = await storage.getUser(req.user.claims.sub);
-      const canDelete = user && (user.isAdmin || translation.userId === req.user.claims.sub);
+      const user = await storage.getUser(req.user.id);
+      const canDelete = user && (user.isAdmin || translation.userId === req.user.id);
       if (!canDelete) {
         return res.status(403).json({ message: "Forbidden" });
       }
@@ -125,7 +125,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ message: "Translation not found" });
       }
       // Check if user can access this translation (owner OR public translation)
-      const isOwner = translation.userId === req.user.claims.sub;
+      const isOwner = translation.userId === req.user.id;
       const isPublic = !translation.isPrivate;
       if (!isOwner && !isPublic) {
         return res.status(403).json({ message: "Forbidden" });
@@ -154,8 +154,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       
       // Check if user owns the translation or is admin
-      const user = await storage.getUser(req.user.claims.sub);
-      const canEdit = user && (user.isAdmin || translation.userId === req.user.claims.sub);
+      const user = await storage.getUser(req.user.id);
+      const canEdit = user && (user.isAdmin || translation.userId === req.user.id);
       if (!canEdit) {
         return res.status(403).json({ message: "Forbidden" });
       }
@@ -178,8 +178,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!translation) {
         return res.status(404).json({ message: "Translation not found" });
       }
-      const user = await storage.getUser(req.user.claims.sub);
-      const canTranslate = user && (user.isAdmin || translation.userId === req.user.claims.sub);
+      const user = await storage.getUser(req.user.id);
+      const canTranslate = user && (user.isAdmin || translation.userId === req.user.id);
       if (!canTranslate) {
         return res.status(403).json({ message: "Forbidden" });
       }

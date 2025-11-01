@@ -22,7 +22,7 @@ export function getSession() {
     saveUninitialized: false,
     cookie: {
       httpOnly: true,
-      secure: true,
+      secure: process.env.NODE_ENV === 'production',
       maxAge: sessionTtl,
     },
   });
@@ -49,12 +49,12 @@ export async function setupAuth(app: Express) {
   const registeredStrategies = new Set<string>();
   
   // Dynamic Google OAuth Strategy setup per request
-  const setupGoogleStrategy = (hostname: string, protocol: string) => {
-    const strategyName = `google-${hostname}`;
+  const setupGoogleStrategy = (host: string, protocol: string) => {
+    const strategyName = `google-${host}`;
     
     // Check if strategy already exists for this domain
     if (!registeredStrategies.has(strategyName)) {
-      const callbackURL = `${protocol}://${hostname}/api/auth/google/callback`;
+      const callbackURL = `${protocol}://${host}/api/auth/google/callback`;
       
       passport.use(
         strategyName,
@@ -92,14 +92,16 @@ export async function setupAuth(app: Express) {
   });
 
   app.get("/api/login", (req, res, next) => {
-    const strategyName = setupGoogleStrategy(req.hostname, req.protocol);
+    const host = req.get('host') ?? req.hostname;
+    const strategyName = setupGoogleStrategy(host, req.protocol);
     passport.authenticate(strategyName, {
       scope: ["profile", "email"],
     })(req, res, next);
   });
 
   app.get("/api/auth/google/callback", (req, res, next) => {
-    const strategyName = setupGoogleStrategy(req.hostname, req.protocol);
+    const host = req.get('host') ?? req.hostname;
+    const strategyName = setupGoogleStrategy(host, req.protocol);
     passport.authenticate(strategyName, {
       failureRedirect: "/",
     })(req, res, next);

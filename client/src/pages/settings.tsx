@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { Loader2, Plus, Trash2, Save, Shield, ShieldCheck } from "lucide-react";
+import { Loader2, Plus, Trash2, Save, Shield, ShieldCheck, ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -214,8 +214,21 @@ export default function Settings() {
   return (
     <div className="flex h-screen flex-col">
       <div className="border-b px-4 py-6 sm:px-6 lg:px-8">
-        <h1 className="text-3xl font-bold">Settings</h1>
-        <p className="text-muted-foreground mt-2">Manage your translation platform configuration</p>
+        <div className="flex items-center gap-4">
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => window.history.back()}
+            className="flex-shrink-0"
+            data-testid="button-back"
+          >
+            <ArrowLeft className="h-5 w-5" />
+          </Button>
+          <div className="flex-1">
+            <h1 className="text-3xl font-bold">Settings</h1>
+            <p className="text-muted-foreground mt-2">Manage your translation platform configuration</p>
+          </div>
+        </div>
       </div>
 
       <ScrollArea className="flex-1">
@@ -223,13 +236,13 @@ export default function Settings() {
           <Tabs defaultValue="users" className="space-y-6">
         <TabsList>
           <TabsTrigger value="users" data-testid="tab-users">Users</TabsTrigger>
-          <TabsTrigger value="api-keys" data-testid="tab-api-keys">API Keys</TabsTrigger>
+          <TabsTrigger value="ai" data-testid="tab-ai">AI</TabsTrigger>
           <TabsTrigger value="translation" data-testid="tab-translation">Translation</TabsTrigger>
           <TabsTrigger value="proofread" disabled data-testid="tab-proofread">Proof Read</TabsTrigger>
         </TabsList>
 
-        {/* API Keys Tab */}
-        <TabsContent value="api-keys" className="space-y-6">
+        {/* AI Tab */}
+        <TabsContent value="ai" className="space-y-6">
           <Card>
             <CardHeader>
               <CardTitle>OpenAI API Key</CardTitle>
@@ -302,44 +315,6 @@ export default function Settings() {
               >
                 {saveApiKeyMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                 {apiKeysStatus?.anthropic && !anthropicKey ? "Update" : "Save"} Anthropic Key
-              </Button>
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        {/* Translation Tab */}
-        <TabsContent value="translation" className="space-y-6">
-          {/* System Prompt */}
-          <Card>
-            <CardHeader>
-              <CardTitle>Translation System Prompt</CardTitle>
-              <CardDescription>
-                Customize the system prompt used for all translations
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="system-prompt">System Prompt</Label>
-                <Textarea
-                  id="system-prompt"
-                  value={systemPrompt}
-                  onChange={(e) => setSystemPrompt(e.target.value)}
-                  className="min-h-48 font-mono text-sm"
-                  placeholder="Enter system prompt for translations..."
-                  data-testid="textarea-system-prompt"
-                />
-                <p className="text-xs text-muted-foreground">
-                  {systemPrompt.length} characters
-                </p>
-              </div>
-              <Button
-                onClick={() => savePromptMutation.mutate(systemPrompt)}
-                disabled={savePromptMutation.isPending}
-                data-testid="button-save-prompt"
-              >
-                {savePromptMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                <Save className="mr-2 h-4 w-4" />
-                Save System Prompt
               </Button>
             </CardContent>
           </Card>
@@ -471,6 +446,44 @@ export default function Settings() {
                   </TableBody>
                 </Table>
               )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* Translation Tab */}
+        <TabsContent value="translation" className="space-y-6">
+          {/* System Prompt */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Translation System Prompt</CardTitle>
+              <CardDescription>
+                Customize the system prompt used for all translations
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="system-prompt">System Prompt</Label>
+                <Textarea
+                  id="system-prompt"
+                  value={systemPrompt}
+                  onChange={(e) => setSystemPrompt(e.target.value)}
+                  className="min-h-48 font-mono text-sm"
+                  placeholder="Enter system prompt for translations..."
+                  data-testid="textarea-system-prompt"
+                />
+                <p className="text-xs text-muted-foreground">
+                  {systemPrompt.length} characters
+                </p>
+              </div>
+              <Button
+                onClick={() => savePromptMutation.mutate(systemPrompt)}
+                disabled={savePromptMutation.isPending}
+                data-testid="button-save-prompt"
+              >
+                {savePromptMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                <Save className="mr-2 h-4 w-4" />
+                Save System Prompt
+              </Button>
             </CardContent>
           </Card>
 

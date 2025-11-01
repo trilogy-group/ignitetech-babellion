@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { Plus, Trash2, Loader2, Copy, Check, Lock, Globe, Pencil, FileText } from "lucide-react";
+import { Plus, Trash2, Loader2, Copy, Check, Lock, Globe, Pencil, FileText, Save, X } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -238,7 +238,18 @@ export default function Translate() {
 
   const handleRenameInList = (id: string, newTitle: string) => {
     if (!isEscapePressed && newTitle.trim()) {
-      updateMutation.mutate({ id, data: { title: newTitle.trim() } });
+      const trimmedTitle = newTitle.trim();
+      updateMutation.mutate(
+        { id, data: { title: trimmedTitle } },
+        {
+          onSuccess: () => {
+            // If renaming the currently selected translation, update the middle panel title
+            if (id === selectedTranslationId) {
+              setTitle(trimmedTitle);
+            }
+          }
+        }
+      );
     }
     setIsRenamingId(null);
     setIsEscapePressed(false);
@@ -252,11 +263,18 @@ export default function Translate() {
   const handleSaveTitle = () => {
     const trimmedTitle = editedTitle.trim();
     if (trimmedTitle && trimmedTitle !== title && selectedTranslationId) {
-      setTitle(trimmedTitle);
-      updateMutation.mutate({
-        id: selectedTranslationId,
-        data: { title: trimmedTitle },
-      });
+      updateMutation.mutate(
+        {
+          id: selectedTranslationId,
+          data: { title: trimmedTitle },
+        },
+        {
+          onSuccess: () => {
+            // Update the title in the middle panel after successful save
+            setTitle(trimmedTitle);
+          }
+        }
+      );
     }
     setIsEditingTitle(false);
   };
@@ -489,12 +507,19 @@ export default function Translate() {
     const editedText = editedOutputs[outputId];
     if (editedText !== undefined) {
       updateOutputMutation.mutate({ id: outputId, text: editedText });
-      setEditedOutputs(prev => {
-        const newOutputs = { ...prev };
-        delete newOutputs[outputId];
-        return newOutputs;
-      });
+      // Note: We don't clear editedOutputs here anymore.
+      // The Save/Discard buttons will automatically disappear once the refetch
+      // completes and output.translatedText matches editedOutputs[outputId].
+      // This prevents the "revert to old value" issue during the save process.
     }
+  };
+
+  const handleDiscardOutput = (outputId: string) => {
+    setEditedOutputs(prev => {
+      const newOutputs = { ...prev };
+      delete newOutputs[outputId];
+      return newOutputs;
+    });
   };
 
   const activeLanguages = languages.filter(l => l.isActive);
@@ -765,12 +790,37 @@ export default function Translate() {
         <div className="flex-1 overflow-hidden p-6">
           <div className="flex h-full flex-col gap-4">
             <div className="flex-shrink-0">
-              <div className="mb-2 flex items-center justify-between">
-                <Label className="text-sm font-medium">
-                  Translation Title
-                </Label>
+              <div className="flex items-center justify-between gap-4">
+                <div className="flex-1">
+                  {isEditingTitle ? (
+                    <Input
+                      value={editedTitle}
+                      onChange={(e) => setEditedTitle(e.target.value)}
+                      onBlur={handleSaveTitle}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          handleSaveTitle();
+                        } else if (e.key === "Escape") {
+                          handleCancelEditingTitle();
+                        }
+                      }}
+                      autoFocus
+                      placeholder="Enter translation title..."
+                      disabled={!selectedTranslationId || !canEditSelected}
+                      data-testid="input-translation-title"
+                    />
+                  ) : (
+                    <div
+                      className={`rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background min-h-9 ${canEditSelected ? 'cursor-text hover:border-accent-foreground/20' : 'cursor-default'}`}
+                      onClick={selectedTranslationId && canEditSelected ? handleStartEditingTitle : undefined}
+                      data-testid="text-translation-title"
+                    >
+                      {title || "Enter translation title..."}
+                    </div>
+                  )}
+                </div>
                 {selectedTranslationId && (
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-shrink-0">
                     <Globe className="h-4 w-4 text-muted-foreground" />
                     <span className="text-xs text-muted-foreground">Public</span>
                     <Switch
@@ -785,32 +835,6 @@ export default function Translate() {
                   </div>
                 )}
               </div>
-              {isEditingTitle ? (
-                <Input
-                  value={editedTitle}
-                  onChange={(e) => setEditedTitle(e.target.value)}
-                  onBlur={handleSaveTitle}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      handleSaveTitle();
-                    } else if (e.key === "Escape") {
-                      handleCancelEditingTitle();
-                    }
-                  }}
-                  autoFocus
-                  placeholder="Enter translation title..."
-                  disabled={!selectedTranslationId || !canEditSelected}
-                  data-testid="input-translation-title"
-                />
-              ) : (
-                <div
-                  className={`rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background min-h-9 ${canEditSelected ? 'cursor-text hover:border-accent-foreground/20' : 'cursor-default'}`}
-                  onClick={selectedTranslationId && canEditSelected ? handleStartEditingTitle : undefined}
-                  data-testid="text-translation-title"
-                >
-                  {title || "Enter translation title..."}
-                </div>
-              )}
             </div>
 
             <div className="flex flex-1 flex-col min-h-0">
@@ -869,7 +893,7 @@ export default function Translate() {
 
       {/* Right Panel - Output */}
       <div className="flex flex-1 w-0 flex-col border-l">
-        <div className="border-b p-4">
+        <div className="border-b px-4 py-5">
           <h2 className="text-lg font-semibold">Translations</h2>
         </div>
 
@@ -894,7 +918,7 @@ export default function Translate() {
             </div>
           ) : (
             <Tabs value={activeLanguageTab} onValueChange={setActiveLanguageTab} className="flex h-full flex-col">
-              <TabsList className="mx-4 mt-4 w-auto justify-start overflow-x-auto">
+              <TabsList className="mx-4 mt-4 w-auto justify-start overflow-x-auto overflow-y-hidden flex-shrink-0">
                 {selectedLanguages.map((langCode) => {
                   const language = activeLanguages.find(l => l.code === langCode);
                   const isTranslating = translatingLanguages.has(langCode);
@@ -902,7 +926,7 @@ export default function Translate() {
                   const isCompleted = !isTranslating && output;
                   
                   return (
-                    <TabsTrigger key={langCode} value={langCode} data-testid={`tab-${langCode}`} className="gap-2">
+                    <TabsTrigger key={langCode} value={langCode} data-testid={`tab-${langCode}`} className="gap-2 h-20">
                       {language?.name || langCode}
                       {isTranslating && <Loader2 className="h-3 w-3 animate-spin" />}
                       {isCompleted && <Check className="h-3 w-3 text-green-600" />}
@@ -930,35 +954,37 @@ export default function Translate() {
                       </div>
                     </div>
                   ) : output ? (
-                    <ScrollArea className="h-full">
-                      <div className="flex flex-col gap-4 p-6">
-                        <div className="flex items-center justify-between">
-                          <Label className="text-sm font-medium">{output.languageName}</Label>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => handleCopyOutput(editedOutputs[output.id] ?? output.translatedText, output.id)}
-                            data-testid={`button-copy-${output.id}`}
-                          >
-                            {copiedOutputId === output.id ? (
-                              <Check className="h-4 w-4" />
-                            ) : (
-                              <Copy className="h-4 w-4" />
-                            )}
-                          </Button>
-                        </div>
+                    <div className="flex flex-col h-full px-6 pt-4 pb-6 gap-4">
+                      {/* Header with language and copy button */}
+                      <div className="flex items-center justify-between flex-shrink-0">
+                        <Label className="text-sm font-medium">{output.languageName}</Label>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleCopyOutput(editedOutputs[output.id] ?? output.translatedText, output.id)}
+                          data-testid={`button-copy-${output.id}`}
+                        >
+                          {copiedOutputId === output.id ? (
+                            <Check className="h-4 w-4" />
+                          ) : (
+                            <Copy className="h-4 w-4" />
+                          )}
+                        </Button>
+                      </div>
 
-                        <RichTextEditor
-                          content={editedOutputs[output.id] ?? output.translatedText}
-                          onChange={(html) => setEditedOutputs(prev => ({ ...prev, [output.id]: html }))}
-                          onBlur={() => handleSaveOutput(output.id)}
-                          placeholder="Translation will appear here..."
-                          editable={canEditSelected}
-                          className="min-h-96"
-                          editorKey={`output-${output.id}`}
-                        />
+                      {/* Editor with internal scrolling */}
+                      <RichTextEditor
+                        content={editedOutputs[output.id] ?? output.translatedText}
+                        onChange={(html) => setEditedOutputs(prev => ({ ...prev, [output.id]: html }))}
+                        placeholder="Translation will appear here..."
+                        editable={canEditSelected}
+                        className="flex-1 overflow-auto"
+                        editorKey={`output-${output.id}`}
+                      />
 
-                        <div className="text-xs text-muted-foreground space-y-0.5">
+                      {/* Footer pinned to bottom */}
+                      <div className="flex items-center justify-between text-xs text-muted-foreground flex-shrink-0 pt-2">
+                        <div className="space-y-0.5">
                           <div>
                             Model: {models.find(m => m.id === output.modelId)?.name || "Unknown"}
                             {translationRuntimes[langCode] && (
@@ -971,14 +997,44 @@ export default function Translate() {
                             Last Updated: {formatDistanceToNow(new Date(output.updatedAt), { addSuffix: true })}
                           </div>
                         </div>
+
+                        {/* Show Save/Discard buttons when there are unsaved changes */}
+                        {editedOutputs[output.id] !== undefined && 
+                         editedOutputs[output.id] !== output.translatedText && (
+                          <div className="flex items-center gap-2">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleDiscardOutput(output.id)}
+                              disabled={updateOutputMutation.isPending}
+                              className="h-7 text-xs"
+                            >
+                              <X className="h-3 w-3 mr-1" />
+                              Discard
+                            </Button>
+                            <Button
+                              variant="default"
+                              size="sm"
+                              onClick={() => handleSaveOutput(output.id)}
+                              disabled={updateOutputMutation.isPending}
+                              className="h-7 text-xs"
+                            >
+                              {updateOutputMutation.isPending ? (
+                                <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                              ) : (
+                                <Save className="h-3 w-3 mr-1" />
+                              )}
+                              Save
+                            </Button>
+                          </div>
+                        )}
                       </div>
-                    </ScrollArea>
+                    </div>
                   ) : (
                     <div className="flex h-full items-center justify-center p-8 text-center">
                       <div>
-                        <p className="mb-2 text-sm font-medium">Not yet translated</p>
-                        <p className="text-xs text-muted-foreground">
-                          Click Translate to generate translation for {language?.name || langCode}
+                        <p className="text-sm text-muted-foreground">
+                          Translate to see content here
                         </p>
                       </div>
                     </div>

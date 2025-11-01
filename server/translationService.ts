@@ -57,18 +57,36 @@ export class TranslationService {
     // the newest OpenAI model is "gpt-5" which was released August 7, 2025. do not change this unless explicitly requested by the user
     const openai = new OpenAI({ apiKey });
 
-    const userMessage = `Translate to ${targetLanguage}. This is the text: ${text}`;
+    const userInput = `Translate to ${targetLanguage}. This is the text: ${text}`;
 
-    const response = await openai.chat.completions.create({
+    // Using responses API: https://platform.openai.com/docs/api-reference/responses/create
+    const response = await openai.responses.create({
       model,
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userMessage }
-      ],
-      max_completion_tokens: 8192,
-    });
+      input: userInput,
+      instructions: systemPrompt,
+      max_output_tokens: 50000,
+      metadata: {
+        app: 'babellion',
+        service: 'translation',
+      },
+    } as any); // Type cast for new API that may not be fully typed yet
 
-    return response.choices[0].message.content || '';
+    // Extract text from responses API output structure:
+    // Models like GPT-5 may return multiple output items (e.g., reasoning + message)
+    // We need to find the item with type="message", not just take the first one
+    if (response.output && Array.isArray(response.output) && response.output.length > 0) {
+      // Find the message item (not reasoning or other types)
+      const messageItem = response.output.find((item: any) => item.type === 'message') as any;
+      
+      if (messageItem && messageItem.content && Array.isArray(messageItem.content) && messageItem.content.length > 0) {
+        const contentItem = messageItem.content[0] as any;
+        if (contentItem.type === 'output_text' && contentItem.text) {
+          return contentItem.text;
+        }
+      }
+    }
+    
+    return '';
   }
 
   private async translateWithAnthropic(
@@ -87,7 +105,7 @@ export class TranslationService {
 
     const response = await anthropic.messages.create({
       model,
-      max_tokens: 8192,
+      max_tokens: 50000,
       system: systemPrompt,
       messages: [
         { role: 'user', content: userMessage }

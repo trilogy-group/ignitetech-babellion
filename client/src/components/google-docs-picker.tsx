@@ -118,8 +118,8 @@ export function GoogleDocsPicker({ open, onOpenChange, onDocumentSelect }: Googl
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-3xl max-h-[80vh] flex flex-col">
-        <DialogHeader>
+      <DialogContent className="max-w-3xl h-[80vh] flex flex-col">
+        <DialogHeader className="flex-shrink-0">
           <div>
             <DialogTitle>Select a Google Doc</DialogTitle>
             {!error && !docsLoading && docs.length > 0 && (
@@ -133,7 +133,7 @@ export function GoogleDocsPicker({ open, onOpenChange, onDocumentSelect }: Googl
         </DialogHeader>
 
         {error ? (
-          <div className="flex flex-col items-center justify-center py-12 px-4 text-center">
+          <div className="flex flex-col items-center justify-center py-12 px-4 text-center flex-1">
             <FileText className="h-12 w-12 text-muted-foreground mb-4" />
             <h3 className="text-lg font-semibold mb-2">Unable to Access Google Docs</h3>
             <p className="text-sm text-muted-foreground mb-4 max-w-md">
@@ -148,7 +148,7 @@ export function GoogleDocsPicker({ open, onOpenChange, onDocumentSelect }: Googl
         ) : (
           <>
             {/* Search Bar */}
-            <div className="relative">
+            <div className="relative flex-shrink-0">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input
                 placeholder="Search documents... (Press Enter to search)"
@@ -170,7 +170,7 @@ export function GoogleDocsPicker({ open, onOpenChange, onDocumentSelect }: Googl
 
             {/* Loading State */}
             {docsLoading && (
-              <div className="flex items-center justify-center py-12">
+              <div className="flex items-center justify-center py-12 flex-1">
                 <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
                 <span className="ml-2 text-sm text-muted-foreground">
                   {activeSearch ? 'Searching your documents...' : 'Loading your documents...'}
@@ -180,7 +180,7 @@ export function GoogleDocsPicker({ open, onOpenChange, onDocumentSelect }: Googl
 
             {/* Documents List */}
             {!docsLoading && (
-              <ScrollArea className="flex-1 -mx-6 px-6">
+              <ScrollArea className="flex-1 -mx-6 px-6 min-h-0">
                 {docs.length === 0 ? (
                   <div className="flex flex-col items-center justify-center py-12 text-center">
                     <FileText className="h-12 w-12 text-muted-foreground mb-4" />
@@ -194,7 +194,7 @@ export function GoogleDocsPicker({ open, onOpenChange, onDocumentSelect }: Googl
                     )}
                   </div>
                 ) : (
-                  <div className="space-y-2">
+                  <div className="space-y-2 pb-4">
                     {docs.map((doc) => (
                       <Card
                         key={doc.id}
@@ -241,7 +241,7 @@ export function GoogleDocsPicker({ open, onOpenChange, onDocumentSelect }: Googl
           </>
         )}
 
-        <DialogFooter>
+        <DialogFooter className="flex-shrink-0">
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isLoading}>
             Cancel
           </Button>

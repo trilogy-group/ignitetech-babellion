@@ -83,9 +83,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!translation) {
         return res.status(404).json({ message: "Translation not found" });
       }
-      // Check if user owns the translation or is admin
+      // Check if user owns the translation or is admin (admins can only edit public translations)
       const user = await storage.getUser(req.user.id);
-      const canEdit = user && (user.isAdmin || translation.userId === req.user.id);
+      const isOwner = translation.userId === req.user.id;
+      const isAdminEditingPublic = user?.isAdmin && !translation.isPrivate;
+      const canEdit = isOwner || isAdminEditingPublic;
       if (!canEdit) {
         return res.status(403).json({ message: "Forbidden" });
       }
@@ -103,9 +105,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!translation) {
         return res.status(404).json({ message: "Translation not found" });
       }
-      // Check if user owns the translation or is admin
+      // Check if user owns the translation or is admin (admins can only delete public translations)
       const user = await storage.getUser(req.user.id);
-      const canDelete = user && (user.isAdmin || translation.userId === req.user.id);
+      const isOwner = translation.userId === req.user.id;
+      const isAdminDeletingPublic = user?.isAdmin && !translation.isPrivate;
+      const canDelete = isOwner || isAdminDeletingPublic;
       if (!canDelete) {
         return res.status(403).json({ message: "Forbidden" });
       }
@@ -153,9 +157,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ message: "Translation not found" });
       }
       
-      // Check if user owns the translation or is admin
+      // Check if user owns the translation or is admin (admins can only edit public translations)
       const user = await storage.getUser(req.user.id);
-      const canEdit = user && (user.isAdmin || translation.userId === req.user.id);
+      const isOwner = translation.userId === req.user.id;
+      const isAdminEditingPublic = user?.isAdmin && !translation.isPrivate;
+      const canEdit = isOwner || isAdminEditingPublic;
       if (!canEdit) {
         return res.status(403).json({ message: "Forbidden" });
       }
@@ -173,13 +179,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const { translationId, languageCode, modelId } = req.body;
 
-      // Verify user owns the translation or is admin
+      // Verify user owns the translation or is admin (admins can only translate public translations)
       const translation = await storage.getTranslation(translationId);
       if (!translation) {
         return res.status(404).json({ message: "Translation not found" });
       }
       const user = await storage.getUser(req.user.id);
-      const canTranslate = user && (user.isAdmin || translation.userId === req.user.id);
+      const isOwner = translation.userId === req.user.id;
+      const isAdminTranslatingPublic = user?.isAdmin && !translation.isPrivate;
+      const canTranslate = isOwner || isAdminTranslatingPublic;
       if (!canTranslate) {
         return res.status(403).json({ message: "Forbidden" });
       }

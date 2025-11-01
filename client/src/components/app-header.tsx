@@ -18,7 +18,7 @@ export function AppHeader() {
   const [location] = useLocation();
   const { user } = useAuth();
 
-  const isTranslate = location === "/" || location === "/translate";
+  const isTranslate = location === "/translate";
   const isSettings = location === "/settings";
 
   return (
@@ -26,10 +26,12 @@ export function AppHeader() {
       <div className="flex h-16 items-center justify-between px-6">
         {/* Logo and Navigation */}
         <div className="flex items-center gap-6">
-          <div className="flex items-center gap-2">
-            <Globe className="h-6 w-6 text-primary" />
-            <span className="text-xl font-semibold">Babellion</span>
-          </div>
+          <Link href="/translate">
+            <div className="flex items-center gap-2 cursor-pointer">
+              <Globe className="h-6 w-6 text-primary" />
+              <span className="text-xl font-semibold">Babellion</span>
+            </div>
+          </Link>
 
           <nav className="flex items-center gap-1">
             <Link href="/translate">

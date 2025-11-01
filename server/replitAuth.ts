@@ -68,6 +68,8 @@ export async function setupAuth(app: Express) {
           async (req: any, accessToken: string, refreshToken: string, profile: any, done: any) => {
             try {
               const user = await upsertUser(profile);
+              // Store tokens in database for Google APIs
+              await storage.updateUserGoogleTokens(user.id, accessToken, refreshToken);
               done(null, { id: user.id, profile });
             } catch (error) {
               done(error, null);
@@ -95,8 +97,15 @@ export async function setupAuth(app: Express) {
     const host = req.get('host') ?? req.hostname;
     const strategyName = setupGoogleStrategy(host, req.protocol);
     passport.authenticate(strategyName, {
-      scope: ["profile", "email"],
-    })(req, res, next);
+      scope: [
+        "profile",
+        "email",
+        "https://www.googleapis.com/auth/drive.readonly",
+        "https://www.googleapis.com/auth/documents.readonly"
+      ],
+      accessType: 'offline',
+      prompt: 'consent'
+    } as any)(req, res, next);
   });
 
   app.get("/api/auth/google/callback", (req, res, next) => {

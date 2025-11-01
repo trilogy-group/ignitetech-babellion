@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { Loader2, Plus, Trash2, Save } from "lucide-react";
+import { Loader2, Plus, Trash2, Save, Shield, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -33,12 +33,15 @@ import {
 import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
-import type { AiModel, Language, Setting } from "@shared/schema";
+import type { AiModel, Language, Setting, User } from "@shared/schema";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Switch } from "@/components/ui/switch";
+import { useAuth } from "@/hooks/useAuth";
 
 export default function Settings() {
   const { toast } = useToast();
+  const { user: currentUser } = useAuth();
   const [openaiKey, setOpenaiKey] = useState("");
   const [anthropicKey, setAnthropicKey] = useState("");
   const [systemPrompt, setSystemPrompt] = useState("");
@@ -72,6 +75,11 @@ export default function Settings() {
       }
       return data;
     },
+  });
+
+  // Fetch users
+  const { data: users = [], isLoading: usersLoading } = useQuery<User[]>({
+    queryKey: ["/api/admin/users"],
   });
 
   // Save API key mutation
@@ -181,6 +189,28 @@ export default function Settings() {
     },
   });
 
+  // Update user role mutation
+  const updateUserRoleMutation = useMutation({
+    mutationFn: async ({ userId, isAdmin }: { userId: string; isAdmin: boolean }) => {
+      const res = await apiRequest("PATCH", `/api/admin/users/${userId}/role`, { isAdmin });
+      return await res.json();
+    },
+    onSuccess: (data, variables) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/users"] });
+      toast({
+        title: "User role updated",
+        description: `User ${variables.isAdmin ? 'promoted to' : 'removed from'} admin role.`,
+      });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to update user role",
+        variant: "destructive",
+      });
+    },
+  });
+
   return (
     <div className="flex h-screen flex-col">
       <div className="border-b px-4 py-6 sm:px-6 lg:px-8">
@@ -190,8 +220,9 @@ export default function Settings() {
 
       <ScrollArea className="flex-1">
         <div className="container max-w-5xl py-8 px-4 sm:px-6 lg:px-8">
-          <Tabs defaultValue="api-keys" className="space-y-6">
+          <Tabs defaultValue="users" className="space-y-6">
         <TabsList>
+          <TabsTrigger value="users" data-testid="tab-users">Users</TabsTrigger>
           <TabsTrigger value="api-keys" data-testid="tab-api-keys">API Keys</TabsTrigger>
           <TabsTrigger value="translation" data-testid="tab-translation">Translation</TabsTrigger>
           <TabsTrigger value="proofread" disabled data-testid="tab-proofread">Proof Read</TabsTrigger>
@@ -540,6 +571,99 @@ export default function Settings() {
                     ))}
                   </div>
                 </ScrollArea>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* Users Tab */}
+        <TabsContent value="users" className="space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle>User Management</CardTitle>
+              <CardDescription>
+                Manage user roles and permissions. Admins can change roles but cannot modify their own.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {usersLoading ? (
+                <div className="flex justify-center py-8">
+                  <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+                </div>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>User</TableHead>
+                      <TableHead>Email</TableHead>
+                      <TableHead className="text-center">Role</TableHead>
+                      <TableHead className="text-center">Admin Access</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {users.map((user) => {
+                      const isCurrentUser = user.id === currentUser?.id;
+                      const displayName = user.firstName && user.lastName 
+                        ? `${user.firstName} ${user.lastName}`
+                        : user.firstName || user.email || "Unknown User";
+
+                      return (
+                        <TableRow key={user.id}>
+                          <TableCell>
+                            <div className="flex items-center gap-2">
+                              {user.profileImageUrl ? (
+                                <img 
+                                  src={user.profileImageUrl} 
+                                  alt={displayName}
+                                  className="h-8 w-8 rounded-full"
+                                />
+                              ) : (
+                                <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center">
+                                  <span className="text-sm font-medium">
+                                    {displayName.charAt(0).toUpperCase()}
+                                  </span>
+                                </div>
+                              )}
+                              <div>
+                                <p className="font-medium">{displayName}</p>
+                                {isCurrentUser && (
+                                  <Badge variant="outline" className="text-xs">You</Badge>
+                                )}
+                              </div>
+                            </div>
+                          </TableCell>
+                          <TableCell>{user.email || "—"}</TableCell>
+                          <TableCell className="text-center">
+                            {user.isAdmin ? (
+                              <Badge variant="default" className="gap-1">
+                                <ShieldCheck className="h-3 w-3" />
+                                Admin
+                              </Badge>
+                            ) : (
+                              <Badge variant="secondary" className="gap-1">
+                                <Shield className="h-3 w-3" />
+                                User
+                              </Badge>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-center">
+                            <Switch
+                              checked={user.isAdmin}
+                              onCheckedChange={(checked) => {
+                                updateUserRoleMutation.mutate({
+                                  userId: user.id,
+                                  isAdmin: checked,
+                                });
+                              }}
+                              disabled={isCurrentUser || updateUserRoleMutation.isPending}
+                              aria-label={`Toggle admin access for ${displayName}`}
+                            />
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
               )}
             </CardContent>
           </Card>

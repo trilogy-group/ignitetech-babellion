@@ -6,7 +6,6 @@ import { setupAuth, isAuthenticated, isAdmin } from "./replitAuth";
 import { z } from "zod";
 import { encrypt } from "./encryption";
 import { translationService } from "./translationService";
-import { getGoogleAuth, listGoogleDocs, getGoogleDocContent } from "./googleDocsService";
 import {
   insertTranslationSchema,
   insertAiModelSchema,
@@ -415,33 +414,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Error updating user role:", error);
       res.status(500).json({ message: "Failed to update user role" });
-    }
-  });
-
-  // ===== GOOGLE DOCS ROUTES =====
-  app.get("/api/google/docs", isAuthenticated, async (req: any, res) => {
-    try {
-      const auth = await getGoogleAuth(req);
-      const searchQuery = req.query.search as string | undefined;
-      const docs = await listGoogleDocs(auth, searchQuery);
-      res.json(docs);
-    } catch (error: unknown) {
-      console.error("Error fetching Google Docs:", error);
-      const message = (error as Error)?.message || "Failed to fetch Google Docs";
-      res.status(500).json({ message });
-    }
-  });
-
-  app.get("/api/google/docs/:documentId", isAuthenticated, async (req: any, res) => {
-    try {
-      const auth = await getGoogleAuth(req);
-      const { documentId } = req.params;
-      const docContent = await getGoogleDocContent(auth, documentId);
-      res.json(docContent);
-    } catch (error: unknown) {
-      console.error("Error fetching Google Doc content:", error);
-      const message = (error as Error)?.message || "Failed to fetch Google Doc content";
-      res.status(500).json({ message });
     }
   });
 

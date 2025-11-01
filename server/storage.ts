@@ -121,10 +121,19 @@ export class DatabaseStorage implements IStorage {
 
   // Translation operations
   async getTranslations(userId: string): Promise<Translation[]> {
-    // Return all public translations + user's private translations
-    return await db
-      .select()
+    // Return all public translations + user's private translations with user info
+    const results = await db
+      .select({
+        translation: translations,
+        owner: {
+          id: users.id,
+          email: users.email,
+          firstName: users.firstName,
+          lastName: users.lastName,
+        }
+      })
       .from(translations)
+      .leftJoin(users, eq(translations.userId, users.id))
       .where(
         or(
           // Either it's public
@@ -134,6 +143,12 @@ export class DatabaseStorage implements IStorage {
         )
       )
       .orderBy(desc(translations.updatedAt));
+    
+    // Map results to include owner info in the translation object
+    return results.map(r => ({
+      ...r.translation,
+      owner: r.owner
+    })) as Translation[];
   }
 
   async getTranslation(id: string): Promise<Translation | undefined> {

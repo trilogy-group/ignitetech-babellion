@@ -72,7 +72,14 @@ export const insertTranslationSchema = createInsertSchema(translations).omit({
 });
 
 export type InsertTranslation = z.infer<typeof insertTranslationSchema>;
-export type Translation = typeof translations.$inferSelect;
+export type Translation = typeof translations.$inferSelect & {
+  owner?: {
+    id: string;
+    email: string | null;
+    firstName: string | null;
+    lastName: string | null;
+  };
+};
 
 // Translation outputs table (stores individual language translations)
 export const translationOutputs = pgTable("translation_outputs", {

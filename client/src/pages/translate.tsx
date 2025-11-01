@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { Plus, Trash2, Loader2, Copy, Check, Lock } from "lucide-react";
+import { Plus, Trash2, Loader2, Copy, Check, Lock, Globe, Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -33,6 +33,12 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
 import { queryClient, apiRequest } from "@/lib/queryClient";
@@ -62,6 +68,7 @@ export default function Translate() {
   const [isPrivate, setIsPrivate] = useState(false);
   const [translatingLanguages, setTranslatingLanguages] = useState<Set<string>>(new Set());
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  const [translationRuntimes, setTranslationRuntimes] = useState<Record<string, number>>({});
 
   // Fetch translations
   const { data: translations = [], isLoading: translationsLoading } = useQuery<Translation[]>({
@@ -202,12 +209,14 @@ export default function Translate() {
     setSourceText(translation.sourceText);
     setTitle(translation.title);
     setSelectedLanguages(translation.selectedLanguages || []);
+    setIsPrivate(translation.isPrivate ?? false);
     // Pre-select the last used model if available
     if (translation.lastUsedModelId) {
       setSelectedModel(translation.lastUsedModelId);
     }
     setEditedOutputs({});
     setTranslatingLanguages(new Set());
+    setTranslationRuntimes({});
   };
 
   const handleNewTranslation = () => {
@@ -249,7 +258,17 @@ export default function Translate() {
     if (selectedTranslationId) {
       updateMutation.mutate({
         id: selectedTranslationId,
-        data: { sourceText, title, selectedLanguages },
+        data: { sourceText, title, selectedLanguages, isPrivate },
+      });
+    }
+  };
+
+  const handleTogglePrivacy = (checked: boolean) => {
+    if (selectedTranslationId && canEditSelected) {
+      setIsPrivate(checked);
+      updateMutation.mutate({
+        id: selectedTranslationId,
+        data: { isPrivate: checked },
       });
     }
   };
@@ -320,10 +339,23 @@ export default function Translate() {
       setActiveLanguageTab(selectedLanguages[0]);
     }
 
+    // Clear previous runtimes
+    setTranslationRuntimes({});
+
     // Translate all languages in parallel
     const promises = selectedLanguages.map(async (langCode) => {
+      const startTime = Date.now();
       try {
         await translateSingleMutation.mutateAsync({ languageCode: langCode });
+        const endTime = Date.now();
+        const duration = (endTime - startTime) / 1000; // Convert to seconds
+        
+        // Store the runtime
+        setTranslationRuntimes(prev => ({
+          ...prev,
+          [langCode]: duration
+        }));
+        
         // Remove from translating set when done
         setTranslatingLanguages(prev => {
           const newSet = new Set(prev);
@@ -400,7 +432,31 @@ export default function Translate() {
   // Permission helper - check if user can edit a translation
   const canEdit = (translation: Translation | null) => {
     if (!user || !translation) return false;
-    return user.isAdmin || translation.userId === user.id;
+    
+    // User can edit their own translations (public or private)
+    if (translation.userId === user.id) return true;
+    
+    // Admins can edit PUBLIC translations from other users
+    if (user.isAdmin && !translation.isPrivate) return true;
+    
+    return false;
+  };
+
+  // Helper to get ownership tooltip text
+  const getOwnershipTooltip = (translation: Translation) => {
+    if (!user) return "";
+    if (translation.userId === user.id) {
+      return "Owned by me";
+    }
+    
+    // Use owner information if available
+    if (translation.owner) {
+      const name = translation.owner.firstName || translation.owner.email || translation.userId;
+      const email = translation.owner.email ? ` (${translation.owner.email})` : "";
+      return `Owned by ${name}${email}`;
+    }
+    
+    return `Owned by ${translation.userId}`;
   };
 
   // Get currently selected translation
@@ -430,76 +486,93 @@ export default function Translate() {
             </div>
           ) : (
             <div className="space-y-1 p-2" style={{ width: '100%', maxWidth: '20rem' }}>
-              {translations.map((translation) => (
-                <Card
-                  key={translation.id}
-                  className={`group cursor-pointer p-4 hover-elevate overflow-hidden ${
-                    selectedTranslationId === translation.id ? "bg-sidebar-accent" : ""
-                  }`}
-                  onClick={() => handleSelectTranslation(translation)}
-                  data-testid={`card-translation-${translation.id}`}
-                >
-                  <div className="flex items-start gap-2 min-w-0">
-                    <div className="flex-1 min-w-0">
-                      {isRenamingId === translation.id ? (
-                        <Input
-                          value={renameValue}
-                          onChange={(e) => setRenameValue(e.target.value)}
-                          onBlur={() => handleRenameInList(translation.id, renameValue)}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter") {
-                              setIsEscapePressed(false);
-                              handleRenameInList(translation.id, renameValue);
-                            } else if (e.key === "Escape") {
-                              setIsEscapePressed(true);
-                              setIsRenamingId(null);
-                            }
-                          }}
-                          autoFocus
-                          className="h-auto p-0 border-none focus-visible:ring-0"
-                          onClick={(e) => e.stopPropagation()}
-                          data-testid="input-rename-translation"
-                        />
-                      ) : (
-                        <div 
-                          className={`flex items-center gap-2 min-w-0 ${canEdit(translation) ? 'cursor-text' : ''}`}
-                          onClick={(e) => {
-                            if (canEdit(translation)) {
+              <TooltipProvider>
+                {translations.map((translation) => (
+                  <Card
+                    key={translation.id}
+                    className={`group cursor-pointer p-4 hover-elevate overflow-hidden ${
+                      selectedTranslationId === translation.id ? "bg-sidebar-accent" : ""
+                    }`}
+                    onClick={() => handleSelectTranslation(translation)}
+                    data-testid={`card-translation-${translation.id}`}
+                  >
+                    <div className="flex items-start gap-2 min-w-0">
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <div className="flex-shrink-0 pt-0.5" onClick={(e) => e.stopPropagation()}>
+                            {translation.isPrivate ? (
+                              <Lock className="h-4 w-4 text-muted-foreground/60" data-testid={`icon-ownership-private-${translation.id}`} />
+                            ) : (
+                              <Globe className="h-4 w-4 text-muted-foreground/60" data-testid={`icon-ownership-public-${translation.id}`} />
+                            )}
+                          </div>
+                        </TooltipTrigger>
+                        <TooltipContent side="right">
+                          <p>{getOwnershipTooltip(translation)}</p>
+                        </TooltipContent>
+                      </Tooltip>
+                      <div className="flex-1 min-w-0">
+                        {isRenamingId === translation.id ? (
+                          <Input
+                            value={renameValue}
+                            onChange={(e) => setRenameValue(e.target.value)}
+                            onBlur={() => handleRenameInList(translation.id, renameValue)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") {
+                                setIsEscapePressed(false);
+                                handleRenameInList(translation.id, renameValue);
+                              } else if (e.key === "Escape") {
+                                setIsEscapePressed(true);
+                                setIsRenamingId(null);
+                              }
+                            }}
+                            autoFocus
+                            className="h-auto p-0 border-none focus-visible:ring-0"
+                            onClick={(e) => e.stopPropagation()}
+                            data-testid="input-rename-translation"
+                          />
+                        ) : (
+                          <div className="flex items-center gap-2 min-w-0">
+                            <h3 className="font-medium truncate flex-1 min-w-0">{translation.title}</h3>
+                          </div>
+                        )}
+                        <p className="text-xs text-muted-foreground mt-1 truncate">
+                          {new Date(translation.updatedAt!).toLocaleDateString()}
+                        </p>
+                      </div>
+                      {canEdit(translation) && (
+                        <div className="flex items-center gap-1 invisible group-hover:visible flex-shrink-0">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-6 w-6"
+                            onClick={(e) => {
                               e.stopPropagation();
                               setIsRenamingId(translation.id);
                               setRenameValue(translation.title);
-                            }
-                          }}
-                        >
-                          <h3 className="font-medium truncate flex-1 min-w-0">{translation.title}</h3>
-                          {translation.isPrivate && (
-                            <Lock className="h-3 w-3 text-muted-foreground flex-shrink-0" data-testid={`icon-private-${translation.id}`} />
-                          )}
+                            }}
+                            data-testid={`button-edit-${translation.id}`}
+                          >
+                            <Pencil className="h-3 w-3" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-6 w-6 text-destructive"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setDeleteConfirmId(translation.id);
+                            }}
+                            data-testid={`button-delete-${translation.id}`}
+                          >
+                            <Trash2 className="h-3 w-3" />
+                          </Button>
                         </div>
                       )}
-                      <p className="text-xs text-muted-foreground mt-1 truncate">
-                        {new Date(translation.updatedAt!).toLocaleDateString()}
-                      </p>
                     </div>
-                    {canEdit(translation) && (
-                      <div className="flex items-center gap-1 invisible group-hover:visible flex-shrink-0">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-6 w-6 text-destructive"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setDeleteConfirmId(translation.id);
-                          }}
-                          data-testid={`button-delete-${translation.id}`}
-                        >
-                          <Trash2 className="h-3 w-3" />
-                        </Button>
-                      </div>
-                    )}
-                  </div>
-                </Card>
-              ))}
+                  </Card>
+                ))}
+              </TooltipProvider>
             </div>
           )}
         </ScrollArea>
@@ -590,9 +663,26 @@ export default function Translate() {
         <div className="flex-1 overflow-hidden p-6">
           <div className="flex h-full flex-col gap-4">
             <div className="flex-shrink-0">
-              <Label className="mb-2 block text-sm font-medium">
-                Translation Title
-              </Label>
+              <div className="mb-2 flex items-center justify-between">
+                <Label className="text-sm font-medium">
+                  Translation Title
+                </Label>
+                {selectedTranslationId && (
+                  <div className="flex items-center gap-2">
+                    <Globe className="h-4 w-4 text-muted-foreground" />
+                    <span className="text-xs text-muted-foreground">Public</span>
+                    <Switch
+                      checked={isPrivate}
+                      onCheckedChange={handleTogglePrivacy}
+                      disabled={!canEditSelected}
+                      className="data-[state=checked]:bg-red-600 data-[state=unchecked]:bg-green-600"
+                      data-testid="switch-toggle-privacy"
+                    />
+                    <span className="text-xs text-muted-foreground">Private</span>
+                    <Lock className="h-4 w-4 text-muted-foreground" />
+                  </div>
+                )}
+              </div>
               {isEditingTitle ? (
                 <Input
                   value={editedTitle}
@@ -747,6 +837,11 @@ export default function Translate() {
 
                         <div className="text-xs text-muted-foreground">
                           Model: {models.find(m => m.id === output.modelId)?.name || "Unknown"}
+                          {translationRuntimes[langCode] && (
+                            <span className="ml-1">
+                              ({translationRuntimes[langCode].toFixed(1)}s)
+                            </span>
+                          )}
                         </div>
                       </div>
                     </ScrollArea>

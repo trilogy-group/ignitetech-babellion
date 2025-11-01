@@ -123,12 +123,17 @@ export default function Translate() {
       return await response.json() as Translation;
     },
     onSuccess: (data: Translation) => {
-      queryClient.invalidateQueries({ queryKey: ["/api/translations"] });
-      setSelectedTranslationId(data.id);
-      setSourceText("");
-      setTitle(data.title);
-      setSelectedLanguages([]);
+      // Optimistically update the cache to include the new translation
+      queryClient.setQueryData<Translation[]>(["/api/translations"], (old = []) => [data, ...old]);
+      
+      // Properly initialize the translation selection
+      handleSelectTranslation(data);
+      
       setIsEditingTitle(false);
+      
+      // Invalidate to sync with server (but optimistic update ensures immediate UI works)
+      queryClient.invalidateQueries({ queryKey: ["/api/translations"] });
+      
       toast({
         title: "Translation created",
         description: "Your new translation project has been created.",

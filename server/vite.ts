@@ -19,6 +19,20 @@ export function log(message: string, source = "express") {
   console.log(`${formattedTime} [${source}] ${message}`);
 }
 
+export function logInfo(message: string, service: string) {
+  const timestamp = new Date().toISOString();
+  console.log(`[${timestamp}] [INFO][${service}] ${message}`);
+}
+
+export function logError(message: string, service: string, error?: any) {
+  const timestamp = new Date().toISOString();
+  if (error) {
+    console.error(`[${timestamp}] [ERROR][${service}] ${message}`, error);
+  } else {
+    console.error(`[${timestamp}] [ERROR][${service}] ${message}`);
+  }
+}
+
 export async function setupVite(app: Express, server: Server) {
   const serverOptions = {
     middlewareMode: true,

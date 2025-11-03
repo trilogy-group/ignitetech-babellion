@@ -13,6 +13,7 @@ import {
   insertLanguageSchema,
   insertSettingSchema,
 } from "@shared/schema";
+import { logInfo, logError } from "./vite";
 
 export async function registerRoutes(app: Express): Promise<Server> {
   // Auth middleware
@@ -216,27 +217,139 @@ export async function registerRoutes(app: Express): Promise<Server> {
         await storage.deleteTranslationOutput(existingOutput.id);
       }
 
-      // Translate
-      const translatedText = await translationService.translate({
-        text: translation.sourceText,
-        targetLanguage: language.name,
-        modelIdentifier: model.modelIdentifier,
-        provider: model.provider as 'openai' | 'anthropic',
-        systemPrompt,
-      });
+      // Log translation start
+      logInfo(`Translating ${translationId} into ${language.name}`, "AI");
+      const translateStartTime = Date.now();
 
-      const result = await storage.createTranslationOutput({
+      // Create output record with 'translating' status (translatedText will be null initially)
+      const output = await storage.createTranslationOutput({
         translationId,
         languageCode: language.code,
         languageName: language.name,
-        translatedText,
+        translatedText: null as any, // Null initially, will be set after translation
         modelId: model.id,
+        translationStatus: 'translating',
+        proofreadStatus: 'pending',
       });
 
-      res.json(result);
+      // Translate
+      let translatedText: string;
+      try {
+        translatedText = await translationService.translate({
+          text: translation.sourceText,
+          targetLanguage: language.name,
+          modelIdentifier: model.modelIdentifier,
+          provider: model.provider as 'openai' | 'anthropic',
+          systemPrompt,
+        });
+      } catch (error) {
+        const translateTime = Math.round((Date.now() - translateStartTime) / 1000);
+        logError(`Translation failed ${translationId} into ${language.name}, time: ${translateTime}s`, "AI", error);
+        // Update status to failed
+        await storage.updateTranslationOutputStatus(output.id, { translationStatus: 'failed' });
+        throw error;
+      }
+
+      const translateTime = Math.round((Date.now() - translateStartTime) / 1000);
+      logInfo(`Translated ${translationId} into ${language.name}, time: ${translateTime}s`, "AI");
+
+      // Update with translated text and mark as completed
+      const result = await storage.updateTranslationOutput(output.id, translatedText);
+      await storage.updateTranslationOutputStatus(result.id, { translationStatus: 'completed' });
+
+      res.json({ ...result, translationStatus: 'completed' });
     } catch (error) {
       console.error("Error translating:", error);
       res.status(500).json({ message: error instanceof Error ? error.message : "Translation failed" });
+    }
+  });
+
+  // ===== PROOFREAD ENDPOINT =====
+  app.post("/api/proofread-translation", isAuthenticated, async (req: any, res) => {
+    try {
+      const { outputId } = req.body;
+
+      if (!outputId) {
+        return res.status(400).json({ message: "outputId is required" });
+      }
+
+      // Get the translation output
+      const output = await storage.getTranslationOutput(outputId);
+      if (!output) {
+        return res.status(404).json({ message: "Translation output not found" });
+      }
+
+      // Get the parent translation
+      const translation = await storage.getTranslation(output.translationId);
+      if (!translation) {
+        return res.status(404).json({ message: "Translation not found" });
+      }
+
+      // Verify user owns the translation or is admin (admins can only proofread public translations)
+      const user = await storage.getUser(req.user.id);
+      const isOwner = translation.userId === req.user.id;
+      const isAdminProofreadingPublic = user?.isAdmin && !translation.isPrivate;
+      const canProofread = isOwner || isAdminProofreadingPublic;
+      if (!canProofread) {
+        return res.status(403).json({ message: "Forbidden" });
+      }
+
+      // Get model details (the same model used for translation)
+      if (!output.modelId) {
+        return res.status(400).json({ message: "Translation output has no associated model" });
+      }
+      const model = await storage.getModel(output.modelId);
+      if (!model) {
+        return res.status(404).json({ message: "Model not found" });
+      }
+
+      // Get language details
+      const language = await storage.getLanguageByCode(output.languageCode);
+      if (!language) {
+        return res.status(404).json({ message: `Language not found: ${output.languageCode}` });
+      }
+
+      // Get proofreading system prompt
+      const proofreadPromptSetting = await storage.getSetting('proofreading_system_prompt');
+      const proofreadSystemPrompt = proofreadPromptSetting?.value;
+
+      // Log proofreading start
+      logInfo(`Proofreading ${translation.id} into ${language.name}`, "AI");
+      const proofreadStartTime = Date.now();
+
+      // Update status to proofreading
+      await storage.updateTranslationOutputStatus(outputId, { proofreadStatus: 'proofreading' });
+
+      // Proof-read the translation
+      let proofreadText: string;
+      try {
+        proofreadText = await translationService.proofread(
+          translation.sourceText,
+          output.translatedText,
+          language.name,
+          model.modelIdentifier,
+          model.provider as 'openai' | 'anthropic',
+          proofreadSystemPrompt
+        );
+      } catch (error) {
+        const proofreadTime = Math.round((Date.now() - proofreadStartTime) / 1000);
+        logError(`Proofreading failed ${translation.id} into ${language.name}, time: ${proofreadTime}s`, "AI", error);
+        // Update status to failed
+        await storage.updateTranslationOutputStatus(outputId, { proofreadStatus: 'failed' });
+        throw error;
+      }
+
+      const proofreadTime = Math.round((Date.now() - proofreadStartTime) / 1000);
+      logInfo(`Proofread ${translation.id} into ${language.name}, time: ${proofreadTime}s`, "AI");
+
+      // Update the translation output with proof-read text and mark as completed
+      const updated = await storage.updateTranslationOutput(outputId, proofreadText);
+      await storage.updateTranslationOutputStatus(updated.id, { proofreadStatus: 'completed' });
+
+      res.json({ ...updated, proofreadStatus: 'completed' });
+    } catch (error) {
+      console.error("Error proofreading:", error);
+      res.status(500).json({ message: error instanceof Error ? error.message : "Proof-reading failed" });
     }
   });
 
@@ -446,5 +559,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   const httpServer = createServer(app);
+  
+  // Set server timeout to 20 minutes (1200000ms) for long-running AI requests
+  // This is higher than the OpenAI client timeout (15 minutes) to allow for network overhead
+  httpServer.timeout = 1200000; // 20 minutes
+  
+  // Set keepAlive timeout to prevent premature connection closure
+  httpServer.keepAliveTimeout = 65000; // 65 seconds
+  httpServer.headersTimeout = 66000; // 66 seconds (must be > keepAliveTimeout)
+  
   return httpServer;
 }

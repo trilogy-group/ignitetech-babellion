@@ -71,6 +71,37 @@ async function seed() {
     console.log("System prompt already exists or error:", error);
   }
 
+  // Create default proofreading system prompt setting
+  try {
+    await storage.upsertSetting({
+      key: "proofreading_system_prompt",
+      value: "You are a linguistic expert in proof reading an original text vs the translated text. You are to understand the original content, and then review the translated content. You will then output a proof read version of the translated content (that only) in the format it's given, preserving the html and any kind of formatting given in the translated content",
+    });
+    console.log("Created default proofreading system prompt");
+  } catch (error) {
+    console.log("Proofreading system prompt already exists or error:", error);
+  }
+
+  // Migrate existing translation outputs to set status as 'completed'
+  // This ensures existing translations are marked as completed
+  try {
+    const { db } = await import("./db");
+    const { translationOutputs } = await import("@shared/schema");
+    const { isNotNull } = await import("drizzle-orm");
+
+    await db
+      .update(translationOutputs)
+      .set({
+        translationStatus: 'completed' as any,
+        proofreadStatus: 'completed' as any,
+      })
+      .where(isNotNull(translationOutputs.translatedText));
+
+    console.log(`Migrated existing translation outputs to completed status`);
+  } catch (error) {
+    console.log("Migration of translation outputs status skipped or error:", error);
+  }
+
   console.log("Seeding complete!");
 }
 

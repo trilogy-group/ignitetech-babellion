@@ -45,6 +45,7 @@ export default function Settings() {
   const [openaiKey, setOpenaiKey] = useState("");
   const [anthropicKey, setAnthropicKey] = useState("");
   const [systemPrompt, setSystemPrompt] = useState("");
+  const [proofreadingPrompt, setProofreadingPrompt] = useState("");
   const [isAddModelOpen, setIsAddModelOpen] = useState(false);
   const [isAddLanguageOpen, setIsAddLanguageOpen] = useState(false);
   const [newModel, setNewModel] = useState({ name: "", provider: "openai", modelIdentifier: "", isDefault: false });
@@ -65,13 +66,17 @@ export default function Settings() {
     queryKey: ["/api/languages"],
   });
 
-  // Fetch system prompt
+  // Fetch system prompts
   const { data: settings } = useQuery<Setting[]>({
     queryKey: ["/api/admin/settings"],
     select: (data) => {
       const promptSetting = data.find(s => s.key === "translation_system_prompt");
       if (promptSetting && !systemPrompt) {
         setSystemPrompt(promptSetting.value);
+      }
+      const proofreadingPromptSetting = data.find(s => s.key === "proofreading_system_prompt");
+      if (proofreadingPromptSetting && !proofreadingPrompt) {
+        setProofreadingPrompt(proofreadingPromptSetting.value);
       }
       return data;
     },
@@ -111,6 +116,23 @@ export default function Settings() {
       toast({
         title: "System prompt saved",
         description: "Translation system prompt has been updated.",
+      });
+    },
+  });
+
+  // Save proofreading system prompt mutation
+  const saveProofreadingPromptMutation = useMutation({
+    mutationFn: async (value: string) => {
+      return await apiRequest("POST", "/api/admin/settings", {
+        key: "proofreading_system_prompt",
+        value,
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/settings"] });
+      toast({
+        title: "Proofreading prompt saved",
+        description: "Proofreading system prompt has been updated.",
       });
     },
   });
@@ -483,6 +505,41 @@ export default function Settings() {
                 {savePromptMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                 <Save className="mr-2 h-4 w-4" />
                 Save System Prompt
+              </Button>
+            </CardContent>
+          </Card>
+
+          {/* Proofreading System Prompt */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Proofreading System Prompt</CardTitle>
+              <CardDescription>
+                Customize the system prompt used for proof-reading translations
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="proofreading-prompt">System Prompt</Label>
+                <Textarea
+                  id="proofreading-prompt"
+                  value={proofreadingPrompt}
+                  onChange={(e) => setProofreadingPrompt(e.target.value)}
+                  className="min-h-48 font-mono text-sm"
+                  placeholder="Enter system prompt for proof-reading..."
+                  data-testid="textarea-proofreading-prompt"
+                />
+                <p className="text-xs text-muted-foreground">
+                  {proofreadingPrompt.length} characters
+                </p>
+              </div>
+              <Button
+                onClick={() => saveProofreadingPromptMutation.mutate(proofreadingPrompt)}
+                disabled={saveProofreadingPromptMutation.isPending}
+                data-testid="button-save-proofreading-prompt"
+              >
+                {saveProofreadingPromptMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                <Save className="mr-2 h-4 w-4" />
+                Save Proofreading Prompt
               </Button>
             </CardContent>
           </Card>

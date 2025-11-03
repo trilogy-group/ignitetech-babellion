@@ -4,6 +4,7 @@ import {
   index,
   jsonb,
   pgTable,
+  pgEnum,
   timestamp,
   varchar,
   text,
@@ -83,14 +84,20 @@ export type Translation = typeof translations.$inferSelect & {
   };
 };
 
+// Status enums for translation and proofreading
+export const translationStatusEnum = pgEnum('translation_status', ['pending', 'translating', 'completed', 'failed']);
+export const proofreadStatusEnum = pgEnum('proofread_status', ['pending', 'proofreading', 'completed', 'failed', 'skipped']);
+
 // Translation outputs table (stores individual language translations)
 export const translationOutputs = pgTable("translation_outputs", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   translationId: varchar("translation_id").notNull().references(() => translations.id, { onDelete: 'cascade' }),
   languageCode: varchar("language_code", { length: 10 }).notNull(),
   languageName: varchar("language_name", { length: 100 }).notNull(),
-  translatedText: text("translated_text").notNull(),
+  translatedText: text("translated_text"), // Nullable - can be empty during translation
   modelId: varchar("model_id").references(() => aiModels.id),
+  translationStatus: translationStatusEnum("translation_status").default('pending').notNull(),
+  proofreadStatus: proofreadStatusEnum("proofread_status").default('pending').notNull(),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });

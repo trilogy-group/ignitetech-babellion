@@ -45,6 +45,7 @@ export interface IStorage {
   getTranslationOutputs(translationId: string): Promise<TranslationOutput[]>;
   createTranslationOutput(output: InsertTranslationOutput): Promise<TranslationOutput>;
   updateTranslationOutput(id: string, text: string): Promise<TranslationOutput>;
+  updateTranslationOutputStatus(id: string, status: Partial<{ translationStatus: 'pending' | 'translating' | 'completed' | 'failed'; proofreadStatus: 'pending' | 'proofreading' | 'completed' | 'failed' | 'skipped' }>): Promise<TranslationOutput>;
   deleteTranslationOutput(id: string): Promise<void>;
   deleteTranslationOutputsByTranslationId(translationId: string): Promise<void>;
 
@@ -236,10 +237,22 @@ export class DatabaseStorage implements IStorage {
     return newOutput;
   }
 
-  async updateTranslationOutput(id: string, text: string): Promise<TranslationOutput> {
+  async updateTranslationOutput(id: string, text: string | null): Promise<TranslationOutput> {
     const [updated] = await db
       .update(translationOutputs)
       .set({ translatedText: text, updatedAt: new Date() })
+      .where(eq(translationOutputs.id, id))
+      .returning();
+    return updated;
+  }
+
+  async updateTranslationOutputStatus(
+    id: string,
+    status: Partial<{ translationStatus: 'pending' | 'translating' | 'completed' | 'failed'; proofreadStatus: 'pending' | 'proofreading' | 'completed' | 'failed' | 'skipped' }>
+  ): Promise<TranslationOutput> {
+    const [updated] = await db
+      .update(translationOutputs)
+      .set({ ...status, updatedAt: new Date() })
       .where(eq(translationOutputs.id, id))
       .returning();
     return updated;

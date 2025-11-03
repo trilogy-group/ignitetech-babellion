@@ -1,6 +1,7 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { Plus, Trash2, Loader2, Copy, Check, Lock, Globe, Pencil, FileText, Save, X } from "lucide-react";
+import { useLocation } from "wouter";
+import { Plus, Trash2, Loader2, Copy, Check, Lock, Globe, Pencil, FileText, Save, X, RotateCw } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -43,6 +44,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { useToast } from "@/hooks/use-toast";
+import { ToastAction } from "@/components/ui/toast";
 import { useAuth } from "@/hooks/useAuth";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import type { Translation, TranslationOutput, AiModel, Language } from "@shared/schema";
@@ -53,6 +55,7 @@ import { Switch } from "@/components/ui/switch";
 export default function Translate() {
   const { toast } = useToast();
   const { user } = useAuth();
+  const [location, setLocation] = useLocation();
   const [selectedTranslationId, setSelectedTranslationId] = useState<string | null>(null);
   const [sourceText, setSourceText] = useState("");
   const [title, setTitle] = useState("Untitled Translation");
@@ -69,9 +72,12 @@ export default function Translate() {
   const [activeLanguageTab, setActiveLanguageTab] = useState<string>("");
   const [editedOutputs, setEditedOutputs] = useState<Record<string, string>>({});
   const [isPrivate, setIsPrivate] = useState(false);
-  const [translatingLanguages, setTranslatingLanguages] = useState<Set<string>>(new Set());
+  // Track progress per translation ID to persist across card switches
+  const [translatingLanguages, setTranslatingLanguages] = useState<Record<string, Set<string>>>({});
+  const [proofreadingLanguages, setProofreadingLanguages] = useState<Record<string, Set<string>>>({});
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
-  const [translationRuntimes, setTranslationRuntimes] = useState<Record<string, number>>({});
+  const [translationRuntimes, setTranslationRuntimes] = useState<Record<string, Record<string, number>>>({});
+  const [proofreadRuntimes, setProofreadRuntimes] = useState<Record<string, Record<string, number>>>({});
   const [isGoogleDocsPickerOpen, setIsGoogleDocsPickerOpen] = useState(false);
   const [isLoadingGoogleDoc, setIsLoadingGoogleDoc] = useState(false);
 
@@ -104,13 +110,79 @@ export default function Translate() {
     setSelectedModel(defaultModel.id);
   }
 
-  // Auto-select first translation on load
+  // Track if we've initialized to avoid loops
+  const hasInitialized = useRef(false);
+  // Ref to track current selectedTranslationId for hashchange handler
+  const selectedTranslationIdRef = useRef<string | null>(null);
+  
+  // Keep ref in sync with state
   useEffect(() => {
-    if (!translationsLoading && translations.length > 0 && !selectedTranslationId) {
+    selectedTranslationIdRef.current = selectedTranslationId;
+  }, [selectedTranslationId]);
+
+  // Handle hash-based URL navigation on initial load only
+  useEffect(() => {
+    if (!translationsLoading && translations.length > 0 && !hasInitialized.current && !selectedTranslationId) {
+      hasInitialized.current = true;
+      const hash = window.location.hash.slice(1); // Remove #
+      if (hash) {
+        const translation = translations.find(t => t.id === hash);
+        if (translation) {
+          handleSelectTranslation(translation);
+          return; // Exit early to avoid auto-selecting first
+        }
+      }
+      // Auto-select first translation if no hash
       const firstTranslation = translations[0];
-      handleSelectTranslation(firstTranslation);
+      if (firstTranslation) {
+        handleSelectTranslation(firstTranslation);
+      }
     }
-  }, [translations, translationsLoading, selectedTranslationId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [translationsLoading]);
+
+  // Flag to prevent hashchange handler from running during programmatic updates
+  const isUpdatingHashRef = useRef(false);
+
+  // Listen to browser hash changes (back/forward buttons) - ignore programmatic updates
+  useEffect(() => {
+    const handleHashChange = () => {
+      // Ignore if we're programmatically updating the hash
+      if (isUpdatingHashRef.current) {
+        return;
+      }
+      if (!translationsLoading && translations.length > 0) {
+        const hash = window.location.hash.slice(1);
+        if (hash) {
+          const translation = translations.find(t => t.id === hash);
+          // Use ref to get current selectedTranslationId value
+          if (translation && translation.id !== selectedTranslationIdRef.current) {
+            handleSelectTranslation(translation);
+          }
+        }
+      }
+    };
+
+    window.addEventListener('hashchange', handleHashChange);
+    return () => window.removeEventListener('hashchange', handleHashChange);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [translations, translationsLoading]); // Remove selectedTranslationId from deps to avoid recreating listener
+
+  // Update URL hash when translation is manually selected (use replaceState to avoid hashchange event)
+  useEffect(() => {
+    if (selectedTranslationId && hasInitialized.current) {
+      const currentHash = window.location.hash.slice(1);
+      if (currentHash !== selectedTranslationId) {
+        isUpdatingHashRef.current = true;
+        // Use replaceState to avoid triggering hashchange event
+        window.history.replaceState(null, '', `${window.location.pathname}#${selectedTranslationId}`);
+        // Reset flag after a tick to allow future hashchange events
+        setTimeout(() => {
+          isUpdatingHashRef.current = false;
+        }, 100);
+      }
+    }
+  }, [selectedTranslationId]);
 
   // Create new translation mutation
   const createMutation = useMutation({
@@ -214,6 +286,19 @@ export default function Translate() {
     },
   });
 
+  // Proof-read translation mutation
+  const proofreadMutation = useMutation({
+    mutationFn: async ({ outputId, translationId }: { outputId: string; translationId: string }) => {
+      const response = await apiRequest("POST", "/api/proofread-translation", {
+        outputId,
+      });
+      return { output: await response.json() as TranslationOutput, translationId };
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/translations", data.translationId, "outputs"] });
+    },
+  });
+
   const handleSelectTranslation = (translation: Translation) => {
     setSelectedTranslationId(translation.id);
     setSourceText(translation.sourceText);
@@ -225,8 +310,8 @@ export default function Translate() {
       setSelectedModel(translation.lastUsedModelId);
     }
     setEditedOutputs({});
-    setTranslatingLanguages(new Set());
-    setTranslationRuntimes({});
+    // Don't clear progress state - preserve it per translation ID
+    // Progress is tracked per translation ID, so switching cards doesn't lose progress
     
     // Auto-select first language tab if languages exist
     if (translation.selectedLanguages && translation.selectedLanguages.length > 0) {
@@ -382,6 +467,155 @@ export default function Translate() {
     setIsLanguageDialogOpen(false);
   };
 
+  const handleRerunLanguage = async (langCode: string) => {
+    if (!selectedTranslationId) {
+      toast({
+        title: "No translation selected",
+        description: "Please select a translation first.",
+        variant: "destructive",
+      });
+      return;
+    }
+    if (!selectedModel) {
+      toast({
+        title: "No model selected",
+        description: "Please select an AI model.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const currentTranslationId = selectedTranslationId;
+    const language = languages.find(l => l.code === langCode);
+    const languageName = language?.name || langCode;
+
+    // Mark this language as translating
+    setTranslatingLanguages(prev => {
+      const newSet = new Set(prev[currentTranslationId] || []);
+      newSet.add(langCode);
+      return {
+        ...prev,
+        [currentTranslationId]: newSet
+      };
+    });
+
+    // Clear previous runtimes for this language
+    setTranslationRuntimes(prev => ({
+      ...prev,
+      [currentTranslationId]: {
+        ...(prev[currentTranslationId] || {}),
+        [langCode]: undefined
+      }
+    }));
+    setProofreadRuntimes(prev => ({
+      ...prev,
+      [currentTranslationId]: {
+        ...(prev[currentTranslationId] || {}),
+        [langCode]: undefined
+      }
+    }));
+
+    try {
+      const startTime = Date.now();
+      const output = await translateSingleMutation.mutateAsync({ languageCode: langCode }) as TranslationOutput;
+      const endTime = Date.now();
+      const duration = (endTime - startTime) / 1000;
+      
+      // Store the runtime
+      setTranslationRuntimes(prev => ({
+        ...prev,
+        [currentTranslationId]: {
+          ...(prev[currentTranslationId] || {}),
+          [langCode]: duration
+        }
+      }));
+      
+      // Remove from translating set
+      setTranslatingLanguages(prev => {
+        const newSet = new Set(prev[currentTranslationId] || []);
+        newSet.delete(langCode);
+        return {
+          ...prev,
+          [currentTranslationId]: newSet
+        };
+      });
+
+      // Trigger proof-reading after translation completes
+      if (output) {
+        toast({
+          title: "Proof Reading in progress",
+          description: `Proof Reading: ${languageName} in progress`,
+        });
+
+        // Add to proofreading set
+        setProofreadingLanguages(prev => {
+          const newSet = new Set(prev[currentTranslationId] || []);
+          newSet.add(langCode);
+          return {
+            ...prev,
+            [currentTranslationId]: newSet
+          };
+        });
+
+        // Proof-read the translation
+        const proofreadStartTime = Date.now();
+        try {
+          await proofreadMutation.mutateAsync({ outputId: output.id, translationId: currentTranslationId });
+          const proofreadEndTime = Date.now();
+          const proofreadDuration = (proofreadEndTime - proofreadStartTime) / 1000;
+          
+          // Store the proof-reading runtime
+          setProofreadRuntimes(prev => ({
+            ...prev,
+            [currentTranslationId]: {
+              ...(prev[currentTranslationId] || {}),
+              [langCode]: proofreadDuration
+            }
+          }));
+        } catch (error) {
+          console.error(`Failed to proofread ${langCode}:`, error);
+          toast({
+            title: "Proof-reading failed",
+            description: error instanceof Error ? error.message : `Failed to proofread ${languageName}`,
+            variant: "destructive",
+          });
+        } finally {
+          // Remove from proofreading set
+          setProofreadingLanguages(prev => {
+            const newSet = new Set(prev[currentTranslationId] || []);
+            newSet.delete(langCode);
+            return {
+              ...prev,
+              [currentTranslationId]: newSet
+            };
+          });
+        }
+      }
+
+      toast({
+        title: "Translation complete",
+        description: `Successfully retranslated to ${languageName}.`,
+      });
+    } catch (error) {
+      console.error(`Failed to rerun translation for ${langCode}:`, error);
+      toast({
+        title: "Translation failed",
+        description: error instanceof Error ? error.message : `Failed to retranslate ${languageName}`,
+        variant: "destructive",
+      });
+      
+      // Remove from translating set on error
+      setTranslatingLanguages(prev => {
+        const newSet = new Set(prev[currentTranslationId] || []);
+        newSet.delete(langCode);
+        return {
+          ...prev,
+          [currentTranslationId]: newSet
+        };
+      });
+    }
+  };
+
   const handleTranslate = async () => {
     if (!selectedTranslationId) {
       toast({
@@ -414,43 +648,122 @@ export default function Translate() {
       data: { lastUsedModelId: selectedModel },
     });
 
-    // Mark all languages as translating
-    setTranslatingLanguages(new Set(selectedLanguages));
+    const currentTranslationId = selectedTranslationId;
+    if (!currentTranslationId) return;
+
+    // Mark all languages as translating for this translation ID
+    setTranslatingLanguages(prev => ({
+      ...prev,
+      [currentTranslationId]: new Set(selectedLanguages)
+    }));
     
     // Set active tab to first language
     if (selectedLanguages.length > 0) {
       setActiveLanguageTab(selectedLanguages[0]);
     }
 
-    // Clear previous runtimes
-    setTranslationRuntimes({});
+    // Clear previous runtimes for this translation
+    setTranslationRuntimes(prev => ({
+      ...prev,
+      [currentTranslationId]: {}
+    }));
+    setProofreadRuntimes(prev => ({
+      ...prev,
+      [currentTranslationId]: {}
+    }));
 
     // Translate all languages in parallel
     const promises = selectedLanguages.map(async (langCode) => {
       const startTime = Date.now();
       try {
-        await translateSingleMutation.mutateAsync({ languageCode: langCode });
+        const output = await translateSingleMutation.mutateAsync({ languageCode: langCode }) as TranslationOutput;
         const endTime = Date.now();
         const duration = (endTime - startTime) / 1000; // Convert to seconds
         
-        // Store the runtime
+        // Store the runtime for this translation ID
         setTranslationRuntimes(prev => ({
           ...prev,
-          [langCode]: duration
+          [currentTranslationId]: {
+            ...(prev[currentTranslationId] || {}),
+            [langCode]: duration
+          }
         }));
         
         // Remove from translating set when done
         setTranslatingLanguages(prev => {
-          const newSet = new Set(prev);
+          const newSet = new Set(prev[currentTranslationId] || []);
           newSet.delete(langCode);
-          return newSet;
+          return {
+            ...prev,
+            [currentTranslationId]: newSet
+          };
         });
+
+        // Trigger proof-reading after translation completes
+        if (output) {
+          // Get language name for toast
+          const language = languages.find(l => l.code === langCode);
+          const languageName = language?.name || langCode;
+          
+          // Show proof-reading toast
+          toast({
+            title: "Proof Reading in progress",
+            description: `Proof Reading: ${languageName} in progress`,
+          });
+
+          // Add to proofreading set for this translation ID
+          setProofreadingLanguages(prev => {
+            const newSet = new Set(prev[currentTranslationId] || []);
+            newSet.add(langCode);
+            return {
+              ...prev,
+              [currentTranslationId]: newSet
+            };
+          });
+
+          // Proof-read the translation
+          const proofreadStartTime = Date.now();
+          try {
+            await proofreadMutation.mutateAsync({ outputId: output.id, translationId: currentTranslationId });
+            const proofreadEndTime = Date.now();
+            const proofreadDuration = (proofreadEndTime - proofreadStartTime) / 1000;
+            
+            // Store the proof-reading runtime for this translation ID
+            setProofreadRuntimes(prev => ({
+              ...prev,
+              [currentTranslationId]: {
+                ...(prev[currentTranslationId] || {}),
+                [langCode]: proofreadDuration
+              }
+            }));
+          } catch (error) {
+            console.error(`Failed to proofread ${langCode}:`, error);
+            toast({
+              title: "Proof-reading failed",
+              description: error instanceof Error ? error.message : `Failed to proofread ${languageName}`,
+              variant: "destructive",
+            });
+          } finally {
+            // Remove from proofreading set
+            setProofreadingLanguages(prev => {
+              const newSet = new Set(prev[currentTranslationId] || []);
+              newSet.delete(langCode);
+              return {
+                ...prev,
+                [currentTranslationId]: newSet
+              };
+            });
+          }
+        }
       } catch (error) {
         console.error(`Failed to translate to ${langCode}:`, error);
         setTranslatingLanguages(prev => {
-          const newSet = new Set(prev);
+          const newSet = new Set(prev[currentTranslationId] || []);
           newSet.delete(langCode);
-          return newSet;
+          return {
+            ...prev,
+            [currentTranslationId]: newSet
+          };
         });
         throw error;
       }
@@ -458,9 +771,23 @@ export default function Translate() {
 
     try {
       await Promise.all(promises);
+      const translation = translations.find(t => t.id === currentTranslationId);
       toast({
         title: "Translation complete",
         description: `Successfully translated to ${selectedLanguages.length} language${selectedLanguages.length > 1 ? 's' : ''}.`,
+        action: (
+          <ToastAction
+            altText="View translation"
+            onClick={() => {
+              window.location.hash = currentTranslationId;
+              if (translation) {
+                handleSelectTranslation(translation);
+              }
+            }}
+          >
+            View
+          </ToastAction>
+        ),
       });
     } catch (error) {
       toast({
@@ -765,38 +1092,47 @@ export default function Translate() {
           </div>
 
           {/* Translate Button */}
-          {selectedLanguages.length === 0 && selectedTranslationId ? (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <span tabIndex={0}>
-                  <Button
-                    onClick={handleTranslate}
-                    disabled={!selectedTranslationId || !canEditSelected || translatingLanguages.size > 0 || selectedLanguages.length === 0}
-                    className="flex-shrink-0"
-                    data-testid="button-translate"
-                    variant="outline"
-                  >
-                    {translatingLanguages.size > 0 && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                    Translate
-                  </Button>
-                </span>
-              </TooltipTrigger>
-              <TooltipContent>
-                <p>Please select at least one language to translate</p>
-              </TooltipContent>
-            </Tooltip>
-          ) : (
-            <Button
-              onClick={handleTranslate}
-              disabled={!selectedTranslationId || !canEditSelected || translatingLanguages.size > 0 || selectedLanguages.length === 0}
-              className="flex-shrink-0"
-              data-testid="button-translate"
-              variant="outline"
-            >
-              {translatingLanguages.size > 0 && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              Translate
-            </Button>
-          )}
+          {(() => {
+            const currentTranslating = selectedTranslationId ? translatingLanguages[selectedTranslationId] : undefined;
+            const isTranslating = (currentTranslating?.size ?? 0) > 0;
+            
+            if (selectedLanguages.length === 0 && selectedTranslationId) {
+              return (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span tabIndex={0}>
+                      <Button
+                        onClick={handleTranslate}
+                        disabled={!selectedTranslationId || !canEditSelected || isTranslating || selectedLanguages.length === 0}
+                        className="flex-shrink-0"
+                        data-testid="button-translate"
+                        variant="outline"
+                      >
+                        {isTranslating && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                        Translate
+                      </Button>
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    <p>Please select at least one language to translate</p>
+                  </TooltipContent>
+                </Tooltip>
+              );
+            } else {
+              return (
+                <Button
+                  onClick={handleTranslate}
+                  disabled={!selectedTranslationId || !canEditSelected || isTranslating || selectedLanguages.length === 0}
+                  className="flex-shrink-0"
+                  data-testid="button-translate"
+                  variant="outline"
+                >
+                  {isTranslating && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                  Translate
+                </Button>
+              );
+            }
+          })()}
           </div>
         </TooltipProvider>
 
@@ -934,14 +1270,18 @@ export default function Translate() {
               <TabsList className="mx-4 mt-4 w-auto justify-start overflow-x-auto overflow-y-hidden flex-shrink-0">
                 {selectedLanguages.map((langCode) => {
                   const language = activeLanguages.find(l => l.code === langCode);
-                  const isTranslating = translatingLanguages.has(langCode);
+                  const currentTranslating = selectedTranslationId ? translatingLanguages[selectedTranslationId] : undefined;
+                  const currentProofreading = selectedTranslationId ? proofreadingLanguages[selectedTranslationId] : undefined;
+                  const isTranslating = currentTranslating?.has(langCode) ?? false;
+                  const isProofreading = currentProofreading?.has(langCode) ?? false;
                   const output = outputs.find(o => o.languageCode === langCode);
-                  const isCompleted = !isTranslating && output;
+                  const isCompleted = !isTranslating && !isProofreading && output;
                   
                   return (
                     <TabsTrigger key={langCode} value={langCode} data-testid={`tab-${langCode}`} className="gap-2 h-20">
                       {language?.name || langCode}
                       {isTranslating && <Loader2 className="h-3 w-3 animate-spin" />}
+                      {isProofreading && <Loader2 className="h-3 w-3 animate-spin text-blue-500" />}
                       {isCompleted && <Check className="h-3 w-3 text-green-600" />}
                     </TabsTrigger>
                   );
@@ -951,7 +1291,10 @@ export default function Translate() {
               {selectedLanguages.map((langCode) => {
                 const output = outputs.find(o => o.languageCode === langCode);
                 const language = activeLanguages.find(l => l.code === langCode);
-                const isTranslating = translatingLanguages.has(langCode);
+                const currentTranslating = selectedTranslationId ? translatingLanguages[selectedTranslationId] : undefined;
+                const currentProofreading = selectedTranslationId ? proofreadingLanguages[selectedTranslationId] : undefined;
+                const isTranslating = currentTranslating?.has(langCode) ?? false;
+                const isProofreading = currentProofreading?.has(langCode) ?? false;
                 
                 return <TabsContent
                   key={langCode}
@@ -966,28 +1309,60 @@ export default function Translate() {
                         <p className="text-xs text-muted-foreground mt-1">Please wait</p>
                       </div>
                     </div>
-                  ) : output ? (
+                  ) : isProofreading && output ? (
                     <div className="flex flex-col h-full px-6 pt-4 pb-6 gap-4">
                       {/* Header with language and copy button */}
                       <div className="flex items-center justify-between flex-shrink-0">
-                        <Label className="text-sm font-medium">{output.languageName}</Label>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleCopyOutput(editedOutputs[output.id] ?? output.translatedText, output.id)}
-                          data-testid={`button-copy-${output.id}`}
-                        >
-                          {copiedOutputId === output.id ? (
-                            <Check className="h-4 w-4" />
-                          ) : (
-                            <Copy className="h-4 w-4" />
-                          )}
-                        </Button>
+                        <div className="flex items-center gap-2">
+                          <Label className="text-sm font-medium">
+                            {output.languageName}
+                            {output.translationStatus === 'completed' && (
+                              <span className="ml-2 inline-flex items-center gap-1 text-green-600">
+                                <Check className="h-3 w-3" />
+                                <span className="text-xs">Translated</span>
+                              </span>
+                            )}
+                            {output.proofreadStatus === 'completed' && (
+                              <span className="ml-2 inline-flex items-center gap-1 text-green-600">
+                                <Check className="h-3 w-3" />
+                                <span className="text-xs">Proof read</span>
+                              </span>
+                            )}
+                          </Label>
+                          <Badge variant="outline" className="text-xs">
+                            <Loader2 className="h-3 w-3 animate-spin mr-1" />
+                            Proof-reading...
+                          </Badge>
+                        </div>
+                        <div className="flex items-center gap-1">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleRerunLanguage(langCode)}
+                            disabled={isTranslating}
+                            data-testid={`button-rerun-${output.id}`}
+                            title="Rerun translation"
+                          >
+                            <RotateCw className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleCopyOutput(editedOutputs[output.id] ?? output.translatedText ?? '', output.id)}
+                            data-testid={`button-copy-${output.id}`}
+                          >
+                            {copiedOutputId === output.id ? (
+                              <Check className="h-4 w-4" />
+                            ) : (
+                              <Copy className="h-4 w-4" />
+                            )}
+                          </Button>
+                        </div>
                       </div>
 
-                      {/* Editor with internal scrolling */}
+                      {/* Editor with internal scrolling - show current translation during proof-reading */}
                       <RichTextEditor
-                        content={editedOutputs[output.id] ?? output.translatedText}
+                        content={editedOutputs[output.id] ?? output.translatedText ?? ''}
                         onChange={(html) => setEditedOutputs(prev => ({ ...prev, [output.id]: html }))}
                         placeholder="Translation will appear here..."
                         editable={canEditSelected}
@@ -1000,9 +1375,85 @@ export default function Translate() {
                         <div className="space-y-0.5">
                           <div>
                             Model: {models.find(m => m.id === output.modelId)?.name || "Unknown"}
-                            {translationRuntimes[langCode] && (
+                            {selectedTranslationId && translationRuntimes[selectedTranslationId]?.[langCode] && (
                               <span className="ml-1">
-                                ({translationRuntimes[langCode].toFixed(1)}s)
+                                (Translation: {translationRuntimes[selectedTranslationId][langCode].toFixed(1)}s)
+                              </span>
+                            )}
+                          </div>
+                          <div>
+                            Last Updated: {formatDistanceToNow(new Date(output.updatedAt), { addSuffix: true })}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ) : output ? (
+                    <div className="flex flex-col h-full px-6 pt-4 pb-6 gap-4">
+                      {/* Header with language and copy button */}
+                      <div className="flex items-center justify-between flex-shrink-0">
+                        <Label className="text-sm font-medium">
+                          {output.languageName}
+                          {output.translationStatus === 'completed' && (
+                            <span className="ml-2 inline-flex items-center gap-1 text-green-600">
+                              <Check className="h-3 w-3" />
+                              <span className="text-xs">Translated</span>
+                            </span>
+                          )}
+                          {output.proofreadStatus === 'completed' && (
+                            <span className="ml-2 inline-flex items-center gap-1 text-green-600">
+                              <Check className="h-3 w-3" />
+                              <span className="text-xs">Proof read</span>
+                            </span>
+                          )}
+                        </Label>
+                        <div className="flex items-center gap-1">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleRerunLanguage(langCode)}
+                            disabled={isTranslating}
+                            data-testid={`button-rerun-${output.id}`}
+                            title="Rerun translation"
+                          >
+                            <RotateCw className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleCopyOutput(editedOutputs[output.id] ?? output.translatedText ?? '', output.id)}
+                            data-testid={`button-copy-${output.id}`}
+                          >
+                            {copiedOutputId === output.id ? (
+                              <Check className="h-4 w-4" />
+                            ) : (
+                              <Copy className="h-4 w-4" />
+                            )}
+                          </Button>
+                        </div>
+                      </div>
+
+                      {/* Editor with internal scrolling */}
+                      <RichTextEditor
+                        content={editedOutputs[output.id] ?? output.translatedText ?? ''}
+                        onChange={(html) => setEditedOutputs(prev => ({ ...prev, [output.id]: html }))}
+                        placeholder="Translation will appear here..."
+                        editable={canEditSelected}
+                        className="flex-1 overflow-auto"
+                        editorKey={`output-${output.id}`}
+                      />
+
+                      {/* Footer pinned to bottom */}
+                      <div className="flex items-center justify-between text-xs text-muted-foreground flex-shrink-0 pt-2">
+                        <div className="space-y-0.5">
+                          <div>
+                            Model: {models.find(m => m.id === output.modelId)?.name || "Unknown"}
+                            {selectedTranslationId && (translationRuntimes[selectedTranslationId]?.[langCode] || proofreadRuntimes[selectedTranslationId]?.[langCode]) && (
+                              <span className="ml-1">
+                                (
+                                {translationRuntimes[selectedTranslationId]?.[langCode] && `Translation: ${translationRuntimes[selectedTranslationId][langCode].toFixed(1)}s`}
+                                {translationRuntimes[selectedTranslationId]?.[langCode] && proofreadRuntimes[selectedTranslationId]?.[langCode] && '; '}
+                                {proofreadRuntimes[selectedTranslationId]?.[langCode] && `Proof Read: ${proofreadRuntimes[selectedTranslationId][langCode].toFixed(1)}s`}
+                                )
                               </span>
                             )}
                           </div>
@@ -1013,7 +1464,7 @@ export default function Translate() {
 
                         {/* Show Save/Discard buttons when there are unsaved changes */}
                         {editedOutputs[output.id] !== undefined && 
-                         editedOutputs[output.id] !== output.translatedText && (
+                         editedOutputs[output.id] !== (output.translatedText ?? '') && (
                           <div className="flex items-center gap-2">
                             <Button
                               variant="ghost"
@@ -1044,11 +1495,33 @@ export default function Translate() {
                       </div>
                     </div>
                   ) : (
-                    <div className="flex h-full items-center justify-center p-8 text-center">
-                      <div>
-                        <p className="text-sm text-muted-foreground">
-                          Translate to see content here
+                    <div className="flex h-full items-center justify-center p-8">
+                      <div className="text-center">
+                        <p className="mb-4 text-sm font-medium text-muted-foreground">
+                          No translation for {language?.name || langCode}
                         </p>
+                        <Button
+                          onClick={() => handleRerunLanguage(langCode)}
+                          disabled={isTranslating || !selectedModel || !selectedTranslationId}
+                          data-testid={`button-translate-${langCode}`}
+                        >
+                          {isTranslating ? (
+                            <>
+                              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                              Translating...
+                            </>
+                          ) : (
+                            <>
+                              <FileText className="h-4 w-4 mr-2" />
+                              Translate
+                            </>
+                          )}
+                        </Button>
+                        {(!selectedModel || !selectedTranslationId) && (
+                          <p className="mt-2 text-xs text-muted-foreground">
+                            {!selectedModel ? "Please select a model first" : "Please select a translation first"}
+                          </p>
+                        )}
                       </div>
                     </div>
                   )}

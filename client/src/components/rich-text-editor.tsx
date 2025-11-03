@@ -1,5 +1,5 @@
 import { useEditor, EditorContent, Editor } from '@tiptap/react';
-import { useEffect } from 'react';
+import { useEffect, useMemo } from 'react';
 import StarterKit from '@tiptap/starter-kit';
 import Placeholder from '@tiptap/extension-placeholder';
 import Link from '@tiptap/extension-link';
@@ -194,22 +194,37 @@ export function RichTextEditor({
   className,
   editorKey,
 }: RichTextEditorProps) {
-  const editor = useEditor({
-    extensions: [
+  // Memoize extensions to prevent duplicate warnings and unnecessary recreations
+  // Each extension instance is created once and reused across renders
+  const extensions = useMemo(() => {
+    // Create extension instances once to avoid TipTap duplicate warnings
+    const linkExtension = Link.configure({
+      openOnClick: false,
+    });
+    
+    const underlineExtension = Underline;
+    
+    const textAlignExtension = TextAlign.configure({
+      types: ['heading', 'paragraph'],
+    });
+    
+    const placeholderExtension = Placeholder.configure({
+      placeholder,
+    });
+    
+    return [
       StarterKit,
-      Underline,
-      Link.configure({
-        openOnClick: false,
-      }),
-      TextAlign.configure({
-        types: ['heading', 'paragraph'],
-      }),
+      underlineExtension,
+      linkExtension,
+      textAlignExtension,
       TextStyle,
       Color,
-      Placeholder.configure({
-        placeholder,
-      }),
-    ],
+      placeholderExtension,
+    ];
+  }, [placeholder]);
+
+  const editor = useEditor({
+    extensions,
     content,
     editable,
     onUpdate: ({ editor }) => {
@@ -234,7 +249,7 @@ export function RichTextEditor({
         ),
       },
     },
-  }, [editorKey]); // Re-create editor when key changes
+  }, [editorKey, extensions]); // Re-create editor when key or extensions change
 
   // Update editor content when prop changes
   useEffect(() => {
@@ -258,7 +273,7 @@ export function RichTextEditor({
 
   return (
     <div className={cn('border rounded-md bg-background rich-text-wrapper', className)}>
-      <style jsx>{`
+      <style>{`
         .rich-text-wrapper .ProseMirror * {
           color: inherit !important;
         }

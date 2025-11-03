@@ -1,5 +1,5 @@
 import { useEditor, EditorContent, Editor } from '@tiptap/react';
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import StarterKit from '@tiptap/starter-kit';
 import Placeholder from '@tiptap/extension-placeholder';
 import Link from '@tiptap/extension-link';
@@ -21,7 +21,8 @@ import {
   AlignRight,
   Link as LinkIcon,
   Undo,
-  Redo
+  Redo,
+  MessageSquare
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -34,9 +35,38 @@ interface RichTextEditorProps {
   editable?: boolean;
   className?: string;
   editorKey?: string; // Add unique key for multiple editors
+  showFeedbackButton?: boolean; // Show feedback button on text selection
+  onFeedbackClick?: (selectedText: string) => void; // Callback when feedback is clicked
 }
 
-const MenuBar = ({ editor }: { editor: Editor | null }) => {
+const MenuBar = ({ 
+  editor, 
+  showFeedbackButton, 
+  onFeedbackClick 
+}: { 
+  editor: Editor | null;
+  showFeedbackButton?: boolean;
+  onFeedbackClick?: (selectedText: string) => void;
+}) => {
+  const [hasSelection, setHasSelection] = useState(false);
+
+  useEffect(() => {
+    if (!editor) return;
+
+    const updateSelection = () => {
+      const { from, to } = editor.state.selection;
+      setHasSelection(from !== to);
+    };
+
+    editor.on('selectionUpdate', updateSelection);
+    editor.on('update', updateSelection);
+
+    return () => {
+      editor.off('selectionUpdate', updateSelection);
+      editor.off('update', updateSelection);
+    };
+  }, [editor]);
+
   if (!editor) {
     return null;
   }
@@ -45,6 +75,17 @@ const MenuBar = ({ editor }: { editor: Editor | null }) => {
     const url = window.prompt('Enter URL');
     if (url) {
       editor.chain().focus().setLink({ href: url }).run();
+    }
+  };
+
+  const handleFeedbackClick = () => {
+    if (!onFeedbackClick) return;
+    
+    const { from, to } = editor.state.selection;
+    const selectedText = editor.state.doc.textBetween(from, to, ' ');
+    
+    if (selectedText) {
+      onFeedbackClick(selectedText);
     }
   };
 
@@ -183,6 +224,21 @@ const MenuBar = ({ editor }: { editor: Editor | null }) => {
       >
         <Redo className="h-3.5 w-3.5" />
       </Button>
+      {showFeedbackButton && hasSelection && (
+        <>
+          <div className="w-px h-5 bg-border mx-0.5" />
+          <Button
+            type="button"
+            variant="default"
+            size="sm"
+            onClick={handleFeedbackClick}
+            className="h-7 px-2 bg-primary text-primary-foreground"
+          >
+            <MessageSquare className="h-3.5 w-3.5 mr-1" />
+            Feedback
+          </Button>
+        </>
+      )}
     </div>
   );
 };
@@ -195,6 +251,8 @@ export function RichTextEditor({
   editable = true,
   className,
   editorKey,
+  showFeedbackButton = false,
+  onFeedbackClick,
 }: RichTextEditorProps) {
   // Memoize extensions to prevent duplicate warnings and unnecessary recreations
   // Each extension instance is created once and reused across renders
@@ -286,7 +344,7 @@ export function RichTextEditor({
           color: hsl(var(--primary)) !important;
         }
       `}</style>
-      {editable && <MenuBar editor={editor} />}
+      {editable && <MenuBar editor={editor} showFeedbackButton={showFeedbackButton} onFeedbackClick={onFeedbackClick} />}
       <EditorContent editor={editor} />
     </div>
   );

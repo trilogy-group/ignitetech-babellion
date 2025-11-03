@@ -8,6 +8,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { AppHeader } from "@/components/app-header";
 import Landing from "@/pages/landing";
 import Translate from "@/pages/translate";
+import Feedback from "@/pages/feedback";
 import Settings from "@/pages/settings";
 import Privacy from "@/pages/privacy";
 import Terms from "@/pages/terms";
@@ -43,6 +44,34 @@ function ProtectedTranslate() {
   return <Translate />;
 }
 
+// Wrapper component to handle unauthenticated access to /feedback
+function ProtectedFeedback() {
+  const { isAuthenticated, isLoading } = useAuth();
+  const { toast } = useToast();
+  const [_location, setLocation] = useLocation();
+
+  useEffect(() => {
+    if (!isLoading && !isAuthenticated) {
+      toast({
+        title: "Authentication Required",
+        description: "Please sign in to access feedback.",
+        variant: "default",
+      });
+      setLocation("/");
+    }
+  }, [isAuthenticated, isLoading, toast, setLocation]);
+
+  if (isLoading) {
+    return null;
+  }
+
+  if (!isAuthenticated) {
+    return null;
+  }
+
+  return <Feedback />;
+}
+
 // Reference: javascript_log_in_with_replit blueprint
 function Router() {
   const { isAuthenticated, isLoading, user } = useAuth();
@@ -60,6 +89,9 @@ function Router() {
       
       {/* Protected translate route */}
       <Route path="/translate" component={ProtectedTranslate} />
+      
+      {/* Protected feedback route */}
+      <Route path="/feedback" component={ProtectedFeedback} />
       
       {/* Admin-only settings route */}
       {user?.isAdmin && <Route path="/settings" component={Settings} />}

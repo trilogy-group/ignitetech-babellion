@@ -7,6 +7,7 @@ import {
   languages,
   settings,
   apiKeys,
+  translationFeedback,
   type User,
   type UpsertUser,
   type Translation,
@@ -21,6 +22,8 @@ import {
   type InsertSetting,
   type ApiKey,
   type InsertApiKey,
+  type TranslationFeedback,
+  type InsertTranslationFeedback,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, or, desc } from "drizzle-orm";
@@ -72,6 +75,11 @@ export interface IStorage {
   getApiKey(provider: string): Promise<ApiKey | undefined>;
   upsertApiKey(apiKey: InsertApiKey): Promise<ApiKey>;
   getApiKeysStatus(): Promise<{ openai: boolean; anthropic: boolean }>;
+
+  // Translation feedback operations
+  createTranslationFeedback(feedback: InsertTranslationFeedback): Promise<TranslationFeedback>;
+  getTranslationFeedback(translationId: string): Promise<TranslationFeedback[]>;
+  getAllTranslationFeedback(): Promise<TranslationFeedback[]>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -374,6 +382,84 @@ export class DatabaseStorage implements IStorage {
       openai: allKeys.some(k => k.provider === 'openai'),
       anthropic: allKeys.some(k => k.provider === 'anthropic'),
     };
+  }
+
+  // Translation feedback operations
+  async createTranslationFeedback(feedback: InsertTranslationFeedback): Promise<TranslationFeedback> {
+    const [created] = await db
+      .insert(translationFeedback)
+      .values(feedback)
+      .returning();
+    return created;
+  }
+
+  async getTranslationFeedback(translationId: string): Promise<TranslationFeedback[]> {
+    const results = await db
+      .select({
+        feedback: translationFeedback,
+        user: {
+          id: users.id,
+          email: users.email,
+          firstName: users.firstName,
+          lastName: users.lastName,
+        },
+        translation: {
+          id: translations.id,
+          title: translations.title,
+        },
+        output: {
+          id: translationOutputs.id,
+          languageCode: translationOutputs.languageCode,
+          languageName: translationOutputs.languageName,
+        },
+      })
+      .from(translationFeedback)
+      .leftJoin(users, eq(translationFeedback.userId, users.id))
+      .leftJoin(translations, eq(translationFeedback.translationId, translations.id))
+      .leftJoin(translationOutputs, eq(translationFeedback.translationOutputId, translationOutputs.id))
+      .where(eq(translationFeedback.translationId, translationId))
+      .orderBy(desc(translationFeedback.createdAt));
+
+    return results.map(r => ({
+      ...r.feedback,
+      user: r.user,
+      translation: r.translation,
+      output: r.output,
+    })) as unknown as TranslationFeedback[];
+  }
+
+  async getAllTranslationFeedback(): Promise<TranslationFeedback[]> {
+    const results = await db
+      .select({
+        feedback: translationFeedback,
+        user: {
+          id: users.id,
+          email: users.email,
+          firstName: users.firstName,
+          lastName: users.lastName,
+        },
+        translation: {
+          id: translations.id,
+          title: translations.title,
+        },
+        output: {
+          id: translationOutputs.id,
+          languageCode: translationOutputs.languageCode,
+          languageName: translationOutputs.languageName,
+        },
+      })
+      .from(translationFeedback)
+      .leftJoin(users, eq(translationFeedback.userId, users.id))
+      .leftJoin(translations, eq(translationFeedback.translationId, translations.id))
+      .leftJoin(translationOutputs, eq(translationFeedback.translationOutputId, translationOutputs.id))
+      .orderBy(desc(translationFeedback.createdAt));
+
+    return results.map(r => ({
+      ...r.feedback,
+      user: r.user,
+      translation: r.translation,
+      output: r.output,
+    })) as unknown as TranslationFeedback[];
   }
 }
 

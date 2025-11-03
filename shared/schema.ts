@@ -190,3 +190,42 @@ export const insertApiKeySchema = createInsertSchema(apiKeys).omit({
 
 export type InsertApiKey = z.infer<typeof insertApiKeySchema>;
 export type ApiKey = typeof apiKeys.$inferSelect;
+
+// Feedback sentiment enum
+export const feedbackSentimentEnum = pgEnum('feedback_sentiment', ['positive', 'negative']);
+
+// Translation Feedback table (stores user feedback on translations)
+export const translationFeedback = pgTable("translation_feedback", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  translationId: varchar("translation_id").notNull().references(() => translations.id, { onDelete: 'cascade' }),
+  translationOutputId: varchar("translation_output_id").notNull().references(() => translationOutputs.id, { onDelete: 'cascade' }),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: 'cascade' }),
+  selectedText: text("selected_text").notNull(),
+  feedbackText: text("feedback_text").notNull(),
+  sentiment: feedbackSentimentEnum("sentiment").notNull(), // thumbs up or down
+  modelUsed: varchar("model_used", { length: 100 }), // Store model identifier at feedback time
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const translationFeedbackRelations = relations(translationFeedback, ({ one }) => ({
+  translation: one(translations, {
+    fields: [translationFeedback.translationId],
+    references: [translations.id],
+  }),
+  translationOutput: one(translationOutputs, {
+    fields: [translationFeedback.translationOutputId],
+    references: [translationOutputs.id],
+  }),
+  user: one(users, {
+    fields: [translationFeedback.userId],
+    references: [users.id],
+  }),
+}));
+
+export const insertTranslationFeedbackSchema = createInsertSchema(translationFeedback).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertTranslationFeedback = z.infer<typeof insertTranslationFeedbackSchema>;
+export type TranslationFeedback = typeof translationFeedback.$inferSelect;

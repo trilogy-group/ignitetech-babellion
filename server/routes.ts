@@ -12,6 +12,7 @@ import {
   insertAiModelSchema,
   insertLanguageSchema,
   insertSettingSchema,
+  insertTranslationFeedbackSchema,
 } from "@shared/schema";
 import { logInfo, logError } from "./vite";
 
@@ -555,6 +556,49 @@ export async function registerRoutes(app: Express): Promise<Server> {
       console.error("Error fetching Google Doc content:", error);
       const message = (error as Error)?.message || "Failed to fetch Google Doc content";
       res.status(500).json({ message });
+    }
+  });
+
+  // ===== FEEDBACK ROUTES =====
+  app.post("/api/translation-feedback", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.id;
+      const data = insertTranslationFeedbackSchema.parse({
+        ...req.body,
+        userId,
+      });
+      
+      // Verify the translation output exists
+      const output = await storage.getTranslationOutput(data.translationOutputId);
+      if (!output) {
+        return res.status(404).json({ message: "Translation output not found" });
+      }
+
+      const feedback = await storage.createTranslationFeedback(data);
+      res.json(feedback);
+    } catch (error) {
+      console.error("Error creating translation feedback:", error);
+      res.status(400).json({ message: "Failed to create feedback" });
+    }
+  });
+
+  app.get("/api/translation-feedback/:translationId", isAuthenticated, async (req: any, res) => {
+    try {
+      const feedback = await storage.getTranslationFeedback(req.params.translationId);
+      res.json(feedback);
+    } catch (error) {
+      console.error("Error fetching translation feedback:", error);
+      res.status(500).json({ message: "Failed to fetch feedback" });
+    }
+  });
+
+  app.get("/api/all-feedback", isAuthenticated, async (req: any, res) => {
+    try {
+      const feedback = await storage.getAllTranslationFeedback();
+      res.json(feedback);
+    } catch (error) {
+      console.error("Error fetching all feedback:", error);
+      res.status(500).json({ message: "Failed to fetch feedback" });
     }
   });
 

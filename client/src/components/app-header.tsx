@@ -1,4 +1,4 @@
-import { Settings as SettingsIcon, LogOut, User } from "lucide-react";
+import { Settings as SettingsIcon, LogOut, User, MessageSquare } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import { Button } from "./ui/button";
 import { ThemeToggle } from "./theme-toggle";
@@ -19,6 +19,7 @@ export function AppHeader() {
   const { user } = useAuth();
 
   const isTranslate = location === "/translate";
+  const isFeedback = location === "/feedback";
   const isSettings = location === "/settings";
 
   return (
@@ -47,6 +48,27 @@ export function AppHeader() {
               >
                 Translate
                 {isTranslate && (
+                  <div 
+                    className="absolute bottom-0 left-0 right-0 h-1 bg-purple-600 rounded-full"
+                    style={{ boxShadow: '0 0 8px rgba(147, 51, 234, 0.6)' }}
+                  />
+                )}
+              </button>
+            </Link>
+            <Link href="/feedback">
+              <button
+                data-testid="nav-feedback"
+                className={`
+                  relative px-1 py-2 text-sm font-medium transition-all flex items-center gap-1.5
+                  ${isFeedback 
+                    ? "text-foreground" 
+                    : "text-muted-foreground hover:text-foreground"
+                  }
+                `}
+              >
+                <MessageSquare className="h-4 w-4" />
+                Feedback
+                {isFeedback && (
                   <div 
                     className="absolute bottom-0 left-0 right-0 h-1 bg-purple-600 rounded-full"
                     style={{ boxShadow: '0 0 8px rgba(147, 51, 234, 0.6)' }}

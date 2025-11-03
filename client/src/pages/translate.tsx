@@ -9,6 +9,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Card } from "@/components/ui/card";
 import { RichTextEditor } from "@/components/rich-text-editor";
 import { GoogleDocsPicker } from "@/components/google-docs-picker";
+import { FeedbackModal } from "@/components/feedback-modal";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -47,7 +48,7 @@ import { useToast } from "@/hooks/use-toast";
 import { ToastAction } from "@/components/ui/toast";
 import { useAuth } from "@/hooks/useAuth";
 import { queryClient, apiRequest } from "@/lib/queryClient";
-import type { Translation, TranslationOutput, AiModel, Language } from "@shared/schema";
+import type { Translation, TranslationOutput, AiModel, Language, TranslationFeedback } from "@shared/schema";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
@@ -80,6 +81,9 @@ export default function Translate() {
   const [proofreadRuntimes, setProofreadRuntimes] = useState<Record<string, Record<string, number>>>({});
   const [isGoogleDocsPickerOpen, setIsGoogleDocsPickerOpen] = useState(false);
   const [isLoadingGoogleDoc, setIsLoadingGoogleDoc] = useState(false);
+  const [isFeedbackModalOpen, setIsFeedbackModalOpen] = useState(false);
+  const [feedbackSelectedText, setFeedbackSelectedText] = useState("");
+  const [feedbackOutputId, setFeedbackOutputId] = useState<string | null>(null);
 
   // Fetch translations
   const { data: translations = [], isLoading: translationsLoading } = useQuery<Translation[]>({
@@ -296,6 +300,37 @@ export default function Translate() {
     },
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["/api/translations", data.translationId, "outputs"] });
+    },
+  });
+
+  // Submit feedback mutation
+  const submitFeedbackMutation = useMutation({
+    mutationFn: async (data: {
+      translationId: string;
+      translationOutputId: string;
+      selectedText: string;
+      feedbackText: string;
+      sentiment: "positive" | "negative";
+      modelUsed: string | null;
+    }) => {
+      const response = await apiRequest("POST", "/api/translation-feedback", data);
+      return await response.json();
+    },
+    onSuccess: () => {
+      setIsFeedbackModalOpen(false);
+      setFeedbackSelectedText("");
+      setFeedbackOutputId(null);
+      toast({
+        title: "Feedback submitted",
+        description: "Thank you for your feedback!",
+      });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Failed to submit feedback",
+        description: error.message || "Please try again.",
+        variant: "destructive",
+      });
     },
   });
 
@@ -854,6 +889,32 @@ export default function Translate() {
     });
   };
 
+  const handleFeedbackClick = (selectedText: string, outputId: string) => {
+    setFeedbackSelectedText(selectedText);
+    setFeedbackOutputId(outputId);
+    setIsFeedbackModalOpen(true);
+  };
+
+  const handleSubmitFeedback = (feedback: {
+    selectedText: string;
+    feedbackText: string;
+    sentiment: "positive" | "negative";
+  }) => {
+    if (!selectedTranslationId || !feedbackOutputId) return;
+
+    const output = outputs.find(o => o.id === feedbackOutputId);
+    const model = output?.modelId ? models.find(m => m.id === output.modelId) : null;
+
+    submitFeedbackMutation.mutate({
+      translationId: selectedTranslationId,
+      translationOutputId: feedbackOutputId,
+      selectedText: feedback.selectedText,
+      feedbackText: feedback.feedbackText,
+      sentiment: feedback.sentiment,
+      modelUsed: model?.modelIdentifier || null,
+    });
+  };
+
   const activeLanguages = languages.filter(l => l.isActive);
   const outputsByLanguage = outputs.reduce((acc, output) => {
     acc[output.languageCode] = output;
@@ -1368,6 +1429,8 @@ export default function Translate() {
                         editable={canEditSelected}
                         className="flex-1 overflow-auto"
                         editorKey={`output-${output.id}`}
+                        showFeedbackButton={true}
+                        onFeedbackClick={(selectedText) => handleFeedbackClick(selectedText, output.id)}
                       />
 
                       {/* Footer pinned to bottom */}
@@ -1440,6 +1503,8 @@ export default function Translate() {
                         editable={canEditSelected}
                         className="flex-1 overflow-auto"
                         editorKey={`output-${output.id}`}
+                        showFeedbackButton={true}
+                        onFeedbackClick={(selectedText) => handleFeedbackClick(selectedText, output.id)}
                       />
 
                       {/* Footer pinned to bottom */}
@@ -1538,6 +1603,22 @@ export default function Translate() {
         onOpenChange={setIsGoogleDocsPickerOpen}
         onDocumentSelect={handleLoadGoogleDoc}
       />
+
+      {/* Feedback Modal */}
+      {feedbackOutputId && (
+        <FeedbackModal
+          open={isFeedbackModalOpen}
+          onOpenChange={setIsFeedbackModalOpen}
+          translationId={selectedTranslationId || ""}
+          translationOutputId={feedbackOutputId}
+          languageName={
+            outputs.find(o => o.id === feedbackOutputId)?.languageName || ""
+          }
+          selectedText={feedbackSelectedText}
+          onSubmit={handleSubmitFeedback}
+          isSubmitting={submitFeedbackMutation.isPending}
+        />
+      )}
 
       {/* Delete Confirmation Dialog */}
       <AlertDialog open={!!deleteConfirmId} onOpenChange={(open) => !open && setDeleteConfirmId(null)}>

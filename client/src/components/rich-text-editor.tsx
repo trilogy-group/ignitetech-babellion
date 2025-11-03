@@ -49,128 +49,129 @@ const MenuBar = ({ editor }: { editor: Editor | null }) => {
   };
 
   return (
-    <div className="border-b border-border p-2 flex flex-wrap gap-1">
+    <div className="border-b border-border p-1.5 flex flex-wrap gap-0.5">
       <Button
         type="button"
         variant="ghost"
         size="sm"
         onClick={() => editor.chain().focus().toggleBold().run()}
-        className={cn(editor.isActive('bold') && 'bg-accent')}
+        className={cn(editor.isActive('bold') && 'bg-accent', 'h-7 w-7 p-0')}
       >
-        <Bold className="h-4 w-4" />
+        <Bold className="h-3.5 w-3.5" />
       </Button>
       <Button
         type="button"
         variant="ghost"
         size="sm"
         onClick={() => editor.chain().focus().toggleItalic().run()}
-        className={cn(editor.isActive('italic') && 'bg-accent')}
+        className={cn(editor.isActive('italic') && 'bg-accent', 'h-7 w-7 p-0')}
       >
-        <Italic className="h-4 w-4" />
+        <Italic className="h-3.5 w-3.5" />
       </Button>
       <Button
         type="button"
         variant="ghost"
         size="sm"
         onClick={() => editor.chain().focus().toggleUnderline().run()}
-        className={cn(editor.isActive('underline') && 'bg-accent')}
+        className={cn(editor.isActive('underline') && 'bg-accent', 'h-7 w-7 p-0')}
       >
-        <UnderlineIcon className="h-4 w-4" />
+        <UnderlineIcon className="h-3.5 w-3.5" />
       </Button>
-      <div className="w-px h-6 bg-border mx-1" />
+      <div className="w-px h-5 bg-border mx-0.5" />
       <Button
         type="button"
         variant="ghost"
         size="sm"
         onClick={() => editor.chain().focus().toggleHeading({ level: 1 }).run()}
-        className={cn(editor.isActive('heading', { level: 1 }) && 'bg-accent')}
+        className={cn(editor.isActive('heading', { level: 1 }) && 'bg-accent', 'h-7 w-7 p-0')}
       >
-        <Heading1 className="h-4 w-4" />
+        <Heading1 className="h-3.5 w-3.5" />
       </Button>
       <Button
         type="button"
         variant="ghost"
         size="sm"
         onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()}
-        className={cn(editor.isActive('heading', { level: 2 }) && 'bg-accent')}
+        className={cn(editor.isActive('heading', { level: 2 }) && 'bg-accent', 'h-7 w-7 p-0')}
       >
-        <Heading2 className="h-4 w-4" />
+        <Heading2 className="h-3.5 w-3.5" />
       </Button>
       <Button
         type="button"
         variant="ghost"
         size="sm"
         onClick={() => editor.chain().focus().toggleHeading({ level: 3 }).run()}
-        className={cn(editor.isActive('heading', { level: 3 }) && 'bg-accent')}
+        className={cn(editor.isActive('heading', { level: 3 }) && 'bg-accent', 'h-7 w-7 p-0')}
       >
-        <Heading3 className="h-4 w-4" />
+        <Heading3 className="h-3.5 w-3.5" />
       </Button>
-      <div className="w-px h-6 bg-border mx-1" />
+      <div className="w-px h-5 bg-border mx-0.5" />
       <Button
         type="button"
         variant="ghost"
         size="sm"
         onClick={() => editor.chain().focus().toggleBulletList().run()}
-        className={cn(editor.isActive('bulletList') && 'bg-accent')}
+        className={cn(editor.isActive('bulletList') && 'bg-accent', 'h-7 w-7 p-0')}
       >
-        <List className="h-4 w-4" />
+        <List className="h-3.5 w-3.5" />
       </Button>
       <Button
         type="button"
         variant="ghost"
         size="sm"
         onClick={() => editor.chain().focus().toggleOrderedList().run()}
-        className={cn(editor.isActive('orderedList') && 'bg-accent')}
+        className={cn(editor.isActive('orderedList') && 'bg-accent', 'h-7 w-7 p-0')}
       >
-        <ListOrdered className="h-4 w-4" />
+        <ListOrdered className="h-3.5 w-3.5" />
       </Button>
-      <div className="w-px h-6 bg-border mx-1" />
+      <div className="w-px h-5 bg-border mx-0.5" />
       <Button
         type="button"
         variant="ghost"
         size="sm"
         onClick={() => editor.chain().focus().setTextAlign('left').run()}
-        className={cn(editor.isActive({ textAlign: 'left' }) && 'bg-accent')}
+        className={cn(editor.isActive({ textAlign: 'left' }) && 'bg-accent', 'h-7 w-7 p-0')}
       >
-        <AlignLeft className="h-4 w-4" />
+        <AlignLeft className="h-3.5 w-3.5" />
       </Button>
       <Button
         type="button"
         variant="ghost"
         size="sm"
         onClick={() => editor.chain().focus().setTextAlign('center').run()}
-        className={cn(editor.isActive({ textAlign: 'center' }) && 'bg-accent')}
+        className={cn(editor.isActive({ textAlign: 'center' }) && 'bg-accent', 'h-7 w-7 p-0')}
       >
-        <AlignCenter className="h-4 w-4" />
+        <AlignCenter className="h-3.5 w-3.5" />
       </Button>
       <Button
         type="button"
         variant="ghost"
         size="sm"
         onClick={() => editor.chain().focus().setTextAlign('right').run()}
-        className={cn(editor.isActive({ textAlign: 'right' }) && 'bg-accent')}
+        className={cn(editor.isActive({ textAlign: 'right' }) && 'bg-accent', 'h-7 w-7 p-0')}
       >
-        <AlignRight className="h-4 w-4" />
+        <AlignRight className="h-3.5 w-3.5" />
       </Button>
-      <div className="w-px h-6 bg-border mx-1" />
+      <div className="w-px h-5 bg-border mx-0.5" />
       <Button
         type="button"
         variant="ghost"
         size="sm"
         onClick={addLink}
-        className={cn(editor.isActive('link') && 'bg-accent')}
+        className={cn(editor.isActive('link') && 'bg-accent', 'h-7 w-7 p-0')}
       >
-        <LinkIcon className="h-4 w-4" />
+        <LinkIcon className="h-3.5 w-3.5" />
       </Button>
-      <div className="w-px h-6 bg-border mx-1" />
+      <div className="w-px h-5 bg-border mx-0.5" />
       <Button
         type="button"
         variant="ghost"
         size="sm"
         onClick={() => editor.chain().focus().undo().run()}
         disabled={!editor.can().undo()}
+        className="h-7 w-7 p-0"
       >
-        <Undo className="h-4 w-4" />
+        <Undo className="h-3.5 w-3.5" />
       </Button>
       <Button
         type="button"
@@ -178,8 +179,9 @@ const MenuBar = ({ editor }: { editor: Editor | null }) => {
         size="sm"
         onClick={() => editor.chain().focus().redo().run()}
         disabled={!editor.can().redo()}
+        className="h-7 w-7 p-0"
       >
-        <Redo className="h-4 w-4" />
+        <Redo className="h-3.5 w-3.5" />
       </Button>
     </div>
   );

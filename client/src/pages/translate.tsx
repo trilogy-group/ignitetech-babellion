@@ -52,6 +52,9 @@ import type { Translation, TranslationOutput, AiModel, Language, TranslationFeed
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import { useIsMobile } from "@/hooks/use-mobile";
+import { MobileHistorySheet } from "@/components/mobile-history-sheet";
+import { History } from "lucide-react";
 
 export default function Translate() {
   const { toast } = useToast();
@@ -535,20 +538,24 @@ export default function Translate() {
     });
 
     // Clear previous runtimes for this language
-    setTranslationRuntimes(prev => ({
-      ...prev,
-      [currentTranslationId]: {
-        ...(prev[currentTranslationId] || {}),
-        [langCode]: undefined
+    setTranslationRuntimes(prev => {
+      const newRuntimes = { ...prev };
+      if (newRuntimes[currentTranslationId]) {
+        const langRuntimes = { ...newRuntimes[currentTranslationId] };
+        delete langRuntimes[langCode];
+        newRuntimes[currentTranslationId] = langRuntimes;
       }
-    }));
-    setProofreadRuntimes(prev => ({
-      ...prev,
-      [currentTranslationId]: {
-        ...(prev[currentTranslationId] || {}),
-        [langCode]: undefined
+      return newRuntimes;
+    });
+    setProofreadRuntimes(prev => {
+      const newRuntimes = { ...prev };
+      if (newRuntimes[currentTranslationId]) {
+        const langRuntimes = { ...newRuntimes[currentTranslationId] };
+        delete langRuntimes[langCode];
+        newRuntimes[currentTranslationId] = langRuntimes;
       }
-    }));
+      return newRuntimes;
+    });
 
     try {
       const startTime = Date.now();
@@ -959,11 +966,12 @@ export default function Translate() {
   // Get currently selected translation
   const selectedTranslation = translations.find(t => t.id === selectedTranslationId) || null;
   const canEditSelected = canEdit(selectedTranslation);
+  const isMobile = useIsMobile();
 
   return (
-    <div className="flex h-full overflow-hidden">
-      {/* Left Sidebar - Translation History */}
-      <div className="flex w-80 flex-col border-r bg-sidebar flex-none">
+    <div className="flex h-full overflow-y-auto md:overflow-hidden flex-col md:flex-row">
+      {/* Left Sidebar - Translation History (Desktop only) */}
+      <div className="hidden md:flex w-80 flex-col border-r bg-sidebar flex-none">
         <div className="flex items-center justify-between gap-4 border-b p-4">
           <h2 className="text-lg font-semibold">Translation History</h2>
           <Button 
@@ -1081,12 +1089,60 @@ export default function Translate() {
         </ScrollArea>
       </div>
 
-      {/* Middle Panel - Input */}
-      <div className="flex flex-1 w-0 flex-col">
-        <TooltipProvider delayDuration={100}>
-          <div className="flex items-center gap-2 border-b p-4">
+      {/* Mobile History Sheet Button */}
+      {isMobile && (
+        <div className="flex items-center justify-between gap-2 border-b p-3 bg-background md:hidden">
+          <MobileHistorySheet
+            translations={translations}
+            isLoading={translationsLoading}
+            selectedTranslationId={selectedTranslationId}
+            onSelectTranslation={handleSelectTranslation}
+            onNewTranslation={handleNewTranslation}
+            isCreating={createMutation.isPending}
+            onRename={handleRenameInList}
+            onDelete={(id) => {
+              setDeleteConfirmId(id);
+              deleteMutation.mutate(id);
+            }}
+            canEdit={canEdit}
+            getOwnershipTooltip={getOwnershipTooltip}
+            trigger={
+              <Button variant="outline" size="sm" className="gap-2">
+                <History className="h-4 w-4" />
+                History
+                {selectedTranslation && (
+                  <span className="text-xs text-muted-foreground truncate max-w-[120px]">
+                    {selectedTranslation.title}
+                  </span>
+                )}
+              </Button>
+            }
+          />
+          <Button
+            size="sm"
+            onClick={handleNewTranslation}
+            disabled={createMutation.isPending}
+            variant="outline"
+            className="gap-2"
+          >
+            {createMutation.isPending ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Plus className="h-4 w-4" />
+            )}
+            New
+          </Button>
+        </div>
+      )}
+
+      {/* Main Content Area - Middle + Right panels */}
+      <div className="flex flex-1 flex-col md:flex-row min-w-0 md:overflow-hidden">
+        {/* Middle Panel - Input */}
+        <div className="flex flex-1 flex-col min-w-0 md:overflow-hidden">
+          <TooltipProvider delayDuration={100}>
+            <div className="flex flex-wrap items-center gap-2 border-b p-3 md:p-4">
             {/* Language Multi-Select */}
-            <div className="flex items-center gap-2 flex-shrink-0">
+            <div className="flex items-center gap-2 flex-shrink-0 w-full sm:w-auto">
             <Label className="text-sm font-medium whitespace-nowrap">Languages:</Label>
             <Dialog open={isLanguageDialogOpen} onOpenChange={setIsLanguageDialogOpen}>
               <DialogTrigger asChild>
@@ -1136,10 +1192,10 @@ export default function Translate() {
           </div>
 
           {/* Model Selection */}
-          <div className="flex items-center gap-2 flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-1 min-w-0 w-full sm:w-auto">
             <Label className="text-sm font-medium whitespace-nowrap">Model:</Label>
             <Select value={selectedModel} onValueChange={setSelectedModel} disabled={!canEditSelected}>
-              <SelectTrigger className="w-full max-w-xs" data-testid="select-model">
+              <SelectTrigger className="w-full max-w-xs flex-1" data-testid="select-model">
                 <SelectValue placeholder="Select model..." />
               </SelectTrigger>
               <SelectContent>
@@ -1197,11 +1253,11 @@ export default function Translate() {
           </div>
         </TooltipProvider>
 
-        <div className="flex-1 overflow-hidden p-6">
-          <div className="flex h-full flex-col gap-4">
+        <div className="flex-1 overflow-y-auto md:overflow-hidden p-4 md:p-6">
+          <div className="flex h-full flex-col gap-3 md:gap-4">
             <div className="flex-shrink-0">
-              <div className="flex items-center justify-between gap-4">
-                <div className="flex-1">
+              <div className="flex items-center gap-2 sm:gap-4">
+                <div className="flex-1 min-w-0">
                   {isEditingTitle ? (
                     <Input
                       value={editedTitle}
@@ -1231,8 +1287,19 @@ export default function Translate() {
                 </div>
                 {selectedTranslationId && (
                   <div className="flex items-center gap-2 flex-shrink-0">
-                    <Globe className="h-4 w-4 text-muted-foreground" />
-                    <span className="text-xs text-muted-foreground">Public</span>
+                    {/* Mobile: Show only icon, Desktop: Show full labels */}
+                    <div className="hidden sm:flex items-center gap-2">
+                      <Globe className="h-4 w-4 text-muted-foreground" />
+                      <span className="text-xs text-muted-foreground">Public</span>
+                    </div>
+                    {/* Mobile icon - changes based on state */}
+                    <div className="sm:hidden">
+                      {isPrivate ? (
+                        <Lock className="h-4 w-4 text-muted-foreground" />
+                      ) : (
+                        <Globe className="h-4 w-4 text-muted-foreground" />
+                      )}
+                    </div>
                     <Switch
                       checked={isPrivate}
                       onCheckedChange={handleTogglePrivacy}
@@ -1240,8 +1307,10 @@ export default function Translate() {
                       className="data-[state=checked]:bg-red-600 data-[state=unchecked]:bg-green-600"
                       data-testid="switch-toggle-privacy"
                     />
-                    <span className="text-xs text-muted-foreground">Private</span>
-                    <Lock className="h-4 w-4 text-muted-foreground" />
+                    <div className="hidden sm:flex items-center gap-2">
+                      <span className="text-xs text-muted-foreground">Private</span>
+                      <Lock className="h-4 w-4 text-muted-foreground" />
+                    </div>
                   </div>
                 )}
               </div>
@@ -1299,15 +1368,15 @@ export default function Translate() {
             </div>
           </div>
         </div>
-      </div>
-
-      {/* Right Panel - Output */}
-      <div className="flex flex-1 w-0 flex-col border-l">
-        <div className="border-b px-4 py-5">
-          <h2 className="text-lg font-semibold">Translations</h2>
         </div>
 
-        <div className="flex-1 overflow-hidden">
+        {/* Right Panel - Output */}
+        <div className="flex flex-1 flex-col min-w-0 border-t md:border-t-0 md:border-l md:overflow-hidden">
+          <div className="border-b px-4 py-5 flex-shrink-0">
+            <h2 className="text-lg font-semibold">Translations</h2>
+          </div>
+
+          <div className="flex-1 overflow-y-auto md:overflow-hidden">
           {!selectedTranslationId ? (
             <div className="flex h-full items-center justify-center p-8 text-center">
               <div>
@@ -1328,7 +1397,7 @@ export default function Translate() {
             </div>
           ) : (
             <Tabs value={activeLanguageTab} onValueChange={setActiveLanguageTab} className="flex h-full flex-col">
-              <TabsList className="mx-4 mt-4 w-auto justify-start overflow-x-auto overflow-y-hidden flex-shrink-0">
+              <TabsList className="mx-2 md:mx-4 mt-2 md:mt-4 w-auto justify-start overflow-x-auto overflow-y-hidden flex-shrink-0 scrollbar-hide">
                 {selectedLanguages.map((langCode) => {
                   const language = activeLanguages.find(l => l.code === langCode);
                   const currentTranslating = selectedTranslationId ? translatingLanguages[selectedTranslationId] : undefined;
@@ -1339,7 +1408,7 @@ export default function Translate() {
                   const isCompleted = !isTranslating && !isProofreading && output;
                   
                   return (
-                    <TabsTrigger key={langCode} value={langCode} data-testid={`tab-${langCode}`} className="gap-2 h-20">
+                    <TabsTrigger key={langCode} value={langCode} data-testid={`tab-${langCode}`} className="gap-2 h-16 md:h-20 whitespace-nowrap">
                       {language?.name || langCode}
                       {isTranslating && <Loader2 className="h-3 w-3 animate-spin" />}
                       {isProofreading && <Loader2 className="h-3 w-3 animate-spin text-blue-500" />}
@@ -1445,15 +1514,15 @@ export default function Translate() {
                             )}
                           </div>
                           <div>
-                            Last Updated: {formatDistanceToNow(new Date(output.updatedAt), { addSuffix: true })}
+                            Last Updated: {output.updatedAt ? formatDistanceToNow(new Date(output.updatedAt), { addSuffix: true }) : 'N/A'}
                           </div>
                         </div>
                       </div>
                     </div>
                   ) : output ? (
-                    <div className="flex flex-col h-full px-6 pt-4 pb-6 gap-4">
+                    <div className="flex flex-col h-full px-4 md:px-6 pt-3 md:pt-4 pb-4 md:pb-6 gap-3 md:gap-4">
                       {/* Header with language and copy button */}
-                      <div className="flex items-center justify-between flex-shrink-0">
+                      <div className="flex items-center justify-between flex-shrink-0 gap-2">
                         <Label className="text-sm font-medium">
                           {output.languageName}
                           {output.translationStatus === 'completed' && (
@@ -1523,7 +1592,7 @@ export default function Translate() {
                             )}
                           </div>
                           <div>
-                            Last Updated: {formatDistanceToNow(new Date(output.updatedAt), { addSuffix: true })}
+                            Last Updated: {output.updatedAt ? formatDistanceToNow(new Date(output.updatedAt), { addSuffix: true }) : 'N/A'}
                           </div>
                         </div>
 
@@ -1594,6 +1663,7 @@ export default function Translate() {
               })}
             </Tabs>
           )}
+          </div>
         </div>
       </div>
 

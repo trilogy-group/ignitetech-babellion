@@ -13,10 +13,13 @@ import {
 } from "./ui/dropdown-menu";
 import { Avatar, AvatarFallback, AvatarImage } from "./ui/avatar";
 import { Badge } from "./ui/badge";
+import { MobileNavMenu } from "./mobile-nav-menu";
+import { useIsMobile } from "@/hooks/use-mobile";
 
 export function AppHeader() {
   const [location] = useLocation();
   const { user } = useAuth();
+  const isMobile = useIsMobile();
 
   const isTranslate = location === "/translate";
   const isFeedback = location === "/feedback";
@@ -24,17 +27,18 @@ export function AppHeader() {
 
   return (
     <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-      <div className="flex h-16 items-center justify-between px-6">
+      <div className="flex h-16 items-center justify-between px-4 sm:px-6">
         {/* Logo and Navigation */}
-        <div className="flex items-center gap-6">
+        <div className="flex items-center gap-4 sm:gap-6">
           <Link href="/translate">
-            <div className="flex items-center gap-3 cursor-pointer">
+            <div className="flex items-center gap-2 sm:gap-3 cursor-pointer">
               <img src="/favicon.png" alt="Babellion" className="h-8 w-8" />
-              <span className="text-xl font-semibold">Babellion</span>
+              <span className="text-lg sm:text-xl font-semibold">Babellion</span>
             </div>
           </Link>
 
-          <nav className="flex items-center gap-6">
+          {/* Desktop Navigation */}
+          <nav className="hidden md:flex items-center gap-6">
             <Link href="/translate">
               <button
                 data-testid="nav-translate"
@@ -55,27 +59,6 @@ export function AppHeader() {
                 )}
               </button>
             </Link>
-            <Link href="/feedback">
-              <button
-                data-testid="nav-feedback"
-                className={`
-                  relative px-1 py-2 text-sm font-medium transition-all flex items-center gap-1.5
-                  ${isFeedback 
-                    ? "text-foreground" 
-                    : "text-muted-foreground hover:text-foreground"
-                  }
-                `}
-              >
-                <MessageSquare className="h-4 w-4" />
-                Feedback
-                {isFeedback && (
-                  <div 
-                    className="absolute bottom-0 left-0 right-0 h-1 bg-purple-600 rounded-full"
-                    style={{ boxShadow: '0 0 8px rgba(147, 51, 234, 0.6)' }}
-                  />
-                )}
-              </button>
-            </Link>
             <button
               disabled
               data-testid="nav-proofread"
@@ -86,8 +69,26 @@ export function AppHeader() {
           </nav>
         </div>
 
-        {/* Right side - User menu */}
+        {/* Right side - Feedback + Theme toggle + User menu */}
         <div className="flex items-center gap-2">
+          {/* Mobile Navigation */}
+          <div className="md:hidden">
+            <MobileNavMenu />
+          </div>
+
+          {/* Feedback Button - Desktop only */}
+          <Link href="/feedback" className="hidden md:block">
+            <Button
+              variant="ghost"
+              size="icon"
+              className={`h-9 w-9 ${isFeedback ? 'bg-accent' : ''}`}
+              data-testid="button-feedback-header"
+              title="Feedback"
+            >
+              <MessageSquare className="h-4 w-4" />
+            </Button>
+          </Link>
+
           <ThemeToggle />
 
           <DropdownMenu>

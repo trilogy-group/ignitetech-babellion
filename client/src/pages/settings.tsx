@@ -38,10 +38,12 @@ import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Switch } from "@/components/ui/switch";
 import { useAuth } from "@/hooks/useAuth";
+import { useIsMobile } from "@/hooks/use-mobile";
 
 export default function Settings() {
   const { toast } = useToast();
   const { user: currentUser } = useAuth();
+  const isMobile = useIsMobile();
   const [openaiKey, setOpenaiKey] = useState("");
   const [anthropicKey, setAnthropicKey] = useState("");
   const [systemPrompt, setSystemPrompt] = useState("");
@@ -234,33 +236,33 @@ export default function Settings() {
   });
 
   return (
-    <div className="flex h-screen flex-col">
-      <div className="border-b px-4 py-6 sm:px-6 lg:px-8">
-        <div className="flex items-center gap-4">
+    <div className="flex h-screen flex-col overflow-hidden">
+      <div className="border-b px-4 py-4 sm:py-6 sm:px-6 lg:px-8 flex-shrink-0">
+        <div className="flex items-center gap-3 sm:gap-4">
           <Button
             variant="ghost"
             size="icon"
             onClick={() => window.history.back()}
-            className="flex-shrink-0"
+            className="flex-shrink-0 h-9 w-9"
             data-testid="button-back"
           >
-            <ArrowLeft className="h-5 w-5" />
+            <ArrowLeft className="h-4 w-4 sm:h-5 sm:w-5" />
           </Button>
-          <div className="flex-1">
-            <h1 className="text-3xl font-bold">Settings</h1>
-            <p className="text-muted-foreground mt-2">Manage your translation platform configuration</p>
+          <div className="flex-1 min-w-0">
+            <h1 className="text-2xl sm:text-3xl font-bold">Settings</h1>
+            <p className="text-muted-foreground mt-1 sm:mt-2 text-sm sm:text-base">Manage your translation platform configuration</p>
           </div>
         </div>
       </div>
 
-      <ScrollArea className="flex-1">
-        <div className="container max-w-5xl py-8 px-4 sm:px-6 lg:px-8">
-          <Tabs defaultValue="users" className="space-y-6">
-        <TabsList>
-          <TabsTrigger value="users" data-testid="tab-users">Users</TabsTrigger>
-          <TabsTrigger value="ai" data-testid="tab-ai">AI</TabsTrigger>
-          <TabsTrigger value="translation" data-testid="tab-translation">Translation</TabsTrigger>
-          <TabsTrigger value="proofread" disabled data-testid="tab-proofread">Proof Read</TabsTrigger>
+      <ScrollArea className="flex-1 min-h-0 overflow-y-auto">
+        <div className="container max-w-5xl py-4 sm:py-8 px-4 sm:px-6 lg:px-8 pb-8">
+          <Tabs defaultValue="users" className="space-y-4 sm:space-y-6">
+        <TabsList className="w-full overflow-x-auto">
+          <TabsTrigger value="users" data-testid="tab-users" className="flex-shrink-0">Users</TabsTrigger>
+          <TabsTrigger value="ai" data-testid="tab-ai" className="flex-shrink-0">AI</TabsTrigger>
+          <TabsTrigger value="translation" data-testid="tab-translation" className="flex-shrink-0">Translation</TabsTrigger>
+          <TabsTrigger value="proofread" disabled data-testid="tab-proofread" className="flex-shrink-0">Proof Read</TabsTrigger>
         </TabsList>
 
         {/* AI Tab */}
@@ -426,6 +428,44 @@ export default function Settings() {
               {modelsLoading ? (
                 <div className="flex justify-center p-8">
                   <Loader2 className="h-6 w-6 animate-spin" />
+                </div>
+              ) : isMobile ? (
+                <div className="space-y-3">
+                  {models.map((model) => (
+                    <Card key={model.id} className="p-4">
+                      <div className="space-y-3">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex-1 min-w-0">
+                            <p className="font-medium truncate">{model.name}</p>
+                            <p className="text-sm text-muted-foreground capitalize">{model.provider}</p>
+                            <p className="font-mono text-xs text-muted-foreground mt-1">{model.modelIdentifier}</p>
+                          </div>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => deleteModelMutation.mutate(model.id)}
+                            data-testid={`button-delete-model-${model.id}`}
+                            className="h-8 w-8 flex-shrink-0"
+                          >
+                            <Trash2 className="h-4 w-4 text-destructive" />
+                          </Button>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Checkbox
+                            id={`default-${model.id}`}
+                            checked={model.isDefault}
+                            onCheckedChange={(checked) =>
+                              updateModelMutation.mutate({ id: model.id, isDefault: !!checked })
+                            }
+                            data-testid={`checkbox-default-${model.id}`}
+                          />
+                          <Label htmlFor={`default-${model.id}`} className="text-sm cursor-pointer">
+                            Set as default
+                          </Label>
+                        </div>
+                      </div>
+                    </Card>
+                  ))}
                 </div>
               ) : (
                 <Table>
@@ -631,7 +671,7 @@ export default function Settings() {
                         <Button
                           variant="ghost"
                           size="icon"
-                          className="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity"
+                          className="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0"
                           onClick={() => deleteLanguageMutation.mutate(lang.id)}
                           data-testid={`button-delete-lang-${lang.id}`}
                         >
@@ -659,6 +699,70 @@ export default function Settings() {
               {usersLoading ? (
                 <div className="flex justify-center py-8">
                   <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+                </div>
+              ) : isMobile ? (
+                <div className="space-y-3">
+                  {users.map((user) => {
+                    const isCurrentUser = user.id === currentUser?.id;
+                    const displayName = user.firstName && user.lastName 
+                      ? `${user.firstName} ${user.lastName}`
+                      : user.firstName || user.email || "Unknown User";
+
+                    return (
+                      <Card key={user.id} className="p-4">
+                        <div className="space-y-3">
+                          <div className="flex items-center gap-3">
+                            {user.profileImageUrl ? (
+                              <img 
+                                src={user.profileImageUrl} 
+                                alt={displayName}
+                                className="h-10 w-10 rounded-full"
+                              />
+                            ) : (
+                              <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center">
+                                <span className="text-sm font-medium">
+                                  {displayName.charAt(0).toUpperCase()}
+                                </span>
+                              </div>
+                            )}
+                            <div className="flex-1 min-w-0">
+                              <p className="font-medium truncate">{displayName}</p>
+                              <p className="text-sm text-muted-foreground truncate">{user.email || "—"}</p>
+                              {isCurrentUser && (
+                                <Badge variant="outline" className="text-xs mt-1">You</Badge>
+                              )}
+                            </div>
+                          </div>
+                          <div className="flex items-center justify-between pt-2 border-t">
+                            <div className="flex items-center gap-2">
+                              {user.isAdmin ? (
+                                <Badge variant="default" className="gap-1">
+                                  <ShieldCheck className="h-3 w-3" />
+                                  Admin
+                                </Badge>
+                              ) : (
+                                <Badge variant="secondary" className="gap-1">
+                                  <Shield className="h-3 w-3" />
+                                  User
+                                </Badge>
+                              )}
+                            </div>
+                            <Switch
+                              checked={user.isAdmin}
+                              onCheckedChange={(checked) => {
+                                updateUserRoleMutation.mutate({
+                                  userId: user.id,
+                                  isAdmin: checked,
+                                });
+                              }}
+                              disabled={isCurrentUser || updateUserRoleMutation.isPending}
+                              aria-label={`Toggle admin access for ${displayName}`}
+                            />
+                          </div>
+                        </div>
+                      </Card>
+                    );
+                  })}
                 </div>
               ) : (
                 <Table>

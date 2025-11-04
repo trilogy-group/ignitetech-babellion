@@ -26,7 +26,7 @@ import {
   type InsertTranslationFeedback,
 } from "@shared/schema";
 import { db } from "./db";
-import { eq, and, or, desc } from "drizzle-orm";
+import { eq, and, or, desc, sql } from "drizzle-orm";
 
 export interface IStorage {
   // User operations (REQUIRED for Replit Auth)
@@ -80,6 +80,15 @@ export interface IStorage {
   createTranslationFeedback(feedback: InsertTranslationFeedback): Promise<TranslationFeedback>;
   getTranslationFeedback(translationId: string): Promise<TranslationFeedback[]>;
   getAllTranslationFeedback(): Promise<TranslationFeedback[]>;
+  getAllTranslationFeedbackPaginated(page: number, limit: number): Promise<{
+    data: TranslationFeedback[];
+    pagination: {
+      page: number;
+      limit: number;
+      total: number;
+      totalPages: number;
+    };
+  }>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -460,6 +469,70 @@ export class DatabaseStorage implements IStorage {
       translation: r.translation,
       output: r.output,
     })) as unknown as TranslationFeedback[];
+  }
+
+  async getAllTranslationFeedbackPaginated(page: number, limit: number): Promise<{
+    data: TranslationFeedback[];
+    pagination: {
+      page: number;
+      limit: number;
+      total: number;
+      totalPages: number;
+    };
+  }> {
+    // Get total count
+    const countResult = await db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(translationFeedback);
+    const total = countResult[0]?.count || 0;
+
+    // Calculate offset
+    const offset = (page - 1) * limit;
+
+    // Get paginated results with joins
+    const results = await db
+      .select({
+        feedback: translationFeedback,
+        user: {
+          id: users.id,
+          email: users.email,
+          firstName: users.firstName,
+          lastName: users.lastName,
+        },
+        translation: {
+          id: translations.id,
+          title: translations.title,
+        },
+        output: {
+          id: translationOutputs.id,
+          languageCode: translationOutputs.languageCode,
+          languageName: translationOutputs.languageName,
+        },
+      })
+      .from(translationFeedback)
+      .leftJoin(users, eq(translationFeedback.userId, users.id))
+      .leftJoin(translations, eq(translationFeedback.translationId, translations.id))
+      .leftJoin(translationOutputs, eq(translationFeedback.translationOutputId, translationOutputs.id))
+      .orderBy(desc(translationFeedback.createdAt))
+      .limit(limit)
+      .offset(offset);
+
+    const data = results.map(r => ({
+      ...r.feedback,
+      user: r.user,
+      translation: r.translation,
+      output: r.output,
+    })) as unknown as TranslationFeedback[];
+
+    return {
+      data,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit),
+      },
+    };
   }
 }
 

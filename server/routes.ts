@@ -594,8 +594,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get("/api/all-feedback", isAuthenticated, async (req: any, res) => {
     try {
-      const feedback = await storage.getAllTranslationFeedback();
-      res.json(feedback);
+      const page = parseInt(req.query.page as string) || 1;
+      const limit = parseInt(req.query.limit as string) || 20;
+      const result = await storage.getAllTranslationFeedbackPaginated(page, limit);
+      res.json(result);
     } catch (error) {
       console.error("Error fetching all feedback:", error);
       res.status(500).json({ message: "Failed to fetch feedback" });

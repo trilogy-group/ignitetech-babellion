@@ -1,7 +1,8 @@
 import { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { formatDistanceToNow } from "date-fns";
-import { ThumbsUp, ThumbsDown, Loader2, FileText, User, Calendar, ChevronLeft, ChevronRight } from "lucide-react";
+import { ThumbsUp, ThumbsDown, Loader2, FileText, User, Calendar, ChevronLeft, ChevronRight, ExternalLink } from "lucide-react";
+import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -55,10 +56,25 @@ export default function Feedback() {
     queryKey: ["/api/translations"],
   });
 
-  // Fetch all feedback (already enriched with user, translation, and output data from backend)
-  const { data: allFeedback = [], isLoading } = useQuery<FeedbackWithDetails[]>({
-    queryKey: ["/api/all-feedback"],
+  // Fetch paginated feedback (server-side pagination)
+  const { data: feedbackResponse, isLoading } = useQuery<{
+    data: FeedbackWithDetails[];
+    pagination: {
+      page: number;
+      limit: number;
+      total: number;
+      totalPages: number;
+    };
+  }>({
+    queryKey: ["/api/all-feedback", currentPage, pageSize],
+    queryFn: async () => {
+      const response = await apiRequest("GET", `/api/all-feedback?page=${currentPage}&limit=${pageSize}`);
+      return await response.json();
+    },
   });
+
+  const allFeedback = feedbackResponse?.data || [];
+  const serverPagination = feedbackResponse?.pagination;
 
   // Get unique languages from feedback
   const availableLanguages = useMemo(() => {
@@ -85,11 +101,12 @@ export default function Feedback() {
     });
   }, [allFeedback, selectedTranslation, sentimentFilter, languageFilter, searchText]);
 
-  // Calculate pagination
-  const totalPages = Math.ceil(filteredFeedback.length / pageSize);
-  const startIndex = (currentPage - 1) * pageSize;
-  const endIndex = startIndex + pageSize;
-  const paginatedFeedback = filteredFeedback.slice(startIndex, endIndex);
+  // Use client-side filtering on paginated data
+  const paginatedFeedback = filteredFeedback;
+  
+  // Use server pagination info, but filter count for display
+  const totalPages = serverPagination?.totalPages || 1;
+  const totalCount = serverPagination?.total || 0;
 
   // Reset to page 1 when filters change
   const handleFilterChange = (setter: (value: string) => void) => (value: string) => {
@@ -117,8 +134,8 @@ export default function Feedback() {
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
               <FileText className="h-4 w-4" />
               <span>
-                {filteredFeedback.length} feedback {filteredFeedback.length === 1 ? 'entry' : 'entries'}
-                {filteredFeedback.length > 0 && ` (page ${currentPage} of ${totalPages})`}
+                {totalCount} feedback {totalCount === 1 ? 'entry' : 'entries'}
+                {totalCount > 0 && ` (page ${currentPage} of ${totalPages})`}
               </span>
             </div>
           </div>
@@ -234,14 +251,13 @@ export default function Feedback() {
                   </TableCaption>
                   <TableHeader>
                     <TableRow>
-                      <TableHead className="w-[150px]">Date</TableHead>
-                      <TableHead className="w-[180px]">User</TableHead>
-                      <TableHead className="w-[200px]">Translation</TableHead>
-                      <TableHead className="w-[120px]">Language</TableHead>
-                      <TableHead className="w-[100px]">Sentiment</TableHead>
-                      <TableHead className="w-[250px]">Selected Text</TableHead>
-                      <TableHead>Feedback</TableHead>
-                      <TableHead className="w-[120px]">Model</TableHead>
+                      <TableHead className="w-[120px]">Date</TableHead>
+                      <TableHead className="w-[150px]">User</TableHead>
+                      <TableHead className="w-[180px]">Translation</TableHead>
+                      <TableHead className="w-[100px]">Language</TableHead>
+                      <TableHead className="w-[140px]">Model</TableHead>
+                      <TableHead className="w-[280px]">Selected Text</TableHead>
+                      <TableHead className="w-[320px]">Feedback</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -252,52 +268,55 @@ export default function Feedback() {
                       
                       return (
                         <TableRow key={feedback.id}>
-                          <TableCell className="text-xs text-muted-foreground">
-                            <div className="flex items-center gap-1">
-                              <Calendar className="h-3 w-3" />
-                              {formatDistanceToNow(new Date(feedback.createdAt), { addSuffix: true })}
-                            </div>
-                          </TableCell>
-                          <TableCell className="text-sm">
-                            <div className="flex items-center gap-1.5">
-                              <User className="h-3.5 w-3.5 text-muted-foreground" />
-                              <span className="font-medium">{userName}</span>
-                            </div>
-                          </TableCell>
-                          <TableCell className="font-medium text-sm">
-                            {feedback.translation?.title || "Unknown"}
+                        <TableCell className="text-xs text-muted-foreground">
+                          <div className="flex items-center gap-1">
+                            <Calendar className="h-3 w-3" />
+                            {formatDistanceToNow(new Date(feedback.createdAt), { addSuffix: true })}
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-xs">
+                          <div className="flex items-center gap-1.5">
+                            <User className="h-3 w-3 text-muted-foreground" />
+                            <span className="font-medium">{userName}</span>
+                          </div>
+                        </TableCell>
+                        <TableCell className="font-medium text-xs">
+                            {feedback.translation?.id ? (
+                              <Link href={`/translate#${feedback.translation.id}`}>
+                                <span className="flex items-center gap-1.5 text-primary hover:underline cursor-pointer transition-all duration-100">
+                                  {feedback.translation.title}
+                                  <ExternalLink className="h-3 w-3" />
+                                </span>
+                              </Link>
+                            ) : (
+                              <span className="text-muted-foreground">Unknown</span>
+                            )}
                           </TableCell>
                         <TableCell>
                           <Badge variant="outline" className="text-xs">
                             {feedback.output?.languageName || "N/A"}
                           </Badge>
                         </TableCell>
-                        <TableCell>
-                          {feedback.sentiment === "positive" ? (
-                            <Badge className="bg-green-600 hover:bg-green-700 text-xs">
-                              <ThumbsUp className="h-3 w-3 mr-1" />
-                              Good
-                            </Badge>
-                          ) : (
-                            <Badge className="bg-red-600 hover:bg-red-700 text-xs">
-                              <ThumbsDown className="h-3 w-3 mr-1" />
-                              Needs Work
-                            </Badge>
-                          )}
-                        </TableCell>
-                        <TableCell>
-                          <div className="max-w-[250px] truncate text-sm" title={feedback.selectedText}>
-                            "{feedback.selectedText}"
+                        <TableCell className="text-xs text-muted-foreground">
+                          <div className="flex items-center gap-2">
+                            <span>{feedback.modelUsed || "N/A"}</span>
+                            {feedback.sentiment === "positive" ? (
+                              <ThumbsUp className="h-4 w-4 text-green-600 flex-shrink-0" />
+                            ) : (
+                              <ThumbsDown className="h-4 w-4 text-red-600 flex-shrink-0" />
+                            )}
                           </div>
                         </TableCell>
                         <TableCell>
-                          <div className="max-w-[400px] text-sm">
+                          <div className="text-xs leading-relaxed" title={feedback.selectedText}>
+                            "{feedback.selectedText.length > 200 ? feedback.selectedText.substring(0, 200) + '...' : feedback.selectedText}"
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <div className="text-xs leading-relaxed">
                             {feedback.feedbackText}
                           </div>
                         </TableCell>
-                          <TableCell className="text-xs text-muted-foreground">
-                            {feedback.modelUsed || "N/A"}
-                          </TableCell>
                         </TableRow>
                       );
                     })}
@@ -306,10 +325,10 @@ export default function Feedback() {
               </ScrollArea>
 
               {/* Pagination Controls */}
-              {filteredFeedback.length > 0 && (
+              {totalCount > 0 && (
                 <div className="flex items-center justify-between px-6 py-4 border-t">
                   <div className="text-sm text-muted-foreground">
-                    Showing {startIndex + 1} to {Math.min(endIndex, filteredFeedback.length)} of {filteredFeedback.length} results
+                    Showing {(currentPage - 1) * pageSize + 1} to {Math.min(currentPage * pageSize, totalCount)} of {totalCount} results
                   </div>
                   <div className="flex items-center gap-2">
                     <Button

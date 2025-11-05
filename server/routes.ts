@@ -6,6 +6,7 @@ import { setupAuth, isAuthenticated, isAdmin } from "./replitAuth";
 import { z } from "zod";
 import { encrypt } from "./encryption";
 import { translationService } from "./translationService";
+import { proofreadingService } from "./proofreadingService";
 import { getGoogleAuth, listGoogleDocs, getGoogleDocContent } from "./googleDocsService";
 import {
   insertTranslationSchema,
@@ -13,6 +14,9 @@ import {
   insertLanguageSchema,
   insertSettingSchema,
   insertTranslationFeedbackSchema,
+  insertProofreadingSchema,
+  insertProofreadingRuleCategorySchema,
+  insertProofreadingRuleSchema,
 } from "@shared/schema";
 import { logInfo, logError } from "./vite";
 
@@ -601,6 +605,379 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Error fetching all feedback:", error);
       res.status(500).json({ message: "Failed to fetch feedback" });
+    }
+  });
+
+  // ===== PROOFREADING ROUTES =====
+
+  // Admin routes for proofreading rule categories
+  app.get("/api/admin/proofreading-categories", isAuthenticated, isAdmin, async (req, res) => {
+    try {
+      const categories = await storage.getProofreadingRuleCategories();
+      res.json(categories);
+    } catch (error) {
+      console.error("Error fetching proofreading categories:", error);
+      res.status(500).json({ message: "Failed to fetch proofreading categories" });
+    }
+  });
+
+  app.post("/api/admin/proofreading-categories", isAuthenticated, isAdmin, async (req, res) => {
+    try {
+      const data = insertProofreadingRuleCategorySchema.parse(req.body);
+      const category = await storage.createProofreadingRuleCategory(data);
+      res.json(category);
+    } catch (error) {
+      console.error("Error creating proofreading category:", error);
+      res.status(400).json({ message: "Failed to create proofreading category" });
+    }
+  });
+
+  app.patch("/api/admin/proofreading-categories/:id", isAuthenticated, isAdmin, async (req, res) => {
+    try {
+      const category = await storage.updateProofreadingRuleCategory(req.params.id, req.body);
+      res.json(category);
+    } catch (error) {
+      console.error("Error updating proofreading category:", error);
+      res.status(400).json({ message: "Failed to update proofreading category" });
+    }
+  });
+
+  app.delete("/api/admin/proofreading-categories/:id", isAuthenticated, isAdmin, async (req, res) => {
+    try {
+      await storage.deleteProofreadingRuleCategory(req.params.id);
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Error deleting proofreading category:", error);
+      res.status(500).json({ message: "Failed to delete proofreading category" });
+    }
+  });
+
+  // Admin routes for proofreading rules
+  app.get("/api/admin/proofreading-rules", isAuthenticated, isAdmin, async (req, res) => {
+    try {
+      const rules = await storage.getProofreadingRules();
+      res.json(rules);
+    } catch (error) {
+      console.error("Error fetching proofreading rules:", error);
+      res.status(500).json({ message: "Failed to fetch proofreading rules" });
+    }
+  });
+
+  app.post("/api/admin/proofreading-rules", isAuthenticated, isAdmin, async (req, res) => {
+    try {
+      const data = insertProofreadingRuleSchema.parse(req.body);
+      const rule = await storage.createProofreadingRule(data);
+      res.json(rule);
+    } catch (error) {
+      console.error("Error creating proofreading rule:", error);
+      res.status(400).json({ message: "Failed to create proofreading rule" });
+    }
+  });
+
+  app.patch("/api/admin/proofreading-rules/:id", isAuthenticated, isAdmin, async (req, res) => {
+    try {
+      const rule = await storage.updateProofreadingRule(req.params.id, req.body);
+      res.json(rule);
+    } catch (error) {
+      console.error("Error updating proofreading rule:", error);
+      res.status(400).json({ message: "Failed to update proofreading rule" });
+    }
+  });
+
+  app.delete("/api/admin/proofreading-rules/:id", isAuthenticated, isAdmin, async (req, res) => {
+    try {
+      await storage.deleteProofreadingRule(req.params.id);
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Error deleting proofreading rule:", error);
+      res.status(500).json({ message: "Failed to delete proofreading rule" });
+    }
+  });
+
+  // User routes for proofreadings
+  app.get("/api/proofreadings", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.id;
+      const proofreadings = await storage.getProofreadings(userId);
+      res.json(proofreadings);
+    } catch (error) {
+      console.error("Error fetching proofreadings:", error);
+      res.status(500).json({ message: "Failed to fetch proofreadings" });
+    }
+  });
+
+  app.get("/api/proofreadings/:id", isAuthenticated, async (req: any, res) => {
+    try {
+      const proofreading = await storage.getProofreading(req.params.id);
+      if (!proofreading) {
+        return res.status(404).json({ message: "Proofreading not found" });
+      }
+      // Check if user can access this proofreading (owner OR public proofreading)
+      const isOwner = proofreading.userId === req.user.id;
+      const isPublic = !proofreading.isPrivate;
+      if (!isOwner && !isPublic) {
+        return res.status(403).json({ message: "Forbidden" });
+      }
+      res.json(proofreading);
+    } catch (error) {
+      console.error("Error fetching proofreading:", error);
+      res.status(500).json({ message: "Failed to fetch proofreading" });
+    }
+  });
+
+  app.post("/api/proofreadings", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.id;
+      const data = insertProofreadingSchema.parse(req.body);
+      const proofreading = await storage.createProofreading({ 
+        userId,
+        title: data.title,
+        sourceText: data.sourceText,
+        isPrivate: data.isPrivate ?? false,
+        selectedCategories: data.selectedCategories,
+      });
+      res.json(proofreading);
+    } catch (error) {
+      console.error("Error creating proofreading:", error);
+      res.status(400).json({ message: "Failed to create proofreading" });
+    }
+  });
+
+  app.patch("/api/proofreadings/:id", isAuthenticated, async (req: any, res) => {
+    try {
+      const proofreading = await storage.getProofreading(req.params.id);
+      if (!proofreading) {
+        return res.status(404).json({ message: "Proofreading not found" });
+      }
+      // Check if user owns the proofreading or is admin (admins can only edit public proofreadings)
+      const user = await storage.getUser(req.user.id);
+      const isOwner = proofreading.userId === req.user.id;
+      const isAdminEditingPublic = user?.isAdmin && !proofreading.isPrivate;
+      const canEdit = isOwner || isAdminEditingPublic;
+      if (!canEdit) {
+        return res.status(403).json({ message: "Forbidden" });
+      }
+      const updated = await storage.updateProofreading(req.params.id, req.body);
+      res.json(updated);
+    } catch (error) {
+      console.error("Error updating proofreading:", error);
+      res.status(400).json({ message: "Failed to update proofreading" });
+    }
+  });
+
+  app.delete("/api/proofreadings/:id", isAuthenticated, async (req: any, res) => {
+    try {
+      const proofreading = await storage.getProofreading(req.params.id);
+      if (!proofreading) {
+        return res.status(404).json({ message: "Proofreading not found" });
+      }
+      // Check if user owns the proofreading or is admin (admins can only delete public proofreadings)
+      const user = await storage.getUser(req.user.id);
+      const isOwner = proofreading.userId === req.user.id;
+      const isAdminDeletingPublic = user?.isAdmin && !proofreading.isPrivate;
+      const canDelete = isOwner || isAdminDeletingPublic;
+      if (!canDelete) {
+        return res.status(403).json({ message: "Forbidden" });
+      }
+      await storage.deleteProofreading(req.params.id);
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Error deleting proofreading:", error);
+      res.status(500).json({ message: "Failed to delete proofreading" });
+    }
+  });
+
+  app.get("/api/proofreadings/:id/output", isAuthenticated, async (req: any, res) => {
+    try {
+      const proofreading = await storage.getProofreading(req.params.id);
+      if (!proofreading) {
+        return res.status(404).json({ message: "Proofreading not found" });
+      }
+      // Check if user can access this proofreading (owner OR public proofreading)
+      const isOwner = proofreading.userId === req.user.id;
+      const isPublic = !proofreading.isPrivate;
+      if (!isOwner && !isPublic) {
+        return res.status(403).json({ message: "Forbidden" });
+      }
+      const output = await storage.getProofreadingOutputByProofreadingId(req.params.id);
+      res.json(output || null);
+    } catch (error) {
+      console.error("Error fetching proofreading output:", error);
+      res.status(500).json({ message: "Failed to fetch proofreading output" });
+    }
+  });
+
+  // Update suggestion status in proofreading output
+  app.patch("/api/proofreadings/:id/output/suggestion/:index", isAuthenticated, async (req: any, res) => {
+    try {
+      const { status } = req.body;
+      const suggestionIndex = parseInt(req.params.index);
+      
+      if (!status || !['pending', 'accepted', 'rejected'].includes(status)) {
+        return res.status(400).json({ message: "Invalid status. Must be 'pending', 'accepted', or 'rejected'" });
+      }
+      
+      if (isNaN(suggestionIndex) || suggestionIndex < 0) {
+        return res.status(400).json({ message: "Invalid suggestion index" });
+      }
+
+      const proofreading = await storage.getProofreading(req.params.id);
+      if (!proofreading) {
+        return res.status(404).json({ message: "Proofreading not found" });
+      }
+      
+      // Check if user is owner
+      if (proofreading.userId !== req.user.id) {
+        return res.status(403).json({ message: "Forbidden" });
+      }
+
+      const output = await storage.getProofreadingOutputByProofreadingId(req.params.id);
+      if (!output) {
+        return res.status(404).json({ message: "Proofreading output not found" });
+      }
+
+      // Update the status of the specific suggestion
+      const results = output.results as Array<{
+        rule: string;
+        original_text: string;
+        suggested_change: string;
+        rationale: string;
+        status?: string;
+      }>;
+
+      if (suggestionIndex >= results.length) {
+        return res.status(400).json({ message: "Suggestion index out of range" });
+      }
+
+      results[suggestionIndex] = {
+        ...results[suggestionIndex],
+        status: status as 'pending' | 'accepted' | 'rejected'
+      };
+
+      // Update the output in the database
+      await storage.updateProofreadingOutput(output.id, { results });
+
+      res.json({ success: true, message: "Suggestion status updated" });
+    } catch (error) {
+      console.error("Error updating suggestion status:", error);
+      res.status(500).json({ message: "Failed to update suggestion status" });
+    }
+  });
+
+  // Get active categories for selection
+  app.get("/api/proofreading-categories", isAuthenticated, async (req, res) => {
+    try {
+      const categories = await storage.getProofreadingRuleCategories();
+      const activeCategories = categories.filter(c => c.isActive);
+      res.json(activeCategories);
+    } catch (error) {
+      console.error("Error fetching proofreading categories:", error);
+      res.status(500).json({ message: "Failed to fetch proofreading categories" });
+    }
+  });
+
+  // Get rules for selected categories
+  app.get("/api/proofreading-rules", isAuthenticated, async (req, res) => {
+    try {
+      const categoryIds = (req.query.categoryIds as string)?.split(',') || [];
+      if (categoryIds.length === 0) {
+        return res.json([]);
+      }
+      const rules = await storage.getProofreadingRulesByCategoryIds(categoryIds);
+      const activeRules = rules.filter(r => r.isActive);
+      res.json(activeRules);
+    } catch (error) {
+      console.error("Error fetching proofreading rules:", error);
+      res.status(500).json({ message: "Failed to fetch proofreading rules" });
+    }
+  });
+
+  // Execute proofreading
+  app.post("/api/proofread-execute", isAuthenticated, async (req: any, res) => {
+    try {
+      const { proofreadingId, categoryIds, modelId, text } = req.body;
+
+      if (!proofreadingId || !categoryIds || !Array.isArray(categoryIds) || categoryIds.length === 0 || !modelId) {
+        return res.status(400).json({ message: "proofreadingId, categoryIds array, and modelId are required" });
+      }
+
+      if (!text || typeof text !== 'string' || text.trim().length === 0) {
+        return res.status(400).json({ message: "text is required" });
+      }
+
+      // Verify user owns the proofreading or is admin (admins can only proofread public proofreadings)
+      const proofreading = await storage.getProofreading(proofreadingId);
+      if (!proofreading) {
+        return res.status(404).json({ message: "Proofreading not found" });
+      }
+      const user = await storage.getUser(req.user.id);
+      const isOwner = proofreading.userId === req.user.id;
+      const isAdminProofreadingPublic = user?.isAdmin && !proofreading.isPrivate;
+      const canProofread = isOwner || isAdminProofreadingPublic;
+      if (!canProofread) {
+        return res.status(403).json({ message: "Forbidden" });
+      }
+
+      // Get model details
+      const model = await storage.getModel(modelId);
+      if (!model) {
+        return res.status(404).json({ message: "Model not found" });
+      }
+
+      // Get rules for selected categories
+      const rules = await storage.getProofreadingRulesByCategoryIds(categoryIds);
+      const activeRules = rules.filter(r => r.isActive);
+      
+      if (activeRules.length === 0) {
+        return res.status(400).json({ message: "No active rules found for selected categories" });
+      }
+
+      // Log proofreading start
+      logInfo(`Proofreading ${proofreadingId}`, "AI");
+      const proofreadStartTime = Date.now();
+
+      // Create output record with 'processing' status
+      const output = await storage.createProofreadingOutput({
+        proofreadingId,
+        results: [],
+        modelId: model.id,
+        status: 'processing',
+      });
+
+      // Execute proofreading - use text from request body (current editor content) instead of saved text
+      let results: Array<{ rule: string; original_text: string; suggested_change: string; rationale: string }>;
+      try {
+        const proofreadingResults = await proofreadingService.proofread({
+          text: text.trim(),
+          rules: activeRules.map(r => ({ title: r.title, ruleText: r.ruleText })),
+          modelIdentifier: model.modelIdentifier,
+          provider: model.provider as 'openai' | 'anthropic',
+        });
+        results = proofreadingResults;
+      } catch (error) {
+        const proofreadTime = Math.round((Date.now() - proofreadStartTime) / 1000);
+        logError(`Proofreading failed ${proofreadingId}, time: ${proofreadTime}s`, "AI", error);
+        // Update status to failed
+        await storage.updateProofreadingOutput(output.id, { status: 'failed' });
+        throw error;
+      }
+
+      const proofreadTime = Math.round((Date.now() - proofreadStartTime) / 1000);
+      logInfo(`Proofread ${proofreadingId}, time: ${proofreadTime}s`, "AI");
+
+      // Update the output with results and mark as completed
+      const updated = await storage.updateProofreadingOutput(output.id, { 
+        results: results as unknown as Record<string, unknown>[],
+        status: 'completed' 
+      });
+
+      // Update last used model
+      await storage.updateProofreading(proofreadingId, { lastUsedModelId: modelId });
+
+      res.json({ ...updated, status: 'completed' });
+    } catch (error) {
+      console.error("Error executing proofreading:", error);
+      res.status(500).json({ message: error instanceof Error ? error.message : "Proofreading failed" });
     }
   });
 

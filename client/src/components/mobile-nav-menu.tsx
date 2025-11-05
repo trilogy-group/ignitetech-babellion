@@ -24,6 +24,7 @@ export function MobileNavMenu({ trigger }: MobileNavMenuProps) {
   const { user } = useAuth();
   const [isOpen, setIsOpen] = React.useState(false);
 
+  const isProofread = location === "/proofread";
   const isTranslate = location === "/translate";
   const isFeedback = location === "/feedback";
   const isSettings = location === "/settings";
@@ -61,6 +62,14 @@ export function MobileNavMenu({ trigger }: MobileNavMenuProps) {
         </SheetHeader>
         <nav className="flex flex-col gap-2 mt-8">
           <Button
+            variant={isProofread ? "secondary" : "ghost"}
+            className="w-full justify-start"
+            onClick={() => handleNavClick("/proofread")}
+          >
+            <FileText className="mr-2 h-4 w-4" />
+            Proofread
+          </Button>
+          <Button
             variant={isTranslate ? "secondary" : "ghost"}
             className="w-full justify-start"
             onClick={() => handleNavClick("/translate")}
@@ -75,17 +84,6 @@ export function MobileNavMenu({ trigger }: MobileNavMenuProps) {
           >
             <MessageSquare className="mr-2 h-4 w-4" />
             Feedback
-          </Button>
-          <Button
-            variant="ghost"
-            className="w-full justify-start"
-            disabled
-          >
-            <FileText className="mr-2 h-4 w-4" />
-            Proofread
-            <Badge variant="outline" className="ml-auto text-xs">
-              Soon
-            </Badge>
           </Button>
 
           <DropdownMenuSeparator className="my-2" />

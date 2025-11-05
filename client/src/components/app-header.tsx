@@ -21,6 +21,7 @@ export function AppHeader() {
   const { user } = useAuth();
   const isMobile = useIsMobile();
 
+  const isProofread = location === "/proofread";
   const isTranslate = location === "/translate";
   const isFeedback = location === "/feedback";
   const isSettings = location === "/settings";
@@ -39,6 +40,26 @@ export function AppHeader() {
 
           {/* Desktop Navigation */}
           <nav className="hidden md:flex items-center gap-6">
+            <Link href="/proofread">
+              <button
+                data-testid="nav-proofread"
+                className={`
+                  relative px-1 py-2 text-sm font-medium transition-all
+                  ${isProofread 
+                    ? "text-foreground" 
+                    : "text-muted-foreground hover:text-foreground"
+                  }
+                `}
+              >
+                Proofread
+                {isProofread && (
+                  <div 
+                    className="absolute bottom-0 left-0 right-0 h-1 bg-purple-600 rounded-full"
+                    style={{ boxShadow: '0 0 8px rgba(147, 51, 234, 0.6)' }}
+                  />
+                )}
+              </button>
+            </Link>
             <Link href="/translate">
               <button
                 data-testid="nav-translate"
@@ -59,13 +80,6 @@ export function AppHeader() {
                 )}
               </button>
             </Link>
-            <button
-              disabled
-              data-testid="nav-proofread"
-              className="relative px-1 py-2 text-sm font-medium text-muted-foreground/50 cursor-not-allowed"
-            >
-              Proofread
-            </button>
           </nav>
         </div>
 

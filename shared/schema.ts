@@ -229,3 +229,125 @@ export const insertTranslationFeedbackSchema = createInsertSchema(translationFee
 
 export type InsertTranslationFeedback = z.infer<typeof insertTranslationFeedbackSchema>;
 export type TranslationFeedback = typeof translationFeedback.$inferSelect;
+
+// Proofreading Rule Categories table
+export const proofreadingRuleCategories = pgTable("proofreading_rule_categories", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: varchar("name", { length: 255 }).notNull(),
+  description: text("description"),
+  isActive: boolean("is_active").default(true).notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const insertProofreadingRuleCategorySchema = createInsertSchema(proofreadingRuleCategories).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertProofreadingRuleCategory = z.infer<typeof insertProofreadingRuleCategorySchema>;
+export type ProofreadingRuleCategory = typeof proofreadingRuleCategories.$inferSelect;
+
+// Proofreading Rules table
+export const proofreadingRules = pgTable("proofreading_rules", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  categoryId: varchar("category_id").notNull().references(() => proofreadingRuleCategories.id, { onDelete: 'cascade' }),
+  title: varchar("title", { length: 255 }).notNull(),
+  ruleText: text("rule_text").notNull(),
+  isActive: boolean("is_active").default(true).notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const proofreadingRulesRelations = relations(proofreadingRules, ({ one }) => ({
+  category: one(proofreadingRuleCategories, {
+    fields: [proofreadingRules.categoryId],
+    references: [proofreadingRuleCategories.id],
+  }),
+}));
+
+export const insertProofreadingRuleSchema = createInsertSchema(proofreadingRules).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertProofreadingRule = z.infer<typeof insertProofreadingRuleSchema>;
+export type ProofreadingRule = typeof proofreadingRules.$inferSelect;
+
+// Proofreading Status enum
+export const proofreadingStatusEnum = pgEnum('proofreading_status', ['pending', 'processing', 'completed', 'failed']);
+
+// Proofreadings table (similar to translations)
+export const proofreadings = pgTable("proofreadings", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: 'cascade' }),
+  title: varchar("title", { length: 255 }).notNull(),
+  sourceText: text("source_text").notNull(),
+  isPrivate: boolean("is_private").default(false).notNull(),
+  selectedCategories: text("selected_categories").array(),
+  lastUsedModelId: varchar("last_used_model_id").references(() => aiModels.id),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const proofreadingsRelations = relations(proofreadings, ({ one, many }) => ({
+  user: one(users, {
+    fields: [proofreadings.userId],
+    references: [users.id],
+  }),
+  outputs: many(proofreadingOutputs),
+  lastUsedModel: one(aiModels, {
+    fields: [proofreadings.lastUsedModelId],
+    references: [aiModels.id],
+  }),
+}));
+
+export const insertProofreadingSchema = createInsertSchema(proofreadings).omit({
+  id: true,
+  userId: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertProofreading = z.infer<typeof insertProofreadingSchema>;
+export type Proofreading = typeof proofreadings.$inferSelect & {
+  owner?: {
+    id: string;
+    email: string | null;
+    firstName: string | null;
+    lastName: string | null;
+  };
+};
+
+// Proofreading Outputs table (stores JSON results from LLM)
+export const proofreadingOutputs = pgTable("proofreading_outputs", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  proofreadingId: varchar("proofreading_id").notNull().references(() => proofreadings.id, { onDelete: 'cascade' }),
+  results: jsonb("results").notNull(), // Array of {rule, original_text, suggested_change, rationale, status: 'pending'|'accepted'|'rejected'}
+  modelId: varchar("model_id").references(() => aiModels.id),
+  status: proofreadingStatusEnum("status").default('pending').notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const proofreadingOutputsRelations = relations(proofreadingOutputs, ({ one }) => ({
+  proofreading: one(proofreadings, {
+    fields: [proofreadingOutputs.proofreadingId],
+    references: [proofreadings.id],
+  }),
+  model: one(aiModels, {
+    fields: [proofreadingOutputs.modelId],
+    references: [aiModels.id],
+  }),
+}));
+
+export const insertProofreadingOutputSchema = createInsertSchema(proofreadingOutputs).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertProofreadingOutput = z.infer<typeof insertProofreadingOutputSchema>;
+export type ProofreadingOutput = typeof proofreadingOutputs.$inferSelect;

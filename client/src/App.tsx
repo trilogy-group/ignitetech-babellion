@@ -8,6 +8,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { AppHeader } from "@/components/app-header";
 import Landing from "@/pages/landing";
 import Translate from "@/pages/translate";
+import Proofread from "@/pages/proofread";
 import Feedback from "@/pages/feedback";
 import Settings from "@/pages/settings";
 import Privacy from "@/pages/privacy";
@@ -42,6 +43,34 @@ function ProtectedTranslate() {
   }
 
   return <Translate />;
+}
+
+// Wrapper component to handle unauthenticated access to /proofread
+function ProtectedProofread() {
+  const { isAuthenticated, isLoading } = useAuth();
+  const { toast } = useToast();
+  const [_location, setLocation] = useLocation();
+
+  useEffect(() => {
+    if (!isLoading && !isAuthenticated) {
+      toast({
+        title: "Authentication Required",
+        description: "Please sign in to access proofreading.",
+        variant: "default",
+      });
+      setLocation("/");
+    }
+  }, [isAuthenticated, isLoading, toast, setLocation]);
+
+  if (isLoading) {
+    return null;
+  }
+
+  if (!isAuthenticated) {
+    return null;
+  }
+
+  return <Proofread />;
 }
 
 // Wrapper component to handle unauthenticated access to /feedback
@@ -86,6 +115,9 @@ function Router() {
       <Route path="/">
         {!isLoading && isAuthenticated ? <Redirect to="/translate" /> : <Landing />}
       </Route>
+      
+      {/* Protected proofread route */}
+      <Route path="/proofread" component={ProtectedProofread} />
       
       {/* Protected translate route */}
       <Route path="/translate" component={ProtectedTranslate} />

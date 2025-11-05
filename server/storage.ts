@@ -8,6 +8,10 @@ import {
   settings,
   apiKeys,
   translationFeedback,
+  proofreadingRuleCategories,
+  proofreadingRules,
+  proofreadings,
+  proofreadingOutputs,
   type User,
   type UpsertUser,
   type Translation,
@@ -24,9 +28,17 @@ import {
   type InsertApiKey,
   type TranslationFeedback,
   type InsertTranslationFeedback,
+  type ProofreadingRuleCategory,
+  type InsertProofreadingRuleCategory,
+  type ProofreadingRule,
+  type InsertProofreadingRule,
+  type Proofreading,
+  type InsertProofreading,
+  type ProofreadingOutput,
+  type InsertProofreadingOutput,
 } from "@shared/schema";
 import { db } from "./db";
-import { eq, and, or, desc, sql } from "drizzle-orm";
+import { eq, and, or, desc, sql, inArray } from "drizzle-orm";
 
 export interface IStorage {
   // User operations (REQUIRED for Replit Auth)
@@ -89,6 +101,35 @@ export interface IStorage {
       totalPages: number;
     };
   }>;
+
+  // Proofreading rule category operations
+  getProofreadingRuleCategories(): Promise<ProofreadingRuleCategory[]>;
+  getProofreadingRuleCategory(id: string): Promise<ProofreadingRuleCategory | undefined>;
+  createProofreadingRuleCategory(category: InsertProofreadingRuleCategory): Promise<ProofreadingRuleCategory>;
+  updateProofreadingRuleCategory(id: string, data: Partial<ProofreadingRuleCategory>): Promise<ProofreadingRuleCategory>;
+  deleteProofreadingRuleCategory(id: string): Promise<void>;
+
+  // Proofreading rule operations
+  getProofreadingRules(): Promise<ProofreadingRule[]>;
+  getProofreadingRule(id: string): Promise<ProofreadingRule | undefined>;
+  getProofreadingRulesByCategory(categoryId: string): Promise<ProofreadingRule[]>;
+  getProofreadingRulesByCategoryIds(categoryIds: string[]): Promise<ProofreadingRule[]>;
+  createProofreadingRule(rule: InsertProofreadingRule): Promise<ProofreadingRule>;
+  updateProofreadingRule(id: string, data: Partial<ProofreadingRule>): Promise<ProofreadingRule>;
+  deleteProofreadingRule(id: string): Promise<void>;
+
+  // Proofreading operations
+  getProofreadings(userId: string): Promise<Proofreading[]>;
+  getProofreading(id: string): Promise<Proofreading | undefined>;
+  createProofreading(proofreading: InsertProofreading & { userId: string }): Promise<Proofreading>;
+  updateProofreading(id: string, data: Partial<Proofreading>): Promise<Proofreading>;
+  deleteProofreading(id: string): Promise<void>;
+
+  // Proofreading output operations
+  getProofreadingOutput(id: string): Promise<ProofreadingOutput | undefined>;
+  getProofreadingOutputByProofreadingId(proofreadingId: string): Promise<ProofreadingOutput | undefined>;
+  createProofreadingOutput(output: InsertProofreadingOutput): Promise<ProofreadingOutput>;
+  updateProofreadingOutput(id: string, data: Partial<ProofreadingOutput>): Promise<ProofreadingOutput>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -533,6 +574,175 @@ export class DatabaseStorage implements IStorage {
         totalPages: Math.ceil(total / limit),
       },
     };
+  }
+
+  // Proofreading rule category operations
+  async getProofreadingRuleCategories(): Promise<ProofreadingRuleCategory[]> {
+    return await db.select().from(proofreadingRuleCategories).orderBy(proofreadingRuleCategories.name);
+  }
+
+  async getProofreadingRuleCategory(id: string): Promise<ProofreadingRuleCategory | undefined> {
+    const [category] = await db.select().from(proofreadingRuleCategories).where(eq(proofreadingRuleCategories.id, id));
+    return category;
+  }
+
+  async createProofreadingRuleCategory(category: InsertProofreadingRuleCategory): Promise<ProofreadingRuleCategory> {
+    const [newCategory] = await db.insert(proofreadingRuleCategories).values(category).returning();
+    return newCategory;
+  }
+
+  async updateProofreadingRuleCategory(id: string, data: Partial<ProofreadingRuleCategory>): Promise<ProofreadingRuleCategory> {
+    const [updated] = await db
+      .update(proofreadingRuleCategories)
+      .set({ ...data, updatedAt: new Date() })
+      .where(eq(proofreadingRuleCategories.id, id))
+      .returning();
+    return updated;
+  }
+
+  async deleteProofreadingRuleCategory(id: string): Promise<void> {
+    await db.delete(proofreadingRuleCategories).where(eq(proofreadingRuleCategories.id, id));
+  }
+
+  // Proofreading rule operations
+  async getProofreadingRules(): Promise<ProofreadingRule[]> {
+    return await db.select().from(proofreadingRules).orderBy(proofreadingRules.title);
+  }
+
+  async getProofreadingRule(id: string): Promise<ProofreadingRule | undefined> {
+    const [rule] = await db.select().from(proofreadingRules).where(eq(proofreadingRules.id, id));
+    return rule;
+  }
+
+  async getProofreadingRulesByCategory(categoryId: string): Promise<ProofreadingRule[]> {
+    return await db
+      .select()
+      .from(proofreadingRules)
+      .where(eq(proofreadingRules.categoryId, categoryId))
+      .orderBy(proofreadingRules.title);
+  }
+
+  async getProofreadingRulesByCategoryIds(categoryIds: string[]): Promise<ProofreadingRule[]> {
+    if (categoryIds.length === 0) {
+      return [];
+    }
+    return await db
+      .select()
+      .from(proofreadingRules)
+      .where(inArray(proofreadingRules.categoryId, categoryIds))
+      .orderBy(proofreadingRules.title);
+  }
+
+  async createProofreadingRule(rule: InsertProofreadingRule): Promise<ProofreadingRule> {
+    const [newRule] = await db.insert(proofreadingRules).values(rule).returning();
+    return newRule;
+  }
+
+  async updateProofreadingRule(id: string, data: Partial<ProofreadingRule>): Promise<ProofreadingRule> {
+    const [updated] = await db
+      .update(proofreadingRules)
+      .set({ ...data, updatedAt: new Date() })
+      .where(eq(proofreadingRules.id, id))
+      .returning();
+    return updated;
+  }
+
+  async deleteProofreadingRule(id: string): Promise<void> {
+    await db.delete(proofreadingRules).where(eq(proofreadingRules.id, id));
+  }
+
+  // Proofreading operations
+  async getProofreadings(userId: string): Promise<Proofreading[]> {
+    // Return all public proofreadings + user's private proofreadings with user info
+    const results = await db
+      .select({
+        proofreading: proofreadings,
+        owner: {
+          id: users.id,
+          email: users.email,
+          firstName: users.firstName,
+          lastName: users.lastName,
+        }
+      })
+      .from(proofreadings)
+      .leftJoin(users, eq(proofreadings.userId, users.id))
+      .where(
+        or(
+          // Either it's public
+          eq(proofreadings.isPrivate, false),
+          // OR it's the user's own proofreading (can be public or private)
+          eq(proofreadings.userId, userId)
+        )
+      )
+      .orderBy(desc(proofreadings.updatedAt));
+    
+    // Map results to include owner info in the proofreading object
+    return results.map(r => ({
+      ...r.proofreading,
+      owner: r.owner
+    })) as Proofreading[];
+  }
+
+  async getProofreading(id: string): Promise<Proofreading | undefined> {
+    const [proofreading] = await db
+      .select()
+      .from(proofreadings)
+      .where(eq(proofreadings.id, id));
+    return proofreading;
+  }
+
+  async createProofreading(proofreading: InsertProofreading & { userId: string }): Promise<Proofreading> {
+    const [newProofreading] = await db
+      .insert(proofreadings)
+      .values(proofreading)
+      .returning();
+    return newProofreading;
+  }
+
+  async updateProofreading(id: string, data: Partial<Proofreading>): Promise<Proofreading> {
+    const [updated] = await db
+      .update(proofreadings)
+      .set({ ...data, updatedAt: new Date() })
+      .where(eq(proofreadings.id, id))
+      .returning();
+    return updated;
+  }
+
+  async deleteProofreading(id: string): Promise<void> {
+    await db.delete(proofreadings).where(eq(proofreadings.id, id));
+  }
+
+  // Proofreading output operations
+  async getProofreadingOutput(id: string): Promise<ProofreadingOutput | undefined> {
+    const [output] = await db
+      .select()
+      .from(proofreadingOutputs)
+      .where(eq(proofreadingOutputs.id, id));
+    return output;
+  }
+
+  async getProofreadingOutputByProofreadingId(proofreadingId: string): Promise<ProofreadingOutput | undefined> {
+    const [output] = await db
+      .select()
+      .from(proofreadingOutputs)
+      .where(eq(proofreadingOutputs.proofreadingId, proofreadingId))
+      .orderBy(desc(proofreadingOutputs.createdAt))
+      .limit(1);
+    return output;
+  }
+
+  async createProofreadingOutput(output: InsertProofreadingOutput): Promise<ProofreadingOutput> {
+    const [newOutput] = await db.insert(proofreadingOutputs).values(output).returning();
+    return newOutput;
+  }
+
+  async updateProofreadingOutput(id: string, data: Partial<ProofreadingOutput>): Promise<ProofreadingOutput> {
+    const [updated] = await db
+      .update(proofreadingOutputs)
+      .set({ ...data, updatedAt: new Date() })
+      .where(eq(proofreadingOutputs.id, id))
+      .returning();
+    return updated;
   }
 }
 

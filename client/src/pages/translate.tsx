@@ -299,9 +299,15 @@ export default function Translate() {
       const response = await apiRequest("POST", "/api/proofread-translation", {
         outputId,
       });
-      return { output: await response.json() as TranslationOutput, translationId };
+      return { output: await response.json() as TranslationOutput, translationId, outputId };
     },
     onSuccess: (data) => {
+      // Clear any manual edits for this output so the proofread text is displayed
+      setEditedOutputs(prev => {
+        const newOutputs = { ...prev };
+        delete newOutputs[data.outputId];
+        return newOutputs;
+      });
       queryClient.invalidateQueries({ queryKey: ["/api/translations", data.translationId, "outputs"] });
     },
   });

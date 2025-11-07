@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useLocation } from "wouter";
-import { Plus, Trash2, Loader2, Copy, Check, Lock, Globe, Pencil, FileText, Save, X, RotateCw } from "lucide-react";
+import { Plus, Trash2, Loader2, Copy, Check, Lock, Globe, Pencil, FileText, Save, X, RotateCw, ChevronLeft, ChevronRight, Square } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -10,6 +10,7 @@ import { Card } from "@/components/ui/card";
 import { RichTextEditor } from "@/components/rich-text-editor";
 import { GoogleDocsPicker } from "@/components/google-docs-picker";
 import { FeedbackModal } from "@/components/feedback-modal";
+import { ProofreadChangesDialog } from "@/components/proofread-changes-dialog";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -78,7 +79,6 @@ export default function Translate() {
   const [isPrivate, setIsPrivate] = useState(false);
   // Track progress per translation ID to persist across card switches
   const [translatingLanguages, setTranslatingLanguages] = useState<Record<string, Set<string>>>({});
-  const [proofreadingLanguages, setProofreadingLanguages] = useState<Record<string, Set<string>>>({});
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [translationRuntimes, setTranslationRuntimes] = useState<Record<string, Record<string, number>>>({});
   const [proofreadRuntimes, setProofreadRuntimes] = useState<Record<string, Record<string, number>>>({});
@@ -87,6 +87,10 @@ export default function Translate() {
   const [isFeedbackModalOpen, setIsFeedbackModalOpen] = useState(false);
   const [feedbackSelectedText, setFeedbackSelectedText] = useState("");
   const [feedbackOutputId, setFeedbackOutputId] = useState<string | null>(null);
+  const [isLeftPanelCollapsed, setIsLeftPanelCollapsed] = useState(false);
+  const [proofreadChangesDialogOpen, setProofreadChangesDialogOpen] = useState(false);
+  const [proofreadChangesOutputId, setProofreadChangesOutputId] = useState<string | null>(null);
+  const [stoppedPollingOutputs, setStoppedPollingOutputs] = useState<Set<string>>(new Set());
 
   // Fetch translations
   const { data: translations = [], isLoading: translationsLoading } = useQuery<Translation[]>({
@@ -107,6 +111,39 @@ export default function Translate() {
   const { data: outputs = [], isLoading: outputsLoading } = useQuery<TranslationOutput[]>({
     queryKey: ["/api/translations", selectedTranslationId, "outputs"],
     enabled: !!selectedTranslationId,
+    refetchInterval: (query) => {
+      // Check if any outputs are in progress
+      const data = query.state.data || [];
+      const hasInProgress = data.some((output: TranslationOutput) => {
+        // Skip if polling was manually stopped for this output
+        if (stoppedPollingOutputs.has(output.id)) {
+          return false;
+        }
+        
+        const isTranslating = output.translationStatus === 'translating';
+        const isProofreading = output.proofreadStatus === 'proof_reading' || output.proofreadStatus === 'applying_proofread';
+        
+        if (isTranslating || isProofreading) {
+          // Check if the output has been stuck for too long (30 minutes)
+          if (output.updatedAt) {
+            const lastUpdate = new Date(output.updatedAt);
+            const now = new Date();
+            const minutesSinceUpdate = (now.getTime() - lastUpdate.getTime()) / (1000 * 60);
+            
+            // If stuck for more than 30 minutes, stop polling
+            if (minutesSinceUpdate > 30) {
+              console.warn(`[Polling] Output ${output.id} has been stuck for ${minutesSinceUpdate.toFixed(1)} minutes, stopping polling`);
+              setStoppedPollingOutputs(prev => new Set(prev).add(output.id));
+              return false;
+            }
+          }
+          return true;
+        }
+        return false;
+      });
+      // Poll every 2 seconds if there are in-progress outputs, otherwise don't poll
+      return hasInProgress ? 2000 : false;
+    },
   });
 
   // Get default model
@@ -290,25 +327,6 @@ export default function Translate() {
         title: "Translation updated",
         description: "Your edits have been saved.",
       });
-    },
-  });
-
-  // Proof-read translation mutation
-  const proofreadMutation = useMutation({
-    mutationFn: async ({ outputId, translationId }: { outputId: string; translationId: string }) => {
-      const response = await apiRequest("POST", "/api/proofread-translation", {
-        outputId,
-      });
-      return { output: await response.json() as TranslationOutput, translationId, outputId };
-    },
-    onSuccess: (data) => {
-      // Clear any manual edits for this output so the proofread text is displayed
-      setEditedOutputs(prev => {
-        const newOutputs = { ...prev };
-        delete newOutputs[data.outputId];
-        return newOutputs;
-      });
-      queryClient.invalidateQueries({ queryKey: ["/api/translations", data.translationId, "outputs"] });
     },
   });
 
@@ -533,7 +551,18 @@ export default function Translate() {
     const language = languages.find(l => l.code === langCode);
     const languageName = language?.name || langCode;
 
-    // Mark this language as translating
+    // Clear stopped polling state for this language's output (if any)
+    // This ensures the new translation can poll properly
+    const output = outputs.find(o => o.languageCode === langCode);
+    if (output) {
+      setStoppedPollingOutputs(prev => {
+        const next = new Set(prev);
+        next.delete(output.id);
+        return next;
+      });
+    }
+
+    // Mark this language as translating (optimistic UI update)
     setTranslatingLanguages(prev => {
       const newSet = new Set(prev[currentTranslationId] || []);
       newSet.add(langCode);
@@ -564,21 +593,10 @@ export default function Translate() {
     });
 
     try {
-      const startTime = Date.now();
-      const output = await translateSingleMutation.mutateAsync({ languageCode: langCode }) as TranslationOutput;
-      const endTime = Date.now();
-      const duration = (endTime - startTime) / 1000;
+      // Trigger translation - backend will automatically handle proofreading
+      await translateSingleMutation.mutateAsync({ languageCode: langCode });
       
-      // Store the runtime
-      setTranslationRuntimes(prev => ({
-        ...prev,
-        [currentTranslationId]: {
-          ...(prev[currentTranslationId] || {}),
-          [langCode]: duration
-        }
-      }));
-      
-      // Remove from translating set
+      // Remove from translating set - polling will update the real status
       setTranslatingLanguages(prev => {
         const newSet = new Set(prev[currentTranslationId] || []);
         newSet.delete(langCode);
@@ -588,61 +606,9 @@ export default function Translate() {
         };
       });
 
-      // Trigger proof-reading after translation completes
-      if (output) {
-        toast({
-          title: "Proof Reading in progress",
-          description: `Proof Reading: ${languageName} in progress`,
-        });
-
-        // Add to proofreading set
-        setProofreadingLanguages(prev => {
-          const newSet = new Set(prev[currentTranslationId] || []);
-          newSet.add(langCode);
-          return {
-            ...prev,
-            [currentTranslationId]: newSet
-          };
-        });
-
-        // Proof-read the translation
-        const proofreadStartTime = Date.now();
-        try {
-          await proofreadMutation.mutateAsync({ outputId: output.id, translationId: currentTranslationId });
-          const proofreadEndTime = Date.now();
-          const proofreadDuration = (proofreadEndTime - proofreadStartTime) / 1000;
-          
-          // Store the proof-reading runtime
-          setProofreadRuntimes(prev => ({
-            ...prev,
-            [currentTranslationId]: {
-              ...(prev[currentTranslationId] || {}),
-              [langCode]: proofreadDuration
-            }
-          }));
-        } catch (error) {
-          console.error(`Failed to proofread ${langCode}:`, error);
-          toast({
-            title: "Proof-reading failed",
-            description: error instanceof Error ? error.message : `Failed to proofread ${languageName}`,
-            variant: "destructive",
-          });
-        } finally {
-          // Remove from proofreading set
-          setProofreadingLanguages(prev => {
-            const newSet = new Set(prev[currentTranslationId] || []);
-            newSet.delete(langCode);
-            return {
-              ...prev,
-              [currentTranslationId]: newSet
-            };
-          });
-        }
-      }
-
       toast({
-        title: "Translation complete",
-        description: `Successfully retranslated to ${languageName}.`,
+        title: "Translation started",
+        description: `Translation and proofreading for ${languageName} has started.`,
       });
     } catch (error) {
       console.error(`Failed to rerun translation for ${langCode}:`, error);
@@ -722,22 +688,11 @@ export default function Translate() {
 
     // Translate all languages in parallel
     const promises = selectedLanguages.map(async (langCode) => {
-      const startTime = Date.now();
       try {
-        const output = await translateSingleMutation.mutateAsync({ languageCode: langCode }) as TranslationOutput;
-        const endTime = Date.now();
-        const duration = (endTime - startTime) / 1000; // Convert to seconds
+        // Trigger translation - backend will automatically handle proofreading
+        await translateSingleMutation.mutateAsync({ languageCode: langCode });
         
-        // Store the runtime for this translation ID
-        setTranslationRuntimes(prev => ({
-          ...prev,
-          [currentTranslationId]: {
-            ...(prev[currentTranslationId] || {}),
-            [langCode]: duration
-          }
-        }));
-        
-        // Remove from translating set when done
+        // Remove from translating set - polling will update the real status
         setTranslatingLanguages(prev => {
           const newSet = new Set(prev[currentTranslationId] || []);
           newSet.delete(langCode);
@@ -746,63 +701,6 @@ export default function Translate() {
             [currentTranslationId]: newSet
           };
         });
-
-        // Trigger proof-reading after translation completes
-        if (output) {
-          // Get language name for toast
-          const language = languages.find(l => l.code === langCode);
-          const languageName = language?.name || langCode;
-          
-          // Show proof-reading toast
-          toast({
-            title: "Proof Reading in progress",
-            description: `Proof Reading: ${languageName} in progress`,
-          });
-
-          // Add to proofreading set for this translation ID
-          setProofreadingLanguages(prev => {
-            const newSet = new Set(prev[currentTranslationId] || []);
-            newSet.add(langCode);
-            return {
-              ...prev,
-              [currentTranslationId]: newSet
-            };
-          });
-
-          // Proof-read the translation
-          const proofreadStartTime = Date.now();
-          try {
-            await proofreadMutation.mutateAsync({ outputId: output.id, translationId: currentTranslationId });
-            const proofreadEndTime = Date.now();
-            const proofreadDuration = (proofreadEndTime - proofreadStartTime) / 1000;
-            
-            // Store the proof-reading runtime for this translation ID
-            setProofreadRuntimes(prev => ({
-              ...prev,
-              [currentTranslationId]: {
-                ...(prev[currentTranslationId] || {}),
-                [langCode]: proofreadDuration
-              }
-            }));
-          } catch (error) {
-            console.error(`Failed to proofread ${langCode}:`, error);
-            toast({
-              title: "Proof-reading failed",
-              description: error instanceof Error ? error.message : `Failed to proofread ${languageName}`,
-              variant: "destructive",
-            });
-          } finally {
-            // Remove from proofreading set
-            setProofreadingLanguages(prev => {
-              const newSet = new Set(prev[currentTranslationId] || []);
-              newSet.delete(langCode);
-              return {
-                ...prev,
-                [currentTranslationId]: newSet
-              };
-            });
-          }
-        }
       } catch (error) {
         console.error(`Failed to translate to ${langCode}:`, error);
         setTranslatingLanguages(prev => {
@@ -821,8 +719,8 @@ export default function Translate() {
       await Promise.all(promises);
       const translation = translations.find(t => t.id === currentTranslationId);
       toast({
-        title: "Translation complete",
-        description: `Successfully translated to ${selectedLanguages.length} language${selectedLanguages.length > 1 ? 's' : ''}.`,
+        title: "Translation started",
+        description: `Translation and proofreading started for ${selectedLanguages.length} language${selectedLanguages.length > 1 ? 's' : ''}.`,
         action: (
           <ToastAction
             altText="View translation"
@@ -974,24 +872,69 @@ export default function Translate() {
   const canEditSelected = canEdit(selectedTranslation);
   const isMobile = useIsMobile();
 
+  // Create proofreading from translation output
+  const createProofreadingMutation = useMutation({
+    mutationFn: async ({ title, sourceText }: { title: string; sourceText: string }) => {
+      const response = await apiRequest("POST", "/api/proofreadings", {
+        title,
+        sourceText,
+        isPrivate: false,
+        selectedCategories: [],
+      });
+      return await response.json();
+    },
+    onSuccess: (data: { id: string }) => {
+      // Navigate to proofread page with the new proofreading ID
+      setLocation(`/proofread#${data.id}`);
+      toast({
+        title: "Proofreading created",
+        description: "Your proofreading project has been created.",
+      });
+    },
+  });
+
+  const handleFinalProofread = async (translatedText: string, languageName: string) => {
+    if (!selectedTranslation) return;
+    
+    const proofreadTitle = `[${languageName.toUpperCase()}] ${selectedTranslation.title}`;
+    createProofreadingMutation.mutate({
+      title: proofreadTitle,
+      sourceText: translatedText,
+    });
+  };
+
   return (
     <div className="flex h-full overflow-y-auto md:overflow-hidden flex-col md:flex-row">
       {/* Left Sidebar - Translation History (Desktop only) */}
-      <div className="hidden md:flex w-80 flex-col border-r bg-sidebar flex-none">
-        <div className="flex items-center justify-between gap-4 border-b p-4">
-          <h2 className="text-lg font-semibold">Translation History</h2>
-          <Button 
-            size="sm" 
-            onClick={handleNewTranslation} 
-            disabled={createMutation.isPending} 
-            data-testid="button-new-translation"
-            variant="outline"
-          >
-            {createMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
-          </Button>
+      <div className={`hidden md:flex ${isLeftPanelCollapsed ? 'w-12' : 'w-80'} flex-col border-r bg-sidebar flex-none transition-all duration-200`}>
+        <div className={`flex items-center ${isLeftPanelCollapsed ? 'flex-col justify-start gap-2' : 'justify-between'} border-b p-4`}>
+          {!isLeftPanelCollapsed && <h2 className="text-lg font-semibold">Translation History</h2>}
+          <div className={`flex items-center ${isLeftPanelCollapsed ? 'flex-col' : 'gap-2'} ${isLeftPanelCollapsed ? '' : 'ml-auto'}`}>
+            <Button 
+              size="sm" 
+              onClick={handleNewTranslation} 
+              disabled={createMutation.isPending} 
+              data-testid="button-new-translation"
+              variant="outline"
+              className={isLeftPanelCollapsed ? "h-8 w-8 p-0" : ""}
+              title="New Translation"
+            >
+              {createMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => setIsLeftPanelCollapsed(!isLeftPanelCollapsed)}
+              className="h-8 w-8 p-0"
+              title={isLeftPanelCollapsed ? "Expand panel" : "Collapse panel"}
+            >
+              {isLeftPanelCollapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
+            </Button>
+          </div>
         </div>
 
-        <ScrollArea className="flex-1" viewportClassName="max-w-full">
+        {!isLeftPanelCollapsed && (
+          <ScrollArea className="flex-1" viewportClassName="max-w-full">
           {translationsLoading ? (
             <div className="flex items-center justify-center p-8">
               <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
@@ -1092,7 +1035,8 @@ export default function Translate() {
               </TooltipProvider>
             </div>
           )}
-        </ScrollArea>
+          </ScrollArea>
+        )}
       </div>
 
       {/* Mobile History Sheet Button */}
@@ -1348,9 +1292,58 @@ export default function Translate() {
                     )}
                   </Button>
                 </div>
-                <span className="text-xs text-muted-foreground">
-                  {sourceText ? new DOMParser().parseFromString(sourceText, 'text/html').body.textContent?.length || 0 : 0} characters
-                </span>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-muted-foreground">
+                    {sourceText ? new DOMParser().parseFromString(sourceText, 'text/html').body.textContent?.length || 0 : 0} characters
+                  </span>
+                  {sourceText && (
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-6 w-6"
+                          onClick={async () => {
+                            try {
+                              // Get plain text version for fallback
+                              const plainText = new DOMParser().parseFromString(sourceText, 'text/html').body.textContent || '';
+                              
+                              // Try to copy with HTML formatting
+                              if (navigator.clipboard.write) {
+                                const htmlBlob = new Blob([sourceText], { type: 'text/html' });
+                                const textBlob = new Blob([plainText], { type: 'text/plain' });
+                                const clipboardItem = new ClipboardItem({
+                                  'text/html': htmlBlob,
+                                  'text/plain': textBlob,
+                                });
+                                await navigator.clipboard.write([clipboardItem]);
+                              } else {
+                                // Fallback to plain text
+                                await navigator.clipboard.writeText(plainText);
+                              }
+                              
+                              toast({
+                                title: "Copied to clipboard",
+                                description: "Source text copied with formatting",
+                              });
+                            } catch (error) {
+                              toast({
+                                title: "Failed to copy",
+                                description: "Could not copy to clipboard",
+                                variant: "destructive",
+                              });
+                            }
+                          }}
+                        >
+                          <Copy className="h-3 w-3" />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>
+                        <p>Copy text with formatting</p>
+                      </TooltipContent>
+                    </Tooltip>
+                  )}
+                </div>
               </div>
               <RichTextEditor
                 content={sourceText}
@@ -1406,19 +1399,21 @@ export default function Translate() {
               <TabsList className="mx-2 md:mx-4 mt-2 md:mt-4 w-auto justify-start overflow-x-auto overflow-y-hidden flex-shrink-0 scrollbar-hide">
                 {selectedLanguages.map((langCode) => {
                   const language = activeLanguages.find(l => l.code === langCode);
-                  const currentTranslating = selectedTranslationId ? translatingLanguages[selectedTranslationId] : undefined;
-                  const currentProofreading = selectedTranslationId ? proofreadingLanguages[selectedTranslationId] : undefined;
-                  const isTranslating = currentTranslating?.has(langCode) ?? false;
-                  const isProofreading = currentProofreading?.has(langCode) ?? false;
                   const output = outputs.find(o => o.languageCode === langCode);
-                  const isCompleted = !isTranslating && !isProofreading && output;
+                  // Use server-side status as source of truth
+                  const isTranslating = output?.translationStatus === 'translating';
+                  const isProofreading = output?.proofreadStatus === 'proof_reading' || output?.proofreadStatus === 'applying_proofread';
+                  const isCompleted = output?.translationStatus === 'completed' && output?.proofreadStatus === 'completed';
+                  const isFailed = output?.translationStatus === 'failed' || output?.proofreadStatus === 'failed';
+                  const isPollingStopped = output && stoppedPollingOutputs.has(output.id);
                   
                   return (
                     <TabsTrigger key={langCode} value={langCode} data-testid={`tab-${langCode}`} className="gap-2 h-16 md:h-20 whitespace-nowrap">
                       {language?.name || langCode}
-                      {isTranslating && <Loader2 className="h-3 w-3 animate-spin" />}
-                      {isProofreading && <Loader2 className="h-3 w-3 animate-spin text-blue-500" />}
+                      {isTranslating && !isPollingStopped && <Loader2 className="h-3 w-3 animate-spin" />}
+                      {isProofreading && !isPollingStopped && <Loader2 className="h-3 w-3 animate-spin text-blue-500" />}
                       {isCompleted && <Check className="h-3 w-3 text-green-600" />}
+                      {isFailed && <X className="h-3 w-3 text-red-600" />}
                     </TabsTrigger>
                   );
                 })}
@@ -1427,22 +1422,53 @@ export default function Translate() {
               {selectedLanguages.map((langCode) => {
                 const output = outputs.find(o => o.languageCode === langCode);
                 const language = activeLanguages.find(l => l.code === langCode);
-                const currentTranslating = selectedTranslationId ? translatingLanguages[selectedTranslationId] : undefined;
-                const currentProofreading = selectedTranslationId ? proofreadingLanguages[selectedTranslationId] : undefined;
-                const isTranslating = currentTranslating?.has(langCode) ?? false;
-                const isProofreading = currentProofreading?.has(langCode) ?? false;
+                // Use server-side status as source of truth
+                const isTranslating = output?.translationStatus === 'translating';
+                const isProofreading = output?.proofreadStatus === 'proof_reading' || output?.proofreadStatus === 'applying_proofread';
                 
                 return <TabsContent
                   key={langCode}
                   value={langCode}
                   className="flex-1 overflow-hidden"
                 >
-                  {isTranslating ? (
+                  {isTranslating && output && stoppedPollingOutputs.has(output.id) ? (
                     <div className="flex h-full items-center justify-center p-8">
-                      <div className="text-center">
+                      <div className="text-center space-y-4">
+                        <p className="text-sm font-medium">Translation stopped</p>
+                        <Button
+                          onClick={() => handleRerunLanguage(langCode)}
+                          variant="outline"
+                          size="sm"
+                          className="mt-4"
+                        >
+                          <RotateCw className="h-4 w-4 mr-2" />
+                          Restart
+                        </Button>
+                      </div>
+                    </div>
+                  ) : isTranslating ? (
+                    <div className="flex h-full items-center justify-center p-8">
+                      <div className="text-center space-y-4">
                         <Loader2 className="h-8 w-8 animate-spin text-primary mx-auto mb-4" />
                         <p className="text-sm font-medium">Translating to {language?.name || langCode}...</p>
                         <p className="text-xs text-muted-foreground mt-1">Please wait</p>
+                        {output && (
+                          <Button
+                            onClick={() => {
+                              setStoppedPollingOutputs(prev => new Set(prev).add(output.id));
+                              toast({
+                                title: "Polling stopped",
+                                description: "You can restart the translation if needed.",
+                              });
+                            }}
+                            variant="outline"
+                            size="sm"
+                            className="mt-4"
+                          >
+                            <Square className="h-4 w-4 mr-2 fill-current" />
+                            Stop
+                          </Button>
+                        )}
                       </div>
                     </div>
                   ) : isProofreading && output ? (
@@ -1464,11 +1490,49 @@ export default function Translate() {
                                 <span className="text-xs">Proof read</span>
                               </span>
                             )}
+                            {output.proofreadProposedChanges != null && (
+                              <Badge 
+                                variant="secondary" 
+                                className="ml-2 cursor-pointer hover:bg-secondary/80"
+                                onClick={() => {
+                                  setProofreadChangesOutputId(output.id);
+                                  setProofreadChangesDialogOpen(true);
+                                }}
+                              >
+                                View Changes
+                              </Badge>
+                            )}
                           </Label>
-                          <Badge variant="outline" className="text-xs">
-                            <Loader2 className="h-3 w-3 animate-spin mr-1" />
-                            Proof-reading...
-                          </Badge>
+                          {stoppedPollingOutputs.has(output.id) ? (
+                            <Badge variant="outline" className="text-xs text-orange-600">
+                              Polling stopped
+                            </Badge>
+                          ) : (
+                            <>
+                              <Badge variant="outline" className="text-xs">
+                                <Loader2 className="h-3 w-3 animate-spin mr-1" />
+                                {output.proofreadStatus === 'applying_proofread' ? 'Applying changes...' : 'Generating changes...'}
+                              </Badge>
+                              {output.translationStatus === 'completed' && (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => {
+                                    setStoppedPollingOutputs(prev => new Set(prev).add(output.id));
+                                    toast({
+                                      title: "Polling stopped",
+                                      description: "You can restart the translation if needed.",
+                                    });
+                                  }}
+                                  className="h-6 px-2 text-xs"
+                                  title="Stop polling"
+                                >
+                                  <Square className="h-3 w-3 mr-1 fill-current" />
+                                  Stop
+                                </Button>
+                              )}
+                            </>
+                          )}
                         </div>
                         <div className="flex items-center gap-1">
                           <Button
@@ -1495,6 +1559,23 @@ export default function Translate() {
                           </Button>
                         </div>
                       </div>
+
+                      {/* Show restart button if polling is stopped */}
+                      {stoppedPollingOutputs.has(output.id) && (
+                        <div className="flex items-center justify-center py-4 border-y">
+                          <div className="text-center space-y-2">
+                            <p className="text-sm text-muted-foreground">Polling stopped</p>
+                            <Button
+                              onClick={() => handleRerunLanguage(langCode)}
+                              variant="outline"
+                              size="sm"
+                            >
+                              <RotateCw className="h-4 w-4 mr-2" />
+                              Restart
+                            </Button>
+                          </div>
+                        </div>
+                      )}
 
                       {/* Editor with internal scrolling - show current translation during proof-reading */}
                       <RichTextEditor
@@ -1523,6 +1604,22 @@ export default function Translate() {
                             Last Updated: {output.updatedAt ? formatDistanceToNow(new Date(output.updatedAt), { addSuffix: true }) : 'N/A'}
                           </div>
                         </div>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => handleFinalProofread(editedOutputs[output.id] ?? output.translatedText ?? '', output.languageName)}
+                          disabled={createProofreadingMutation.isPending || !(editedOutputs[output.id] ?? output.translatedText)}
+                          className="ml-auto"
+                        >
+                          {createProofreadingMutation.isPending ? (
+                            <>
+                              <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                              Creating...
+                            </>
+                          ) : (
+                            "Final ProofRead"
+                          )}
+                        </Button>
                       </div>
                     </div>
                   ) : output ? (
@@ -1542,6 +1639,18 @@ export default function Translate() {
                               <Check className="h-3 w-3" />
                               <span className="text-xs">Proof read</span>
                             </span>
+                          )}
+                          {output.proofreadProposedChanges != null && (
+                            <Badge 
+                              variant="secondary" 
+                              className="ml-2 cursor-pointer hover:bg-secondary/80"
+                              onClick={() => {
+                                setProofreadChangesOutputId(output.id);
+                                setProofreadChangesDialogOpen(true);
+                              }}
+                            >
+                              View Changes
+                            </Badge>
                           )}
                         </Label>
                         <div className="flex items-center gap-1">
@@ -1601,38 +1710,54 @@ export default function Translate() {
                             Last Updated: {output.updatedAt ? formatDistanceToNow(new Date(output.updatedAt), { addSuffix: true }) : 'N/A'}
                           </div>
                         </div>
-
-                        {/* Show Save/Discard buttons when there are unsaved changes */}
-                        {editedOutputs[output.id] !== undefined && 
-                         editedOutputs[output.id] !== (output.translatedText ?? '') && (
-                          <div className="flex items-center gap-2">
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => handleDiscardOutput(output.id)}
-                              disabled={updateOutputMutation.isPending}
-                              className="h-7 text-xs"
-                            >
-                              <X className="h-3 w-3 mr-1" />
-                              Discard
-                            </Button>
-                            <Button
-                              variant="default"
-                              size="sm"
-                              onClick={() => handleSaveOutput(output.id)}
-                              disabled={updateOutputMutation.isPending}
-                              className="h-7 text-xs"
-                            >
-                              {updateOutputMutation.isPending ? (
-                                <Loader2 className="h-3 w-3 mr-1 animate-spin" />
-                              ) : (
-                                <Save className="h-3 w-3 mr-1" />
-                              )}
-                              Save
-                            </Button>
-                          </div>
-                        )}
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => handleFinalProofread(editedOutputs[output.id] ?? output.translatedText ?? '', output.languageName)}
+                          disabled={createProofreadingMutation.isPending || !(editedOutputs[output.id] ?? output.translatedText)}
+                          className="ml-auto"
+                        >
+                          {createProofreadingMutation.isPending ? (
+                            <>
+                              <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                              Creating...
+                            </>
+                          ) : (
+                            "Final ProofRead"
+                          )}
+                        </Button>
                       </div>
+
+                      {/* Show Save/Discard buttons when there are unsaved changes */}
+                      {editedOutputs[output.id] !== undefined && 
+                       editedOutputs[output.id] !== (output.translatedText ?? '') && (
+                        <div className="flex items-center gap-2 flex-shrink-0 pt-2">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleDiscardOutput(output.id)}
+                            disabled={updateOutputMutation.isPending}
+                            className="h-7 text-xs"
+                          >
+                            <X className="h-3 w-3 mr-1" />
+                            Discard
+                          </Button>
+                          <Button
+                            variant="default"
+                            size="sm"
+                            onClick={() => handleSaveOutput(output.id)}
+                            disabled={updateOutputMutation.isPending}
+                            className="h-7 text-xs"
+                          >
+                            {updateOutputMutation.isPending ? (
+                              <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                            ) : (
+                              <Save className="h-3 w-3 mr-1" />
+                            )}
+                            Save
+                          </Button>
+                        </div>
+                      )}
                     </div>
                   ) : (
                     <div className="flex h-full items-center justify-center p-8">
@@ -1693,6 +1818,20 @@ export default function Translate() {
           selectedText={feedbackSelectedText}
           onSubmit={handleSubmitFeedback}
           isSubmitting={submitFeedbackMutation.isPending}
+        />
+      )}
+
+      {/* Proofread Changes Dialog */}
+      {proofreadChangesOutputId && (
+        <ProofreadChangesDialog
+          open={proofreadChangesDialogOpen}
+          onOpenChange={setProofreadChangesDialogOpen}
+          proposedChanges={
+            (outputs.find(o => o.id === proofreadChangesOutputId)?.proofreadProposedChanges as string | Record<string, unknown> | null | undefined)
+          }
+          languageName={
+            outputs.find(o => o.id === proofreadChangesOutputId)?.languageName || ""
+          }
         />
       )}
 

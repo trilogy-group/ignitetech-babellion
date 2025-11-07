@@ -224,7 +224,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Log translation start
       logInfo(`Translating ${translationId} into ${language.name}`, "AI");
-      const translateStartTime = Date.now();
 
       // Create output record with 'translating' status (translatedText will be null initially)
       const output = await storage.createTranslationOutput({
@@ -237,124 +236,101 @@ export async function registerRoutes(app: Express): Promise<Server> {
         proofreadStatus: 'pending',
       });
 
-      // Translate
-      let translatedText: string;
-      try {
-        translatedText = await translationService.translate({
-          text: translation.sourceText,
-          targetLanguage: language.name,
-          modelIdentifier: model.modelIdentifier,
-          provider: model.provider as 'openai' | 'anthropic',
-          systemPrompt,
-        });
-      } catch (error) {
-        const translateTime = Math.round((Date.now() - translateStartTime) / 1000);
-        logError(`Translation failed ${translationId} into ${language.name}, time: ${translateTime}s`, "AI", error);
-        // Update status to failed
-        await storage.updateTranslationOutputStatus(output.id, { translationStatus: 'failed' });
-        throw error;
-      }
+      // Start async job - don't await, return immediately
+      (async () => {
+        const translateStartTime = Date.now();
+        
+        try {
+          // Step 1: Translate
+          let translatedText: string;
+          try {
+            translatedText = await translationService.translate({
+              text: translation.sourceText,
+              targetLanguage: language.name,
+              modelIdentifier: model.modelIdentifier,
+              provider: model.provider as 'openai' | 'anthropic',
+              systemPrompt,
+            });
+          } catch (error) {
+            const translateTime = Math.round((Date.now() - translateStartTime) / 1000);
+            logError(`Translation failed ${translationId} into ${language.name}, time: ${translateTime}s`, "AI", error);
+            // Update status to failed
+            await storage.updateTranslationOutputStatus(output.id, { translationStatus: 'failed' });
+            return; // Exit early if translation fails
+          }
 
-      const translateTime = Math.round((Date.now() - translateStartTime) / 1000);
-      logInfo(`Translated ${translationId} into ${language.name}, time: ${translateTime}s`, "AI");
+          const translateTime = Math.round((Date.now() - translateStartTime) / 1000);
+          logInfo(`Translated ${translationId} into ${language.name}, time: ${translateTime}s`, "AI");
 
-      // Update with translated text and mark as completed
-      const result = await storage.updateTranslationOutput(output.id, translatedText);
-      await storage.updateTranslationOutputStatus(result.id, { translationStatus: 'completed' });
+          // Update with translated text and mark translation as completed
+          await storage.updateTranslationOutput(output.id, translatedText);
+          await storage.updateTranslationOutputStatus(output.id, { translationStatus: 'completed' });
 
-      res.json({ ...result, translationStatus: 'completed' });
+          // Step 2: Automatically trigger proofreading
+          try {
+            // Update proofread status to proof_reading
+            await storage.updateTranslationOutputStatus(output.id, { proofreadStatus: 'proof_reading' });
+
+            // Get proofreading system prompt
+            const proofreadPromptSetting = await storage.getSetting('proofreading_system_prompt');
+            const proofreadSystemPrompt = proofreadPromptSetting?.value;
+
+            logInfo(`Proofreading ${translationId} into ${language.name}`, "AI");
+            const proofreadStartTime = Date.now();
+
+            // Execute Step 1: Generate proposed changes
+            const step1Result = await translationService.proofreadStep1(
+              translation.sourceText,
+              translatedText,
+              language.name,
+              model.modelIdentifier,
+              model.provider as 'openai' | 'anthropic',
+              proofreadSystemPrompt
+            );
+
+            // Save proposed changes and original translation
+            await storage.updateTranslationOutputProofreadData(output.id, {
+              proofreadProposedChanges: step1Result.proposedChanges,
+              proofreadOriginalTranslation: translatedText,
+            });
+
+            // Update status to applying_proofread before Step 2
+            await storage.updateTranslationOutputStatus(output.id, { proofreadStatus: 'applying_proofread' });
+
+            // Execute Step 2: Apply changes to produce final translation
+            const finalTranslation = await translationService.proofreadStep2(
+              step1Result.userInputStep1,
+              step1Result.proposedChanges,
+              model.modelIdentifier,
+              model.provider as 'openai' | 'anthropic',
+              proofreadSystemPrompt
+            );
+
+            // Update with final proofread translation
+            await storage.updateTranslationOutput(output.id, finalTranslation);
+            
+            // Mark proofreading as completed
+            await storage.updateTranslationOutputStatus(output.id, { proofreadStatus: 'completed' });
+
+            const proofreadTime = Math.round((Date.now() - proofreadStartTime) / 1000);
+            logInfo(`Proofread ${translationId} into ${language.name}, time: ${proofreadTime}s`, "AI");
+          } catch (error) {
+            const proofreadStartTime = Date.now();
+            const proofreadTime = Math.round((Date.now() - proofreadStartTime) / 1000);
+            logError(`Proofreading failed ${translationId} into ${language.name}, time: ${proofreadTime}s`, "AI", error);
+            // Update status to failed, but keep the translated text
+            await storage.updateTranslationOutputStatus(output.id, { proofreadStatus: 'failed' });
+          }
+        } catch (error) {
+          console.error(`Unexpected error in translation pipeline for ${translationId} into ${language.name}:`, error);
+        }
+      })(); // Fire and forget - async job runs in background
+
+      // Return immediately with the output record (status: translating)
+      res.json(output);
     } catch (error) {
-      console.error("Error translating:", error);
-      res.status(500).json({ message: error instanceof Error ? error.message : "Translation failed" });
-    }
-  });
-
-  // ===== PROOFREAD ENDPOINT =====
-  app.post("/api/proofread-translation", isAuthenticated, async (req: any, res) => {
-    try {
-      const { outputId } = req.body;
-
-      if (!outputId) {
-        return res.status(400).json({ message: "outputId is required" });
-      }
-
-      // Get the translation output
-      const output = await storage.getTranslationOutput(outputId);
-      if (!output) {
-        return res.status(404).json({ message: "Translation output not found" });
-      }
-
-      // Get the parent translation
-      const translation = await storage.getTranslation(output.translationId);
-      if (!translation) {
-        return res.status(404).json({ message: "Translation not found" });
-      }
-
-      // Verify user owns the translation or is admin (admins can only proofread public translations)
-      const user = await storage.getUser(req.user.id);
-      const isOwner = translation.userId === req.user.id;
-      const isAdminProofreadingPublic = user?.isAdmin && !translation.isPrivate;
-      const canProofread = isOwner || isAdminProofreadingPublic;
-      if (!canProofread) {
-        return res.status(403).json({ message: "Forbidden" });
-      }
-
-      // Get model details (the same model used for translation)
-      if (!output.modelId) {
-        return res.status(400).json({ message: "Translation output has no associated model" });
-      }
-      const model = await storage.getModel(output.modelId);
-      if (!model) {
-        return res.status(404).json({ message: "Model not found" });
-      }
-
-      // Get language details
-      const language = await storage.getLanguageByCode(output.languageCode);
-      if (!language) {
-        return res.status(404).json({ message: `Language not found: ${output.languageCode}` });
-      }
-
-      // Get proofreading system prompt
-      const proofreadPromptSetting = await storage.getSetting('proofreading_system_prompt');
-      const proofreadSystemPrompt = proofreadPromptSetting?.value;
-
-      // Log proofreading start
-      logInfo(`Proofreading ${translation.id} into ${language.name}`, "AI");
-      const proofreadStartTime = Date.now();
-
-      // Update status to proofreading
-      await storage.updateTranslationOutputStatus(outputId, { proofreadStatus: 'proofreading' });
-
-      // Proof-read the translation
-      let proofreadText: string;
-      try {
-        proofreadText = await translationService.proofread(
-          translation.sourceText,
-          output.translatedText,
-          language.name,
-          model.modelIdentifier,
-          model.provider as 'openai' | 'anthropic',
-          proofreadSystemPrompt
-        );
-      } catch (error) {
-        const proofreadTime = Math.round((Date.now() - proofreadStartTime) / 1000);
-        logError(`Proofreading failed ${translation.id} into ${language.name}, time: ${proofreadTime}s`, "AI", error);
-        // Update status to failed
-        await storage.updateTranslationOutputStatus(outputId, { proofreadStatus: 'failed' });
-        throw error;
-      }
-
-      const proofreadTime = Math.round((Date.now() - proofreadStartTime) / 1000);
-      logInfo(`Proofread ${translation.id} into ${language.name}, time: ${proofreadTime}s`, "AI");
-
-      // Update the translation output with proof-read text and mark as completed
-      const updated = await storage.updateTranslationOutput(outputId, proofreadText);
-      await storage.updateTranslationOutputStatus(updated.id, { proofreadStatus: 'completed' });
-
-      res.json({ ...updated, proofreadStatus: 'completed' });
-    } catch (error) {
-      console.error("Error proofreading:", error);
-      res.status(500).json({ message: error instanceof Error ? error.message : "Proof-reading failed" });
+      console.error("Error starting translation:", error);
+      res.status(500).json({ message: error instanceof Error ? error.message : "Failed to start translation" });
     }
   });
 
@@ -932,10 +908,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "No active rules found for selected categories" });
       }
 
-      // Log proofreading start
-      logInfo(`Proofreading ${proofreadingId}`, "AI");
-      const proofreadStartTime = Date.now();
-
       // Create output record with 'processing' status
       const output = await storage.createProofreadingOutput({
         proofreadingId,
@@ -944,40 +916,46 @@ export async function registerRoutes(app: Express): Promise<Server> {
         status: 'processing',
       });
 
-      // Execute proofreading - use text from request body (current editor content) instead of saved text
-      let results: Array<{ rule: string; original_text: string; suggested_change: string; rationale: string }>;
-      try {
-        const proofreadingResults = await proofreadingService.proofread({
-          text: text.trim(),
-          rules: activeRules.map(r => ({ title: r.title, ruleText: r.ruleText })),
-          modelIdentifier: model.modelIdentifier,
-          provider: model.provider as 'openai' | 'anthropic',
-        });
-        results = proofreadingResults;
-      } catch (error) {
-        const proofreadTime = Math.round((Date.now() - proofreadStartTime) / 1000);
-        logError(`Proofreading failed ${proofreadingId}, time: ${proofreadTime}s`, "AI", error);
-        // Update status to failed
-        await storage.updateProofreadingOutput(output.id, { status: 'failed' });
-        throw error;
-      }
+      // Fire and forget - async proofreading runs in background
+      (async () => {
+        try {
+          // Log proofreading start
+          logInfo(`Proofreading ${proofreadingId}`, "AI");
+          const proofreadStartTime = Date.now();
 
-      const proofreadTime = Math.round((Date.now() - proofreadStartTime) / 1000);
-      logInfo(`Proofread ${proofreadingId}, time: ${proofreadTime}s`, "AI");
+          // Execute proofreading - use text from request body (current editor content) instead of saved text
+          const proofreadingResults = await proofreadingService.proofread({
+            text: text.trim(),
+            rules: activeRules.map(r => ({ title: r.title, ruleText: r.ruleText })),
+            modelIdentifier: model.modelIdentifier,
+            provider: model.provider as 'openai' | 'anthropic',
+          });
 
-      // Update the output with results and mark as completed
-      const updated = await storage.updateProofreadingOutput(output.id, { 
-        results: results as unknown as Record<string, unknown>[],
-        status: 'completed' 
-      });
+          const proofreadTime = Math.round((Date.now() - proofreadStartTime) / 1000);
+          logInfo(`Proofread ${proofreadingId}, time: ${proofreadTime}s`, "AI");
 
-      // Update last used model
-      await storage.updateProofreading(proofreadingId, { lastUsedModelId: modelId });
+          // Update the output with results and mark as completed
+          await storage.updateProofreadingOutput(output.id, { 
+            results: proofreadingResults as unknown as Record<string, unknown>[],
+            status: 'completed' 
+          });
 
-      res.json({ ...updated, status: 'completed' });
+          // Update last used model
+          await storage.updateProofreading(proofreadingId, { lastUsedModelId: modelId });
+        } catch (error) {
+          const proofreadStartTime = Date.now();
+          const proofreadTime = Math.round((Date.now() - proofreadStartTime) / 1000);
+          logError(`Proofreading failed ${proofreadingId}, time: ${proofreadTime}s`, "AI", error);
+          // Update status to failed
+          await storage.updateProofreadingOutput(output.id, { status: 'failed' });
+        }
+      })(); // Fire and forget - async job runs in background
+
+      // Return immediately with the output record (status: processing)
+      res.json(output);
     } catch (error) {
-      console.error("Error executing proofreading:", error);
-      res.status(500).json({ message: error instanceof Error ? error.message : "Proofreading failed" });
+      console.error("Error starting proofreading:", error);
+      res.status(500).json({ message: error instanceof Error ? error.message : "Failed to start proofreading" });
     }
   });
 

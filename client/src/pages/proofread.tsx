@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useLocation } from "wouter";
-import { Plus, Trash2, Loader2, Check, Lock, Globe, Pencil, FileText, Save, X, History, Code, ChevronDown } from "lucide-react";
+import { Plus, Trash2, Loader2, Check, Lock, Globe, Pencil, FileText, Save, X, History, Code, ChevronDown, ArrowRight, Square, RotateCw } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -74,7 +74,7 @@ interface ProofreadingResult {
 export default function Proofread() {
   const { toast } = useToast();
   const { user } = useAuth();
-  const [location] = useLocation();
+  const [location, setLocation] = useLocation();
   const [selectedProofreadingId, setSelectedProofreadingId] = useState<string | null>(null);
   const [sourceText, setSourceText] = useState("");
   const [title, setTitle] = useState("Untitled Proofreading");
@@ -89,6 +89,7 @@ export default function Proofread() {
   const [isPrivate, setIsPrivate] = useState(false);
   const [isProofreading, setIsProofreading] = useState(false);
   const [proofreadingInProgress, setProofreadingInProgress] = useState<Set<string>>(new Set());
+  const [stoppedPollingOutputs, setStoppedPollingOutputs] = useState<Set<string>>(new Set());
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [isGoogleDocsPickerOpen, setIsGoogleDocsPickerOpen] = useState(false);
   const [isLoadingGoogleDoc, setIsLoadingGoogleDoc] = useState(false);
@@ -159,7 +160,7 @@ export default function Proofread() {
     queryKey: ["/api/proofreading-categories"],
   });
 
-  // Fetch proofreading output for selected proofreading
+  // Fetch proofreading output for selected proofreading with polling
   const { data: output, isLoading: outputLoading } = useQuery<ProofreadingOutput | null>({
     queryKey: ["/api/proofreadings", selectedProofreadingId, "output"],
     queryFn: async () => {
@@ -168,6 +169,38 @@ export default function Proofread() {
       return await response.json() as ProofreadingOutput | null;
     },
     enabled: !!selectedProofreadingId,
+    refetchInterval: (query) => {
+      const data = query.state.data;
+      if (!data) return false;
+      
+      // Skip if polling was manually stopped for this output
+      if (stoppedPollingOutputs.has(data.id)) {
+        return false;
+      }
+      
+      // Poll if status is processing
+      const isProcessing = data.status === 'processing';
+      
+      if (isProcessing) {
+        // Check if the output has been stuck for too long (30 minutes)
+        if (data.updatedAt) {
+          const lastUpdate = new Date(data.updatedAt);
+          const now = new Date();
+          const minutesSinceUpdate = (now.getTime() - lastUpdate.getTime()) / (1000 * 60);
+          
+          // If stuck for more than 30 minutes, stop polling
+          if (minutesSinceUpdate > 30) {
+            console.warn(`[Polling] Output ${data.id} has been stuck for ${minutesSinceUpdate.toFixed(1)} minutes, stopping polling`);
+            setStoppedPollingOutputs(prev => new Set(prev).add(data.id));
+            return false;
+          }
+        }
+        // Poll every 2 seconds if processing
+        return 2000;
+      }
+      
+      return false;
+    },
   });
 
   // Get default model
@@ -319,11 +352,62 @@ export default function Proofread() {
     },
   });
 
+  // Send to Translate mutation
+  const sendToTranslateMutation = useMutation({
+    mutationFn: async ({ title, sourceText }: { title: string; sourceText: string }) => {
+      const response = await apiRequest("POST", "/api/translations", {
+        title,
+        sourceText,
+        isPrivate: false,
+      });
+      return await response.json() as { id: string; title: string };
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/translations"] });
+      toast({
+        title: "Translation created",
+        description: "Your proofreading has been sent to Translate.",
+      });
+      // Navigate to translate page
+      setLocation("/translate");
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Failed to create translation",
+        description: error.message || "Could not create translation.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const handleSendToTranslate = () => {
+    if (!selectedProofreadingId) return;
+    
+    // Get the current HTML content from the editor
+    const htmlContent = editorRef.current?.getHTML() || sourceText;
+    
+    // Use the current title
+    const currentTitle = title || "Untitled Translation";
+    
+    sendToTranslateMutation.mutate({
+      title: currentTitle,
+      sourceText: htmlContent,
+    });
+  };
+
   // Execute proofreading mutation
   const executeProofreadingMutation = useMutation({
     mutationFn: async ({ proofreadingId, categoryIds, modelId, text }: { proofreadingId: string; categoryIds: string[]; modelId: string; text: string }) => {
-      // Add this proofreading to the in-progress set
-      setProofreadingInProgress(prev => new Set(prev).add(proofreadingId));
+      // Clear stopped polling for this output if restarting
+      setStoppedPollingOutputs(prev => {
+        const next = new Set(prev);
+        // Find the output ID if we have it
+        const currentOutput = output;
+        if (currentOutput && selectedProofreadingId === proofreadingId) {
+          next.delete(currentOutput.id);
+        }
+        return next;
+      });
       
       const response = await apiRequest("POST", "/api/proofread-execute", {
         proofreadingId,
@@ -331,44 +415,25 @@ export default function Proofread() {
         modelId,
         text,
       });
-      return { data: await response.json() as ProofreadingOutput, proofreadingId };
-    },
-    onSuccess: ({ proofreadingId }) => {
-      // Remove from in-progress set
-      setProofreadingInProgress(prev => {
-        const next = new Set(prev);
-        next.delete(proofreadingId);
-        return next;
-      });
+      const newOutput = await response.json() as ProofreadingOutput;
       
+      // Invalidate queries to start polling
       queryClient.invalidateQueries({ queryKey: ["/api/proofreadings", proofreadingId, "output"] });
       
-      // Only show toast and clear local state if we're still on this proofreading
-      if (selectedProofreadingId === proofreadingId) {
-        setIsProofreading(false);
-        toast({
-          title: "Proofreading complete",
-          description: "Your text has been proofread successfully.",
-        });
-      }
+      return { data: newOutput, proofreadingId };
     },
-    onError: (error: Error, { proofreadingId }) => {
-      // Remove from in-progress set
-      setProofreadingInProgress(prev => {
-        const next = new Set(prev);
-        next.delete(proofreadingId);
-        return next;
+    onSuccess: ({ proofreadingId }) => {
+      toast({
+        title: "Proofreading started",
+        description: "Your text is being proofread. Results will appear when ready.",
       });
-      
-      // Only show toast and clear local state if we're still on this proofreading
-      if (selectedProofreadingId === proofreadingId) {
-        setIsProofreading(false);
-        toast({
-          title: "Proofreading failed",
-          description: error.message || "Failed to proofread text. Please try again.",
-          variant: "destructive",
-        });
-      }
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Failed to start proofreading",
+        description: error.message || "Failed to start proofreading.",
+        variant: "destructive",
+      });
     },
   });
 
@@ -394,10 +459,7 @@ export default function Proofread() {
     setHasUnsavedChanges(false);
     setLastSavedContent(proofreading.sourceText);
     
-    // Check if this proofreading is in progress
-    // If so, show the loading state in the current view
-    const isThisInProgress = proofreadingInProgress.has(proofreading.id);
-    setIsProofreading(isThisInProgress);
+    // Note: Status is now tracked via server-side polling, no need for local state
   };
 
   const handleNewProofreading = () => {
@@ -427,8 +489,7 @@ export default function Proofread() {
       setSelectedCardIndex(null);
       setHasUnsavedChanges(false);
       setLastSavedContent(proofreading.sourceText);
-      const isThisInProgress = proofreadingInProgress.has(proofreading.id);
-      setIsProofreading(isThisInProgress);
+      // Note: Status is now tracked via server-side polling, no need for local state
     } else if (unsavedChangesAction.type === 'new') {
       // Continue with creating new proofreading
       setHasUnsavedChanges(false);
@@ -618,8 +679,6 @@ export default function Proofread() {
       return;
     }
 
-    setIsProofreading(true);
-
     try {
       // Clear highlights before saving to prevent them from being persisted
       editorRef.current?.clearHighlights();
@@ -638,11 +697,9 @@ export default function Proofread() {
           lastUsedModelId: selectedModel,
         },
       });
-      
-      // Suppress the success toast since we're about to proofread
-      // (The toast will still show but will be immediately followed by proofreading status)
 
       // Then execute proofreading with the HTML formatted text (so LLM can understand structure)
+      // This is async - polling will handle status updates
       executeProofreadingMutation.mutate({
         proofreadingId: selectedProofreadingId,
         categoryIds: selectedCategories,
@@ -650,7 +707,6 @@ export default function Proofread() {
         text: currentHTML, // Send HTML instead of plain text
       });
     } catch (error) {
-      setIsProofreading(false);
       toast({
         title: "Failed to save",
         description: error instanceof Error ? error.message : "Failed to save proofreading before executing.",
@@ -944,7 +1000,7 @@ export default function Proofread() {
                           />
                         ) : (
                           <div className="flex items-center gap-2 min-w-0">
-                            <h3 className="font-medium truncate flex-1 min-w-0">{proofreading.title}</h3>
+                            <h3 className="text-sm font-medium truncate flex-1 min-w-0">{proofreading.title}</h3>
                           </div>
                         )}
                         <p className="text-xs text-muted-foreground mt-1 truncate">
@@ -1106,11 +1162,11 @@ export default function Proofread() {
               {/* Proofread Button */}
               <Button
                 onClick={handleProofread}
-                disabled={!selectedProofreadingId || !canEditSelected || isProofreading || selectedCategories.length === 0 || !selectedModel}
+                disabled={!selectedProofreadingId || !canEditSelected || (output?.status === 'processing' && !stoppedPollingOutputs.has(output.id)) || selectedCategories.length === 0 || !selectedModel || executeProofreadingMutation.isPending}
                 className="flex-shrink-0"
                 variant="outline"
               >
-                {isProofreading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                {executeProofreadingMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                 Proofread
               </Button>
             </div>
@@ -1298,12 +1354,85 @@ export default function Proofread() {
                   </p>
                 </div>
               </div>
-            ) : isProofreading || outputLoading ? (
+            ) : outputLoading ? (
               <div className="flex h-full items-center justify-center p-8">
                 <div className="text-center">
                   <Loader2 className="h-8 w-8 animate-spin text-primary mx-auto mb-4" />
-                  <p className="text-sm font-medium">Proofreading in progress...</p>
-                  <p className="text-xs text-muted-foreground mt-1">Please wait</p>
+                  <p className="text-sm font-medium">Loading...</p>
+                </div>
+              </div>
+            ) : output && output.status === 'processing' ? (
+              <div className="flex h-full items-center justify-center p-8">
+                <div className="text-center space-y-4">
+                  {stoppedPollingOutputs.has(output.id) ? (
+                    <>
+                      <p className="text-sm font-medium">Proofreading stopped</p>
+                      <p className="text-xs text-muted-foreground mb-4">Polling has been stopped</p>
+                      <Button
+                        onClick={() => {
+                          if (!selectedProofreadingId || !selectedModel || selectedCategories.length === 0) return;
+                          const currentHTML = editorRef.current?.getHTML() || sourceText;
+                          executeProofreadingMutation.mutate({
+                            proofreadingId: selectedProofreadingId,
+                            categoryIds: selectedCategories,
+                            modelId: selectedModel,
+                            text: currentHTML,
+                          });
+                        }}
+                        disabled={executeProofreadingMutation.isPending || !selectedModel || selectedCategories.length === 0}
+                        size="sm"
+                        variant="default"
+                      >
+                        {executeProofreadingMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                        <RotateCw className="mr-2 h-4 w-4" />
+                        Restart
+                      </Button>
+                    </>
+                  ) : (
+                    <>
+                      <Loader2 className="h-8 w-8 animate-spin text-primary mx-auto mb-4" />
+                      <p className="text-sm font-medium">Proofreading in progress...</p>
+                      <p className="text-xs text-muted-foreground mt-1 mb-4">Please wait</p>
+                      <Button
+                        onClick={() => {
+                          if (output) {
+                            setStoppedPollingOutputs(prev => new Set(prev).add(output.id));
+                          }
+                        }}
+                        variant="outline"
+                        size="sm"
+                      >
+                        <Square className="h-4 w-4 mr-2 fill-current" />
+                        Stop
+                      </Button>
+                    </>
+                  )}
+                </div>
+              </div>
+            ) : output && output.status === 'failed' ? (
+              <div className="flex h-full items-center justify-center p-8">
+                <div className="text-center space-y-4">
+                  <p className="text-sm font-medium text-destructive">Proofreading failed</p>
+                  <p className="text-xs text-muted-foreground mb-4">The proofreading process encountered an error</p>
+                  <Button
+                    onClick={() => {
+                      if (!selectedProofreadingId || !selectedModel || selectedCategories.length === 0) return;
+                      const currentHTML = editorRef.current?.getHTML() || sourceText;
+                      executeProofreadingMutation.mutate({
+                        proofreadingId: selectedProofreadingId,
+                        categoryIds: selectedCategories,
+                        modelId: selectedModel,
+                        text: currentHTML,
+                      });
+                    }}
+                    disabled={executeProofreadingMutation.isPending || !selectedModel || selectedCategories.length === 0}
+                    size="sm"
+                    variant="default"
+                  >
+                    {executeProofreadingMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                    <RotateCw className="mr-2 h-4 w-4" />
+                    Retry
+                  </Button>
                 </div>
               </div>
             ) : !output || !results || results.length === 0 ? (
@@ -1371,6 +1500,22 @@ export default function Proofread() {
               </ScrollArea>
             )}
           </div>
+
+          {/* Footer with Send to Translate button */}
+          {selectedProofreadingId && (
+            <div className="border-t px-4 py-3 flex-shrink-0 flex justify-end">
+              <Button
+                onClick={handleSendToTranslate}
+                disabled={sendToTranslateMutation.isPending}
+                size="sm"
+                variant="default"
+              >
+                {sendToTranslateMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                <ArrowRight className="mr-2 h-4 w-4" />
+                Send to Translate
+              </Button>
+            </div>
+          )}
         </div>
       </div>
 

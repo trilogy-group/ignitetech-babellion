@@ -86,7 +86,7 @@ export type Translation = typeof translations.$inferSelect & {
 
 // Status enums for translation and proofreading
 export const translationStatusEnum = pgEnum('translation_status', ['pending', 'translating', 'completed', 'failed']);
-export const proofreadStatusEnum = pgEnum('proofread_status', ['pending', 'proofreading', 'completed', 'failed', 'skipped']);
+export const proofreadStatusEnum = pgEnum('proofread_status', ['pending', 'proof_reading', 'applying_proofread', 'completed', 'failed', 'skipped']);
 
 // Translation outputs table (stores individual language translations)
 export const translationOutputs = pgTable("translation_outputs", {
@@ -98,6 +98,8 @@ export const translationOutputs = pgTable("translation_outputs", {
   modelId: varchar("model_id").references(() => aiModels.id),
   translationStatus: translationStatusEnum("translation_status").default('pending').notNull(),
   proofreadStatus: proofreadStatusEnum("proofread_status").default('pending').notNull(),
+  proofreadProposedChanges: jsonb("proofread_proposed_changes"), // Stores bullet-point list of proposed changes from Step 1
+  proofreadOriginalTranslation: text("proofread_original_translation"), // Stores pre-proofread translation for reference
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });

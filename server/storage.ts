@@ -59,8 +59,9 @@ export interface IStorage {
   getTranslationOutput(id: string): Promise<TranslationOutput | undefined>;
   getTranslationOutputs(translationId: string): Promise<TranslationOutput[]>;
   createTranslationOutput(output: InsertTranslationOutput): Promise<TranslationOutput>;
-  updateTranslationOutput(id: string, text: string): Promise<TranslationOutput>;
-  updateTranslationOutputStatus(id: string, status: Partial<{ translationStatus: 'pending' | 'translating' | 'completed' | 'failed'; proofreadStatus: 'pending' | 'proofreading' | 'completed' | 'failed' | 'skipped' }>): Promise<TranslationOutput>;
+  updateTranslationOutput(id: string, text: string | null): Promise<TranslationOutput>;
+  updateTranslationOutputStatus(id: string, status: Partial<{ translationStatus: 'pending' | 'translating' | 'completed' | 'failed'; proofreadStatus: 'pending' | 'proof_reading' | 'applying_proofread' | 'completed' | 'failed' | 'skipped' }>): Promise<TranslationOutput>;
+  updateTranslationOutputProofreadData(id: string, data: { proofreadProposedChanges?: unknown; proofreadOriginalTranslation?: string | null }): Promise<TranslationOutput>;
   deleteTranslationOutput(id: string): Promise<void>;
   deleteTranslationOutputsByTranslationId(translationId: string): Promise<void>;
 
@@ -306,11 +307,23 @@ export class DatabaseStorage implements IStorage {
 
   async updateTranslationOutputStatus(
     id: string,
-    status: Partial<{ translationStatus: 'pending' | 'translating' | 'completed' | 'failed'; proofreadStatus: 'pending' | 'proofreading' | 'completed' | 'failed' | 'skipped' }>
+    status: Partial<{ translationStatus: 'pending' | 'translating' | 'completed' | 'failed'; proofreadStatus: 'pending' | 'proof_reading' | 'applying_proofread' | 'completed' | 'failed' | 'skipped' }>
   ): Promise<TranslationOutput> {
     const [updated] = await db
       .update(translationOutputs)
       .set({ ...status, updatedAt: new Date() })
+      .where(eq(translationOutputs.id, id))
+      .returning();
+    return updated;
+  }
+
+  async updateTranslationOutputProofreadData(
+    id: string,
+    data: { proofreadProposedChanges?: unknown; proofreadOriginalTranslation?: string | null }
+  ): Promise<TranslationOutput> {
+    const [updated] = await db
+      .update(translationOutputs)
+      .set({ ...data, updatedAt: new Date() })
       .where(eq(translationOutputs.id, id))
       .returning();
     return updated;

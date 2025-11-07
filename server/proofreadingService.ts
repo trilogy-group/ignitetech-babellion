@@ -75,21 +75,26 @@ export class ProofreadingService {
 
       // Handle different response formats
       if (Array.isArray(parsed)) {
-        return parsed as ProofreadingResult[];
+        // Check if it's a direct array of results
+        if (parsed.length > 0 && typeof parsed[0] === 'object' && parsed[0] !== null) {
+          const firstItem = parsed[0] as Record<string, unknown>;
+          // Check if first item has a 'results' property (nested structure: [{results: [...]}])
+          if (firstItem.results && Array.isArray(firstItem.results)) {
+            return firstItem.results as ProofreadingResult[];
+          }
+          // Check if first item has the expected structure (direct array: [{rule: ..., ...}])
+          if (firstItem.rule || firstItem.original_text !== undefined) {
+            return parsed as ProofreadingResult[];
+          }
+        }
+        // If array is empty or doesn't match expected structure, return empty
+        return [];
       }
 
+      // Handle object with results property: {results: [...]}
       const parsedObj = parsed as Record<string, unknown>;
       if (parsedObj.results && Array.isArray(parsedObj.results)) {
         return parsedObj.results as ProofreadingResult[];
-      }
-
-      // If the response is an object with a results property
-      if (typeof parsedObj === 'object' && parsedObj !== null) {
-        // Try to find results array
-        const results = (parsedObj as Record<string, unknown>).results;
-        if (Array.isArray(results)) {
-          return results as ProofreadingResult[];
-        }
       }
 
       // If we can't find results, return empty array
@@ -108,8 +113,8 @@ export class ProofreadingService {
     // Construct system prompt
     const systemPrompt = `You are a linguistic expert in proof reading. 
     You are to proof read the text given against common grammatical and linguistic errors, and the given <rules>. 
-    You must output the proofread changes only in the format of [results: [{rule: rule-name, original_text:..., suggested_change:....., rationale:...}]]. 
-    You must output this in a JSON format. If no changes are needed, you must output an empty array. 
+    You must output the proofread changes only in the format of {"results": [{"rule": rule-name, "original_text":..., "suggested_change":....., "rationale":...in English...}]}. 
+    You must output this in a valid JSON format. If no changes are needed, you must output {"results": [{"rule": "no changes needed", "original_text": "N/A", "suggested_change": "N/A", "rationale": clean evaluation of the text}]}. 
     If you are correcting common grammatical or spelling errors, use "grammar" or "spelling" as the rule name.
     If there are foreign language terms use, use multi-lingual lenses to evaluate those parts of the text against grammar and spelling errors.
     

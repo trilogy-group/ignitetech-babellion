@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
-import { useQuery, useMutation } from "@tanstack/react-query";
+import { useQuery, useMutation, useInfiniteQuery } from "@tanstack/react-query";
 import { useLocation } from "wouter";
-import { Plus, Trash2, Loader2, Copy, Check, Lock, Globe, Pencil, FileText, Save, X, RotateCw, ChevronLeft, ChevronRight, Square } from "lucide-react";
+import { Plus, Trash2, Loader2, Copy, Check, Lock, Globe, Pencil, FileText, Save, X, RotateCw, ChevronLeft, ChevronRight, Square, Search } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -91,11 +91,53 @@ export default function Translate() {
   const [proofreadChangesDialogOpen, setProofreadChangesDialogOpen] = useState(false);
   const [proofreadChangesOutputId, setProofreadChangesOutputId] = useState<string | null>(null);
   const [stoppedPollingOutputs, setStoppedPollingOutputs] = useState<Set<string>>(new Set());
+  const [isSearchExpanded, setIsSearchExpanded] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchTerm, setSearchTerm] = useState(""); // Actual search term used for API
+  const searchInputRef = useRef<HTMLInputElement>(null);
 
-  // Fetch translations
-  const { data: translations = [], isLoading: translationsLoading } = useQuery<Translation[]>({
-    queryKey: ["/api/translations"],
+  // Auto-focus search input when expanded
+  useEffect(() => {
+    if (isSearchExpanded && searchInputRef.current) {
+      searchInputRef.current.focus();
+    }
+  }, [isSearchExpanded]);
+
+  // Fetch translations with infinite scroll and server-side search
+  const {
+    data: translationsData,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+    isLoading: translationsLoading,
+  } = useInfiniteQuery({
+    queryKey: ["/api/translations", searchTerm],
+    queryFn: async ({ pageParam = 1 }) => {
+      const params = new URLSearchParams({
+        page: String(pageParam),
+        limit: "20",
+        ...(searchTerm && searchTerm.length >= 2 ? { search: searchTerm } : {}),
+      });
+      const response = await apiRequest("GET", `/api/translations?${params}`);
+      return await response.json() as {
+        data: Translation[];
+        pagination: {
+          page: number;
+          limit: number;
+          total: number;
+          totalPages: number;
+          hasMore: boolean;
+        };
+      };
+    },
+    getNextPageParam: (lastPage) => {
+      return lastPage.pagination.hasMore ? lastPage.pagination.page + 1 : undefined;
+    },
+    initialPageParam: 1,
   });
+
+  // Flatten paginated translations
+  const translations = translationsData?.pages.flatMap(page => page.data) ?? [];
 
   // Fetch models
   const { data: models = [] } = useQuery<AiModel[]>({
@@ -163,6 +205,32 @@ export default function Translate() {
   useEffect(() => {
     selectedTranslationIdRef.current = selectedTranslationId;
   }, [selectedTranslationId]);
+
+  // Handle search
+  const handleSearch = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      if (searchQuery.length >= 2) {
+        setSearchTerm(searchQuery); // Trigger actual search
+      } else {
+        setSearchTerm(""); // Clear search if less than 2 chars
+      }
+    }
+  };
+
+  const handleClearSearch = () => {
+    setSearchQuery("");
+    setSearchTerm("");
+    setIsSearchExpanded(false);
+  };
+
+  const handleToggleSearch = () => {
+    if (isSearchExpanded) {
+      handleClearSearch();
+    } else {
+      setIsSearchExpanded(true);
+    }
+  };
 
   // Handle hash-based URL navigation on initial load only
   useEffect(() => {
@@ -908,29 +976,72 @@ export default function Translate() {
       {/* Left Sidebar - Translation History (Desktop only) */}
       <div className={`hidden md:flex ${isLeftPanelCollapsed ? 'w-12' : 'w-80'} flex-col border-r bg-sidebar flex-none transition-all duration-200`}>
         <div className={`flex items-center ${isLeftPanelCollapsed ? 'flex-col justify-start gap-2' : 'justify-between'} border-b p-4`}>
-          {!isLeftPanelCollapsed && <h2 className="text-lg font-semibold">Translation History</h2>}
-          <div className={`flex items-center ${isLeftPanelCollapsed ? 'flex-col' : 'gap-2'} ${isLeftPanelCollapsed ? '' : 'ml-auto'}`}>
-            <Button 
-              size="sm" 
-              onClick={handleNewTranslation} 
-              disabled={createMutation.isPending} 
-              data-testid="button-new-translation"
-              variant="outline"
-              className={isLeftPanelCollapsed ? "h-8 w-8 p-0" : ""}
-              title="New Translation"
-            >
-              {createMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
-            </Button>
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={() => setIsLeftPanelCollapsed(!isLeftPanelCollapsed)}
-              className="h-8 w-8 p-0"
-              title={isLeftPanelCollapsed ? "Expand panel" : "Collapse panel"}
-            >
-              {isLeftPanelCollapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
-            </Button>
-          </div>
+          {!isLeftPanelCollapsed && !isSearchExpanded && <h2 className="text-lg font-semibold">Translation History</h2>}
+          {!isLeftPanelCollapsed && isSearchExpanded ? (
+            <div className="flex-1 flex items-center gap-2 w-full">
+              <Input
+                ref={searchInputRef}
+                type="text"
+                placeholder="Search (min 2 chars)..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                onKeyDown={handleSearch}
+                className="h-8 flex-1"
+              />
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={handleClearSearch}
+                className="h-8 w-8 p-0 flex-shrink-0"
+                title="Clear search"
+              >
+                <X className="h-4 w-4" />
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={handleToggleSearch}
+                className="h-8 w-8 p-0 flex-shrink-0"
+                title="Search translations"
+              >
+                <Search className="h-4 w-4" />
+              </Button>
+            </div>
+          ) : (
+            <div className={`flex items-center ${isLeftPanelCollapsed ? 'flex-col' : 'gap-2'} ${isLeftPanelCollapsed ? '' : 'ml-auto'}`}>
+              {!isLeftPanelCollapsed && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={handleToggleSearch}
+                  className="h-8 w-8 p-0"
+                  title="Search translations"
+                >
+                  <Search className="h-4 w-4" />
+                </Button>
+              )}
+              <Button 
+                size="sm" 
+                onClick={handleNewTranslation} 
+                disabled={createMutation.isPending} 
+                data-testid="button-new-translation"
+                variant="outline"
+                className={isLeftPanelCollapsed ? "h-8 w-8 p-0" : ""}
+                title="New Translation"
+              >
+                {createMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => setIsLeftPanelCollapsed(!isLeftPanelCollapsed)}
+                className="h-8 w-8 p-0"
+                title={isLeftPanelCollapsed ? "Expand panel" : "Collapse panel"}
+              >
+                {isLeftPanelCollapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
+              </Button>
+            </div>
+          )}
         </div>
 
         {!isLeftPanelCollapsed && (
@@ -939,18 +1050,20 @@ export default function Translate() {
             <div className="flex items-center justify-center p-8">
               <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
             </div>
-          ) : translations.length === 0 ? (
+          ) : !translationsData || translationsData.pages[0]?.data.length === 0 ? (
             <div className="flex flex-col items-center justify-center p-8 text-center">
-              <p className="mb-2 text-sm font-medium">No translations yet</p>
-              <p className="mb-4 text-xs text-muted-foreground">Create your first translation to get started</p>
+              <p className="mb-2 text-sm font-medium">{searchTerm ? "No results found" : "No translations yet"}</p>
+              <p className="mb-4 text-xs text-muted-foreground">
+                {searchTerm ? "Try a different search term" : "Create your first translation to get started"}
+              </p>
             </div>
           ) : (
-            <div className="space-y-1 p-2" style={{ width: '100%', maxWidth: '20rem' }}>
+            <div className="space-y-0.5 p-2" style={{ width: '100%', maxWidth: '20rem' }}>
               <TooltipProvider>
                 {translations.map((translation) => (
                   <Card
                     key={translation.id}
-                    className={`group cursor-pointer p-4 hover-elevate overflow-hidden ${
+                    className={`group cursor-pointer p-2 hover-elevate overflow-hidden ${
                       selectedTranslationId === translation.id ? "bg-sidebar-accent" : ""
                     }`}
                     onClick={() => handleSelectTranslation(translation)}
@@ -993,7 +1106,7 @@ export default function Translate() {
                           />
                         ) : (
                           <div className="flex items-center gap-2 min-w-0">
-                            <h3 className="font-medium truncate flex-1 min-w-0">{translation.title}</h3>
+                            <h3 className="text-sm font-medium truncate flex-1 min-w-0">{translation.title}</h3>
                           </div>
                         )}
                         <p className="text-xs text-muted-foreground mt-1 truncate">
@@ -1031,8 +1144,30 @@ export default function Translate() {
                       )}
                     </div>
                   </Card>
-                ))}
+                  ))}
               </TooltipProvider>
+              
+              {/* Load More / Loading indicator */}
+              {hasNextPage && (
+                <div className="p-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => fetchNextPage()}
+                    disabled={isFetchingNextPage}
+                    className="w-full"
+                  >
+                    {isFetchingNextPage ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        Loading...
+                      </>
+                    ) : (
+                      'Load More'
+                    )}
+                  </Button>
+                </div>
+              )}
             </div>
           )}
           </ScrollArea>
@@ -1841,7 +1976,22 @@ export default function Translate() {
           <AlertDialogHeader>
             <AlertDialogTitle>Delete Translation</AlertDialogTitle>
             <AlertDialogDescription>
-              Are you sure you want to delete this translation? This action cannot be undone and will remove all associated translation outputs.
+              {(() => {
+                const translation = translations.find(t => t.id === deleteConfirmId);
+                if (!translation) return "Are you sure you want to delete this translation?";
+                
+                const isOwner = user && translation.userId === user.id;
+                const ownerText = isOwner ? "you" : 
+                  (translation.owner?.firstName || translation.owner?.email || translation.userId);
+                
+                return (
+                  <>
+                    You are deleting <span className="font-semibold">"{translation.title}"</span> by {ownerText}.
+                    <br /><br />
+                    This action cannot be undone and will remove all associated translation outputs.
+                  </>
+                );
+              })()}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

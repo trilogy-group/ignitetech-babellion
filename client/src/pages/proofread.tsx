@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
-import { useQuery, useMutation } from "@tanstack/react-query";
+import { useQuery, useMutation, useInfiniteQuery } from "@tanstack/react-query";
 import { useLocation } from "wouter";
-import { Plus, Trash2, Loader2, Check, Lock, Globe, Pencil, FileText, Save, X, History, Code, ChevronDown, ArrowRight, Square, RotateCw } from "lucide-react";
+import { Plus, Trash2, Loader2, Check, Lock, Globe, Pencil, FileText, Save, X, History, Code, ChevronDown, ArrowRight, Square, RotateCw, Search } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -100,6 +100,17 @@ export default function Proofread() {
   const [isRawView, setIsRawView] = useState(false);
   const editorRef = useRef<RichTextEditorRef>(null);
   const highlightTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const [isSearchExpanded, setIsSearchExpanded] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchTerm, setSearchTerm] = useState(""); // Actual search term used for API
+  const searchInputRef = useRef<HTMLInputElement>(null);
+
+  // Auto-focus search input when expanded
+  useEffect(() => {
+    if (isSearchExpanded && searchInputRef.current) {
+      searchInputRef.current.focus();
+    }
+  }, [isSearchExpanded]);
 
   // Clear highlights when selectedCardIndex changes to null
   useEffect(() => {
@@ -145,10 +156,41 @@ export default function Proofread() {
     };
   }, [selectedCardIndex]);
 
-  // Fetch proofreadings
-  const { data: proofreadings = [], isLoading: proofreadingsLoading } = useQuery<Proofreading[]>({
-    queryKey: ["/api/proofreadings"],
+  // Fetch proofreadings with infinite scroll and server-side search
+  const {
+    data: proofreadingsData,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+    isLoading: proofreadingsLoading,
+  } = useInfiniteQuery({
+    queryKey: ["/api/proofreadings", searchTerm],
+    queryFn: async ({ pageParam = 1 }) => {
+      const params = new URLSearchParams({
+        page: String(pageParam),
+        limit: "20",
+        ...(searchTerm && searchTerm.length >= 2 ? { search: searchTerm } : {}),
+      });
+      const response = await apiRequest("GET", `/api/proofreadings?${params}`);
+      return await response.json() as {
+        data: Proofreading[];
+        pagination: {
+          page: number;
+          limit: number;
+          total: number;
+          totalPages: number;
+          hasMore: boolean;
+        };
+      };
+    },
+    getNextPageParam: (lastPage) => {
+      return lastPage.pagination.hasMore ? lastPage.pagination.page + 1 : undefined;
+    },
+    initialPageParam: 1,
   });
+
+  // Flatten paginated proofreadings
+  const proofreadings = proofreadingsData?.pages.flatMap(page => page.data) ?? [];
 
   // Fetch models
   const { data: models = [] } = useQuery<AiModel[]>({
@@ -220,6 +262,32 @@ export default function Proofread() {
   useEffect(() => {
     selectedProofreadingIdRef.current = selectedProofreadingId;
   }, [selectedProofreadingId]);
+
+  // Handle search
+  const handleSearch = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      if (searchQuery.length >= 2) {
+        setSearchTerm(searchQuery); // Trigger actual search
+      } else {
+        setSearchTerm(""); // Clear search if less than 2 chars
+      }
+    }
+  };
+
+  const handleClearSearch = () => {
+    setSearchQuery("");
+    setSearchTerm("");
+    setIsSearchExpanded(false);
+  };
+
+  const handleToggleSearch = () => {
+    if (isSearchExpanded) {
+      handleClearSearch();
+    } else {
+      setIsSearchExpanded(true);
+    }
+  };
 
   // Handle hash-based URL navigation on initial load only
   useEffect(() => {
@@ -917,15 +985,58 @@ export default function Proofread() {
       {/* Left Sidebar - Proofreading History (Desktop only) */}
       <div className="hidden md:flex w-80 flex-col border-r bg-sidebar flex-none">
         <div className="flex items-center justify-between gap-4 border-b p-4">
-          <h2 className="text-lg font-semibold">Proofreading History</h2>
-          <Button 
-            size="sm" 
-            onClick={handleNewProofreading} 
-            disabled={createMutation.isPending} 
-            variant="outline"
-          >
-            {createMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
-          </Button>
+          {!isSearchExpanded && <h2 className="text-lg font-semibold">Proofreading History</h2>}
+          {isSearchExpanded ? (
+            <div className="flex-1 flex items-center gap-2 w-full">
+              <Input
+                ref={searchInputRef}
+                type="text"
+                placeholder="Search (min 2 chars)..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                onKeyDown={handleSearch}
+                className="h-8 flex-1"
+              />
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={handleClearSearch}
+                className="h-8 w-8 p-0 flex-shrink-0"
+                title="Clear search"
+              >
+                <X className="h-4 w-4" />
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={handleToggleSearch}
+                className="h-8 w-8 p-0 flex-shrink-0"
+                title="Search proofreadings"
+              >
+                <Search className="h-4 w-4" />
+              </Button>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2">
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={handleToggleSearch}
+                className="h-8 w-8 p-0"
+                title="Search proofreadings"
+              >
+                <Search className="h-4 w-4" />
+              </Button>
+              <Button 
+                size="sm" 
+                onClick={handleNewProofreading} 
+                disabled={createMutation.isPending} 
+                variant="outline"
+              >
+                {createMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+              </Button>
+            </div>
+          )}
         </div>
 
         <ScrollArea className="flex-1" viewportClassName="max-w-full">
@@ -933,20 +1044,22 @@ export default function Proofread() {
             <div className="flex items-center justify-center p-8">
               <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
             </div>
-          ) : proofreadings.length === 0 ? (
+          ) : !proofreadingsData || proofreadingsData.pages[0]?.data.length === 0 ? (
             <div className="flex flex-col items-center justify-center p-8 text-center">
-              <p className="mb-2 text-sm font-medium">No proofreadings yet</p>
-              <p className="mb-4 text-xs text-muted-foreground">Create your first proofreading to get started</p>
+              <p className="mb-2 text-sm font-medium">{searchTerm ? "No results found" : "No proofreadings yet"}</p>
+              <p className="mb-4 text-xs text-muted-foreground">
+                {searchTerm ? "Try a different search term" : "Create your first proofreading to get started"}
+              </p>
             </div>
           ) : (
-            <div className="space-y-1 p-2" style={{ width: '100%', maxWidth: '20rem' }}>
+            <div className="space-y-0.5 p-2" style={{ width: '100%', maxWidth: '20rem' }}>
               <TooltipProvider>
                 {proofreadings.map((proofreading) => {
                   const isInProgress = proofreadingInProgress.has(proofreading.id);
                   return (
                   <Card
                     key={proofreading.id}
-                    className={`group cursor-pointer p-4 hover-elevate overflow-hidden ${
+                    className={`group cursor-pointer p-2 hover-elevate overflow-hidden ${
                       selectedProofreadingId === proofreading.id ? "bg-sidebar-accent" : ""
                     }`}
                     onClick={() => handleSelectProofreading(proofreading)}
@@ -1036,9 +1149,31 @@ export default function Proofread() {
                       )}
                     </div>
                   </Card>
-                  );
+                );
                 })}
               </TooltipProvider>
+              
+              {/* Load More / Loading indicator */}
+              {hasNextPage && (
+                <div className="p-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => fetchNextPage()}
+                    disabled={isFetchingNextPage}
+                    className="w-full"
+                  >
+                    {isFetchingNextPage ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        Loading...
+                      </>
+                    ) : (
+                      'Load More'
+                    )}
+                  </Button>
+                </div>
+              )}
             </div>
           )}
         </ScrollArea>
@@ -1532,7 +1667,22 @@ export default function Proofread() {
           <AlertDialogHeader>
             <AlertDialogTitle>Delete Proofreading</AlertDialogTitle>
             <AlertDialogDescription>
-              Are you sure you want to delete this proofreading? This action cannot be undone and will remove all associated results.
+              {(() => {
+                const proofreading = proofreadings.find(p => p.id === deleteConfirmId);
+                if (!proofreading) return "Are you sure you want to delete this proofreading?";
+                
+                const isOwner = user && proofreading.userId === user.id;
+                const ownerText = isOwner ? "you" : 
+                  (proofreading.owner?.firstName || proofreading.owner?.email || proofreading.userId);
+                
+                return (
+                  <>
+                    You are deleting <span className="font-semibold">"{proofreading.title}"</span> by {ownerText}.
+                    <br /><br />
+                    This action cannot be undone and will remove all associated results.
+                  </>
+                );
+              })()}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

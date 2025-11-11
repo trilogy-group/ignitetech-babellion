@@ -1,4 +1,4 @@
-import { Settings as SettingsIcon, LogOut, User, MessageSquare } from "lucide-react";
+import { Settings as SettingsIcon, LogOut, User, MessageSquare, Info } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import { Button } from "./ui/button";
 import { ThemeToggle } from "./theme-toggle";
@@ -15,11 +15,14 @@ import { Avatar, AvatarFallback, AvatarImage } from "./ui/avatar";
 import { Badge } from "./ui/badge";
 import { MobileNavMenu } from "./mobile-nav-menu";
 import { useIsMobile } from "@/hooks/use-mobile";
+import { useState } from "react";
+import { ReleaseNotesModal } from "./release-notes-modal";
 
 export function AppHeader() {
   const [location] = useLocation();
   const { user } = useAuth();
   const isMobile = useIsMobile();
+  const [isReleaseNotesOpen, setIsReleaseNotesOpen] = useState(false);
 
   const isProofread = location === "/proofread";
   const isTranslate = location === "/translate";
@@ -147,6 +150,17 @@ export function AppHeader() {
                 </>
               )}
               <DropdownMenuItem
+                onClick={() => setIsReleaseNotesOpen(true)}
+                data-testid="menu-release-notes"
+              >
+                <Info className="mr-2 h-4 w-4" />
+                <div className="flex items-center justify-between flex-1">
+                  <span>Babellion</span>
+                  <Badge variant="secondary" className="ml-2 text-xs">v1.3</Badge>
+                </div>
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
                 onClick={() => window.location.href = '/api/logout'}
                 data-testid="menu-logout"
               >
@@ -157,6 +171,8 @@ export function AppHeader() {
           </DropdownMenu>
         </div>
       </div>
+      
+      <ReleaseNotesModal open={isReleaseNotesOpen} onOpenChange={setIsReleaseNotesOpen} />
     </header>
   );
 }

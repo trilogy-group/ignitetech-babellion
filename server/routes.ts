@@ -19,6 +19,7 @@ import {
   insertProofreadingRuleSchema,
 } from "@shared/schema";
 import { logInfo, logError } from "./vite";
+import { retryOnDatabaseError } from "./retry";
 
 export async function registerRoutes(app: Express): Promise<Server> {
   // Auth middleware
@@ -40,8 +41,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/translations", isAuthenticated, async (req: any, res) => {
     try {
       const userId = req.user.id;
-      const translations = await storage.getTranslations(userId);
-      res.json(translations);
+      const page = parseInt(req.query.page as string) || 1;
+      const limit = parseInt(req.query.limit as string) || 20;
+      const search = req.query.search as string | undefined;
+
+      const result = await storage.getTranslationsPaginated(userId, page, limit, search);
+      res.json(result);
     } catch (error) {
       console.error("Error fetching translations:", error);
       res.status(500).json({ message: "Failed to fetch translations" });
@@ -254,25 +259,35 @@ export async function registerRoutes(app: Express): Promise<Server> {
           } catch (error) {
             const translateTime = Math.round((Date.now() - translateStartTime) / 1000);
             logError(`Translation failed ${translationId} into ${language.name}, time: ${translateTime}s`, "AI", error);
-            // Update status to failed
-            await storage.updateTranslationOutputStatus(output.id, { translationStatus: 'failed' });
+            // Update status to failed with retry
+            await retryOnDatabaseError(() => 
+              storage.updateTranslationOutputStatus(output.id, { translationStatus: 'failed' })
+            );
             return; // Exit early if translation fails
           }
 
           const translateTime = Math.round((Date.now() - translateStartTime) / 1000);
           logInfo(`Translated ${translationId} into ${language.name}, time: ${translateTime}s`, "AI");
 
-          // Update with translated text and mark translation as completed
-          await storage.updateTranslationOutput(output.id, translatedText);
-          await storage.updateTranslationOutputStatus(output.id, { translationStatus: 'completed' });
+          // Update with translated text and mark translation as completed (with retry)
+          await retryOnDatabaseError(() => 
+            storage.updateTranslationOutput(output.id, translatedText)
+          );
+          await retryOnDatabaseError(() => 
+            storage.updateTranslationOutputStatus(output.id, { translationStatus: 'completed' })
+          );
 
           // Step 2: Automatically trigger proofreading
           try {
-            // Update proofread status to proof_reading
-            await storage.updateTranslationOutputStatus(output.id, { proofreadStatus: 'proof_reading' });
+            // Update proofread status to proof_reading (with retry)
+            await retryOnDatabaseError(() => 
+              storage.updateTranslationOutputStatus(output.id, { proofreadStatus: 'proof_reading' })
+            );
 
-            // Get proofreading system prompt
-            const proofreadPromptSetting = await storage.getSetting('proofreading_system_prompt');
+            // Get proofreading system prompt (with retry)
+            const proofreadPromptSetting = await retryOnDatabaseError(() => 
+              storage.getSetting('proofreading_system_prompt')
+            );
             const proofreadSystemPrompt = proofreadPromptSetting?.value;
 
             logInfo(`Proofreading ${translationId} into ${language.name}`, "AI");
@@ -288,14 +303,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
               proofreadSystemPrompt
             );
 
-            // Save proposed changes and original translation
-            await storage.updateTranslationOutputProofreadData(output.id, {
-              proofreadProposedChanges: step1Result.proposedChanges,
-              proofreadOriginalTranslation: translatedText,
-            });
+            // Save proposed changes and original translation (with retry)
+            await retryOnDatabaseError(() => 
+              storage.updateTranslationOutputProofreadData(output.id, {
+                proofreadProposedChanges: step1Result.proposedChanges,
+                proofreadOriginalTranslation: translatedText,
+              })
+            );
 
-            // Update status to applying_proofread before Step 2
-            await storage.updateTranslationOutputStatus(output.id, { proofreadStatus: 'applying_proofread' });
+            // Update status to applying_proofread before Step 2 (with retry)
+            await retryOnDatabaseError(() => 
+              storage.updateTranslationOutputStatus(output.id, { proofreadStatus: 'applying_proofread' })
+            );
 
             // Execute Step 2: Apply changes to produce final translation
             const finalTranslation = await translationService.proofreadStep2(
@@ -306,11 +325,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
               proofreadSystemPrompt
             );
 
-            // Update with final proofread translation
-            await storage.updateTranslationOutput(output.id, finalTranslation);
+            // Update with final proofread translation (with retry)
+            await retryOnDatabaseError(() => 
+              storage.updateTranslationOutput(output.id, finalTranslation)
+            );
             
-            // Mark proofreading as completed
-            await storage.updateTranslationOutputStatus(output.id, { proofreadStatus: 'completed' });
+            // Mark proofreading as completed (with retry)
+            await retryOnDatabaseError(() => 
+              storage.updateTranslationOutputStatus(output.id, { proofreadStatus: 'completed' })
+            );
 
             const proofreadTime = Math.round((Date.now() - proofreadStartTime) / 1000);
             logInfo(`Proofread ${translationId} into ${language.name}, time: ${proofreadTime}s`, "AI");
@@ -318,8 +341,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
             const proofreadStartTime = Date.now();
             const proofreadTime = Math.round((Date.now() - proofreadStartTime) / 1000);
             logError(`Proofreading failed ${translationId} into ${language.name}, time: ${proofreadTime}s`, "AI", error);
-            // Update status to failed, but keep the translated text
-            await storage.updateTranslationOutputStatus(output.id, { proofreadStatus: 'failed' });
+            // Update status to failed, but keep the translated text (with retry)
+            await retryOnDatabaseError(() => 
+              storage.updateTranslationOutputStatus(output.id, { proofreadStatus: 'failed' })
+            ).catch((retryError) => {
+              // If retry also fails, log but don't throw - we've already logged the original error
+              logError(`Failed to update proofread status to failed after retries for ${translationId}`, "AI", retryError);
+            });
           }
         } catch (error) {
           console.error(`Unexpected error in translation pipeline for ${translationId} into ${language.name}:`, error);
@@ -674,8 +702,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/proofreadings", isAuthenticated, async (req: any, res) => {
     try {
       const userId = req.user.id;
-      const proofreadings = await storage.getProofreadings(userId);
-      res.json(proofreadings);
+      const page = parseInt(req.query.page as string) || 1;
+      const limit = parseInt(req.query.limit as string) || 20;
+      const search = req.query.search as string | undefined;
+
+      const result = await storage.getProofreadingsPaginated(userId, page, limit, search);
+      res.json(result);
     } catch (error) {
       console.error("Error fetching proofreadings:", error);
       res.status(500).json({ message: "Failed to fetch proofreadings" });
@@ -934,20 +966,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const proofreadTime = Math.round((Date.now() - proofreadStartTime) / 1000);
           logInfo(`Proofread ${proofreadingId}, time: ${proofreadTime}s`, "AI");
 
-          // Update the output with results and mark as completed
-          await storage.updateProofreadingOutput(output.id, { 
-            results: proofreadingResults as unknown as Record<string, unknown>[],
-            status: 'completed' 
-          });
+          // Update the output with results and mark as completed (with retry)
+          await retryOnDatabaseError(() => 
+            storage.updateProofreadingOutput(output.id, { 
+              results: proofreadingResults as unknown as Record<string, unknown>[],
+              status: 'completed' 
+            })
+          );
 
-          // Update last used model
-          await storage.updateProofreading(proofreadingId, { lastUsedModelId: modelId });
+          // Update last used model (with retry)
+          await retryOnDatabaseError(() => 
+            storage.updateProofreading(proofreadingId, { lastUsedModelId: modelId })
+          );
         } catch (error) {
           const proofreadStartTime = Date.now();
           const proofreadTime = Math.round((Date.now() - proofreadStartTime) / 1000);
           logError(`Proofreading failed ${proofreadingId}, time: ${proofreadTime}s`, "AI", error);
-          // Update status to failed
-          await storage.updateProofreadingOutput(output.id, { status: 'failed' });
+          // Update status to failed (with retry)
+          await retryOnDatabaseError(() => 
+            storage.updateProofreadingOutput(output.id, { status: 'failed' })
+          ).catch((retryError) => {
+            // If retry also fails, log but don't throw - we've already logged the original error
+            logError(`Failed to update proofreading status to failed after retries for ${proofreadingId}`, "AI", retryError);
+          });
         }
       })(); // Fire and forget - async job runs in background
 

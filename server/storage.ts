@@ -38,7 +38,7 @@ import {
   type InsertProofreadingOutput,
 } from "@shared/schema";
 import { db } from "./db";
-import { eq, and, or, desc, sql, inArray } from "drizzle-orm";
+import { eq, and, or, desc, sql, inArray, ilike } from "drizzle-orm";
 
 export interface IStorage {
   // User operations (REQUIRED for Replit Auth)
@@ -50,6 +50,16 @@ export interface IStorage {
 
   // Translation operations
   getTranslations(userId: string): Promise<Translation[]>;
+  getTranslationsPaginated(userId: string, page: number, limit: number, search?: string): Promise<{
+    data: Translation[];
+    pagination: {
+      page: number;
+      limit: number;
+      total: number;
+      totalPages: number;
+      hasMore: boolean;
+    };
+  }>;
   getTranslation(id: string): Promise<Translation | undefined>;
   createTranslation(translation: InsertTranslation & { userId: string }): Promise<Translation>;
   updateTranslation(id: string, data: Partial<Translation>): Promise<Translation>;
@@ -121,6 +131,16 @@ export interface IStorage {
 
   // Proofreading operations
   getProofreadings(userId: string): Promise<Proofreading[]>;
+  getProofreadingsPaginated(userId: string, page: number, limit: number, search?: string): Promise<{
+    data: Proofreading[];
+    pagination: {
+      page: number;
+      limit: number;
+      total: number;
+      totalPages: number;
+      hasMore: boolean;
+    };
+  }>;
   getProofreading(id: string): Promise<Proofreading | undefined>;
   createProofreading(proofreading: InsertProofreading & { userId: string }): Promise<Proofreading>;
   updateProofreading(id: string, data: Partial<Proofreading>): Promise<Proofreading>;
@@ -241,6 +261,81 @@ export class DatabaseStorage implements IStorage {
       ...r.translation,
       owner: r.owner
     })) as Translation[];
+  }
+
+  async getTranslationsPaginated(
+    userId: string,
+    page: number = 1,
+    limit: number = 20,
+    search?: string
+  ): Promise<{
+    data: Translation[];
+    pagination: {
+      page: number;
+      limit: number;
+      total: number;
+      totalPages: number;
+      hasMore: boolean;
+    };
+  }> {
+    // Build base conditions
+    const baseConditions = or(
+      eq(translations.isPrivate, false),
+      eq(translations.userId, userId)
+    );
+
+    // Add search conditions if search query provided
+    const searchConditions = search && search.length >= 2
+      ? and(
+          baseConditions,
+          or(
+            ilike(translations.title, `%${search}%`),
+            ilike(translations.sourceText, `%${search}%`)
+          )
+        )
+      : baseConditions;
+
+    // Get total count
+    const [{ count }] = await db
+      .select({ count: sql<number>`cast(count(*) as integer)` })
+      .from(translations)
+      .where(searchConditions);
+
+    const total = Number(count);
+    const totalPages = Math.ceil(total / limit);
+    const offset = (page - 1) * limit;
+
+    // Get paginated results
+    const results = await db
+      .select({
+        translation: translations,
+        owner: {
+          id: users.id,
+          email: users.email,
+          firstName: users.firstName,
+          lastName: users.lastName,
+        }
+      })
+      .from(translations)
+      .leftJoin(users, eq(translations.userId, users.id))
+      .where(searchConditions)
+      .orderBy(desc(translations.updatedAt))
+      .limit(limit)
+      .offset(offset);
+
+    return {
+      data: results.map(r => ({
+        ...r.translation,
+        owner: r.owner
+      })) as Translation[],
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages,
+        hasMore: page < totalPages,
+      },
+    };
   }
 
   async getTranslation(id: string): Promise<Translation | undefined> {
@@ -694,6 +789,81 @@ export class DatabaseStorage implements IStorage {
       ...r.proofreading,
       owner: r.owner
     })) as Proofreading[];
+  }
+
+  async getProofreadingsPaginated(
+    userId: string,
+    page: number = 1,
+    limit: number = 20,
+    search?: string
+  ): Promise<{
+    data: Proofreading[];
+    pagination: {
+      page: number;
+      limit: number;
+      total: number;
+      totalPages: number;
+      hasMore: boolean;
+    };
+  }> {
+    // Build base conditions
+    const baseConditions = or(
+      eq(proofreadings.isPrivate, false),
+      eq(proofreadings.userId, userId)
+    );
+
+    // Add search conditions if search query provided
+    const searchConditions = search && search.length >= 2
+      ? and(
+          baseConditions,
+          or(
+            ilike(proofreadings.title, `%${search}%`),
+            ilike(proofreadings.sourceText, `%${search}%`)
+          )
+        )
+      : baseConditions;
+
+    // Get total count
+    const [{ count }] = await db
+      .select({ count: sql<number>`cast(count(*) as integer)` })
+      .from(proofreadings)
+      .where(searchConditions);
+
+    const total = Number(count);
+    const totalPages = Math.ceil(total / limit);
+    const offset = (page - 1) * limit;
+
+    // Get paginated results
+    const results = await db
+      .select({
+        proofreading: proofreadings,
+        owner: {
+          id: users.id,
+          email: users.email,
+          firstName: users.firstName,
+          lastName: users.lastName,
+        }
+      })
+      .from(proofreadings)
+      .leftJoin(users, eq(proofreadings.userId, users.id))
+      .where(searchConditions)
+      .orderBy(desc(proofreadings.updatedAt))
+      .limit(limit)
+      .offset(offset);
+
+    return {
+      data: results.map(r => ({
+        ...r.proofreading,
+        owner: r.owner
+      })) as Proofreading[],
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages,
+        hasMore: page < totalPages,
+      },
+    };
   }
 
   async getProofreading(id: string): Promise<Proofreading | undefined> {

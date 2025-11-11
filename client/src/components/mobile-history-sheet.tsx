@@ -87,7 +87,7 @@ export function MobileHistorySheet({
             </Button>
           )}
         </SheetTrigger>
-        <SheetContent side="bottom" className="h-[85vh] flex flex-col max-h-[85vh]">
+        <SheetContent side="bottom" className="h-[85vh] flex flex-col max-h-[85vh] w-full max-w-full">
           <SheetHeader className="flex-shrink-0">
             <SheetTitle>Translation History</SheetTitle>
           </SheetHeader>
@@ -112,8 +112,9 @@ export function MobileHistorySheet({
             </Button>
           </div>
 
-          <ScrollArea className="flex-1 min-h-0 -mx-6 px-6">
-            <div className="pb-4">
+          <ScrollArea className="flex-1 min-h-0 w-full">
+            <div className="pb-4 w-full flex flex-col items-center">
+              <div className="w-full" style={{ maxWidth: '20rem' }}>
               {isLoading ? (
                 <div className="flex items-center justify-center p-8">
                   <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
@@ -126,19 +127,19 @@ export function MobileHistorySheet({
                   </p>
                 </div>
               ) : (
-                <div className="space-y-2">
+                <div className="space-y-0.5 w-full">
                 <TooltipProvider>
                   {translations.map((translation) => (
                     <Card
                       key={translation.id}
-                      className={`group cursor-pointer p-4 hover-elevate overflow-hidden ${
+                      className={`group cursor-pointer p-2 hover-elevate overflow-hidden w-full ${
                         selectedTranslationId === translation.id
                           ? "bg-sidebar-accent"
                           : ""
                       }`}
                       onClick={() => handleSelectAndClose(translation)}
                     >
-                      <div className="flex items-start gap-1.5 sm:gap-2 min-w-0 w-full">
+                      <div className="flex items-start gap-1 min-w-0 w-full max-w-full">
                         <Tooltip>
                           <TooltipTrigger asChild>
                             <div
@@ -182,7 +183,7 @@ export function MobileHistorySheet({
                             />
                           ) : (
                             <div className="flex items-center gap-2 min-w-0">
-                              <h3 className="font-medium truncate flex-1 min-w-0 text-sm sm:text-base">
+                              <h3 className="text-sm font-medium truncate flex-1 min-w-0">
                                 {translation.title}
                               </h3>
                             </div>
@@ -227,6 +228,7 @@ export function MobileHistorySheet({
                 </TooltipProvider>
                 </div>
               )}
+              </div>
             </div>
           </ScrollArea>
         </SheetContent>

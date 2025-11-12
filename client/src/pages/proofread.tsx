@@ -947,21 +947,25 @@ export default function Proofread() {
     const plainText = extractPlainTextFromHTML(result.original_text);
     
     if (plainText) {
-      // Use a longer delay to ensure editor is fully ready
+      // Use a delay to ensure editor is fully ready
       highlightTimeoutRef.current = setTimeout(() => {
         if (editorRef.current) {
+          // First highlight the text
           editorRef.current.highlightText(plainText);
-          // scrollToText can be problematic if editor isn't fully mounted
-          // The highlight itself should bring text into view
-          // Only try to scroll if it's really needed
-          try {
-            editorRef.current.scrollToText(plainText);
-          } catch (e) {
-            // Ignore scroll errors - highlight is the main feature
-            console.warn('Could not scroll to highlighted text');
-          }
+          
+          // Then scroll to it after a short delay to ensure highlights are rendered
+          setTimeout(() => {
+            if (editorRef.current) {
+              try {
+                editorRef.current.scrollToText(plainText);
+              } catch (e) {
+                // Ignore scroll errors - highlight is the main feature
+                console.warn('Could not scroll to highlighted text:', e);
+              }
+            }
+          }, 100);
         }
-      }, 150); // Increased delay
+      }, 150);
     }
   };
 

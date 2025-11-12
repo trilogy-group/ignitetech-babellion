@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation, useInfiniteQuery } from "@tanstack/react-query";
 import { useLocation } from "wouter";
-import { Plus, Trash2, Loader2, Check, Lock, Globe, Pencil, FileText, Save, X, History, Code, ChevronDown, ArrowRight, Square, RotateCw, Search } from "lucide-react";
+import { Plus, Trash2, Loader2, Check, Lock, Globe, Pencil, FileText, Save, X, History, Code, ChevronDown, ArrowRight, Square, RotateCw, Search, ChevronLeft, ChevronRight, Copy, Share } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -104,6 +104,13 @@ export default function Proofread() {
   const [searchQuery, setSearchQuery] = useState("");
   const [searchTerm, setSearchTerm] = useState(""); // Actual search term used for API
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const [isCreatingGoogleDoc, setIsCreatingGoogleDoc] = useState(false);
+  const [isLeftPanelCollapsed, setIsLeftPanelCollapsed] = useState(() => {
+    const saved = localStorage.getItem('proofread-left-panel-collapsed');
+    return saved ? JSON.parse(saved) : false;
+  });
+  const [copiedSource, setCopiedSource] = useState(false);
+  const [copiedLink, setCopiedLink] = useState(false);
 
   // Auto-focus search input when expanded
   useEffect(() => {
@@ -111,6 +118,11 @@ export default function Proofread() {
       searchInputRef.current.focus();
     }
   }, [isSearchExpanded]);
+
+  // Save left panel collapsed state to localStorage
+  useEffect(() => {
+    localStorage.setItem('proofread-left-panel-collapsed', JSON.stringify(isLeftPanelCollapsed));
+  }, [isLeftPanelCollapsed]);
 
   // Clear highlights when selectedCardIndex changes to null
   useEffect(() => {
@@ -289,6 +301,58 @@ export default function Proofread() {
     }
   };
 
+  const handleCopySource = async () => {
+    try {
+      // Create a blob with both HTML and plain text
+      const plainText = new DOMParser().parseFromString(sourceText, 'text/html').body.textContent || '';
+      
+      // Use the modern Clipboard API to copy rich HTML
+      const clipboardItem = new ClipboardItem({
+        'text/html': new Blob([sourceText], { type: 'text/html' }),
+        'text/plain': new Blob([plainText], { type: 'text/plain' }),
+      });
+      
+      await navigator.clipboard.write([clipboardItem]);
+      
+      setCopiedSource(true);
+      setTimeout(() => setCopiedSource(false), 2000);
+      toast({
+        title: "Copied to clipboard",
+        description: "Rich formatted text has been copied with style preserved.",
+      });
+    } catch (error: unknown) {
+      console.error('Failed to copy:', error);
+      toast({
+        title: "Copy failed",
+        description: "Could not copy to clipboard.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleShareLink = async () => {
+    if (!selectedProofreadingId) return;
+    
+    try {
+      const shareUrl = `${window.location.origin}${window.location.pathname}#${selectedProofreadingId}`;
+      await navigator.clipboard.writeText(shareUrl);
+      
+      setCopiedLink(true);
+      setTimeout(() => setCopiedLink(false), 2000);
+      toast({
+        title: "Link copied",
+        description: "Shareable link has been copied to clipboard.",
+      });
+    } catch (error: unknown) {
+      console.error('Failed to copy link:', error);
+      toast({
+        title: "Copy failed",
+        description: "Could not copy link to clipboard.",
+        variant: "destructive",
+      });
+    }
+  };
+
   // Handle hash-based URL navigation on initial load only
   useEffect(() => {
     if (!proofreadingsLoading && proofreadings.length > 0 && !hasInitialized.current && !selectedProofreadingId) {
@@ -460,6 +524,67 @@ export default function Proofread() {
     sendToTranslateMutation.mutate({
       title: currentTitle,
       sourceText: htmlContent,
+    });
+  };
+
+  // Create Google Doc from proofreading mutation
+  const createGoogleDocFromProofreadMutation = useMutation({
+    mutationFn: async ({ proofreadingId, title, htmlContent }: { proofreadingId: string; title?: string; htmlContent?: string }) => {
+      const response = await apiRequest("POST", "/api/google/docs/create-from-proofread", {
+        proofreadingId,
+        title,
+        htmlContent,
+      });
+      return await response.json() as { documentId: string; webViewLink: string };
+    },
+    onSuccess: (data) => {
+      setIsCreatingGoogleDoc(false);
+      // Open document in new tab
+      window.open(data.webViewLink, '_blank');
+      toast({
+        title: "Google Doc created",
+        description: "Your document has been created and opened in a new tab.",
+      });
+    },
+    onError: (error: Error) => {
+      setIsCreatingGoogleDoc(false);
+      const errorMessage = error.message || "";
+      const isScopeError = errorMessage.toLowerCase().includes("insufficient") || 
+                          errorMessage.includes("log out and log back in") ||
+                          errorMessage.includes("403");
+      
+      if (isScopeError) {
+        toast({
+          title: "Permission required",
+          description: errorMessage.includes("log out") 
+            ? errorMessage 
+            : "Please log out and log back in to grant the necessary permissions for creating Google Docs.",
+          variant: "destructive",
+        });
+      } else {
+        toast({
+          title: "Failed to create Google Doc",
+          description: errorMessage || "Could not create Google Doc. Please check your Google credentials.",
+          variant: "destructive",
+        });
+      }
+    },
+  });
+
+  const handleCreateGoogleDoc = () => {
+    if (!selectedProofreadingId) return;
+    
+    setIsCreatingGoogleDoc(true);
+    // Get the current HTML content from the editor (edited or original)
+    const htmlContent = editorRef.current?.getHTML() || sourceText;
+    
+    // Use the current title
+    const currentTitle = title || "Untitled Proofreading";
+    
+    createGoogleDocFromProofreadMutation.mutate({
+      proofreadingId: selectedProofreadingId,
+      title: currentTitle,
+      htmlContent, // Send the current editor content
     });
   };
 
@@ -784,12 +909,20 @@ export default function Proofread() {
   };
 
   // Helper function to extract plain text from HTML
+  // This function extracts text WITHOUT newlines to match how Tiptap's textContent works
   const extractPlainTextFromHTML = (html: string): string => {
     if (!html) return '';
-    // Create a temporary DOM element to parse HTML and extract text
+    
+    // Create a temporary DOM element to parse HTML
     const tempDiv = document.createElement('div');
     tempDiv.innerHTML = html;
-    return tempDiv.textContent || tempDiv.innerText || '';
+    
+    // Simply get the text content without any newlines
+    // Tiptap concatenates all text nodes without adding newlines between blocks
+    const text = tempDiv.textContent || tempDiv.innerText || '';
+    
+    // Trim leading/trailing whitespace
+    return text.trim();
   };
 
   const handleCardClick = (index: number, result: ProofreadingResult) => {
@@ -812,6 +945,7 @@ export default function Proofread() {
     
     // Extract plain text from HTML original_text for highlighting
     const plainText = extractPlainTextFromHTML(result.original_text);
+    
     if (plainText) {
       // Use a longer delay to ensure editor is fully ready
       highlightTimeoutRef.current = setTimeout(() => {
@@ -834,18 +968,19 @@ export default function Proofread() {
   const handleAccept = async (result: ProofreadingResult, index: number) => {
     if (!selectedProofreadingId) return;
     
-    // Extract plain text from HTML for both original and suggested
-    const originalPlainText = extractPlainTextFromHTML(result.original_text);
-    const suggestedPlainText = extractPlainTextFromHTML(result.suggested_change);
+    // Clear all highlights first
+    editorRef.current?.clearHighlights();
     
-    if (originalPlainText && suggestedPlainText) {
-      // Clear all highlights first
-      editorRef.current?.clearHighlights();
-      // Then replace the text
-      editorRef.current?.replaceText(originalPlainText, suggestedPlainText);
-      
-      // Get the updated content from editor
-      const updatedHTML = editorRef.current?.getHTML() || "";
+    // Replace HTML content directly to preserve formatting
+    editorRef.current?.replaceHTML(result.original_text, result.suggested_change);
+    
+    // Small delay to ensure editor has updated
+    await new Promise(resolve => setTimeout(resolve, 100));
+    
+    // Get the updated content from editor
+    const updatedHTML = editorRef.current?.getHTML() || "";
+    
+    if (updatedHTML) {
       
       // Update status in backend and save the document
       try {
@@ -895,19 +1030,17 @@ export default function Proofread() {
     const results = output.results as unknown as ProofreadingResult[];
     const acceptedIndices: number[] = [];
     
-    results.forEach((result, index) => {
+    for (const [index, result] of results.entries()) {
       // Skip already accepted suggestions
-      if (result.status === 'accepted') return;
+      if (result.status === 'accepted') continue;
       
-      // Extract plain text from HTML for both original and suggested
-      const originalPlainText = extractPlainTextFromHTML(result.original_text);
-      const suggestedPlainText = extractPlainTextFromHTML(result.suggested_change);
+      // Replace HTML content directly to preserve formatting
+      editorRef.current?.replaceHTML(result.original_text, result.suggested_change);
+      acceptedIndices.push(index);
       
-      if (originalPlainText && suggestedPlainText) {
-        editorRef.current?.replaceText(originalPlainText, suggestedPlainText);
-        acceptedIndices.push(index);
-      }
-    });
+      // Small delay between replacements
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
     
     // Get the updated content from editor
     const updatedHTML = editorRef.current?.getHTML() || "";
@@ -983,10 +1116,10 @@ export default function Proofread() {
   return (
     <div className="flex h-full overflow-y-auto md:overflow-hidden flex-col md:flex-row">
       {/* Left Sidebar - Proofreading History (Desktop only) */}
-      <div className="hidden md:flex w-80 flex-col border-r bg-sidebar flex-none">
-        <div className="flex items-center justify-between gap-4 border-b p-4">
-          {!isSearchExpanded && <h2 className="text-lg font-semibold">Proofreading History</h2>}
-          {isSearchExpanded ? (
+      <div className={`hidden md:flex ${isLeftPanelCollapsed ? 'w-12' : 'w-80'} flex-col border-r bg-sidebar flex-none transition-all duration-200`}>
+        <div className={`flex items-center ${isLeftPanelCollapsed ? 'flex-col justify-start gap-2' : 'justify-between'} border-b p-4`}>
+          {!isLeftPanelCollapsed && !isSearchExpanded && <h2 className="text-lg font-semibold">History</h2>}
+          {!isLeftPanelCollapsed && isSearchExpanded ? (
             <div className="flex-1 flex items-center gap-2 w-full">
               <Input
                 ref={searchInputRef}
@@ -1017,29 +1150,43 @@ export default function Proofread() {
               </Button>
             </div>
           ) : (
-            <div className="flex items-center gap-2">
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={handleToggleSearch}
-                className="h-8 w-8 p-0"
-                title="Search proofreadings"
-              >
-                <Search className="h-4 w-4" />
-              </Button>
+            <div className={`flex items-center ${isLeftPanelCollapsed ? 'flex-col' : 'gap-2'} ${isLeftPanelCollapsed ? '' : 'ml-auto'}`}>
+              {!isLeftPanelCollapsed && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={handleToggleSearch}
+                  className="h-8 w-8 p-0"
+                  title="Search proofreadings"
+                >
+                  <Search className="h-4 w-4" />
+                </Button>
+              )}
               <Button 
                 size="sm" 
                 onClick={handleNewProofreading} 
                 disabled={createMutation.isPending} 
                 variant="outline"
+                className={isLeftPanelCollapsed ? "h-8 w-8 p-0" : ""}
+                title="New Proofreading"
               >
                 {createMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => setIsLeftPanelCollapsed(!isLeftPanelCollapsed)}
+                className="h-8 w-8 p-0"
+                title={isLeftPanelCollapsed ? "Expand panel" : "Collapse panel"}
+              >
+                {isLeftPanelCollapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
               </Button>
             </div>
           )}
         </div>
 
-        <ScrollArea className="flex-1" viewportClassName="max-w-full">
+        {!isLeftPanelCollapsed && (
+          <ScrollArea className="flex-1" viewportClassName="max-w-full">
           {proofreadingsLoading ? (
             <div className="flex items-center justify-center p-8">
               <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
@@ -1176,7 +1323,8 @@ export default function Proofread() {
               )}
             </div>
           )}
-        </ScrollArea>
+          </ScrollArea>
+        )}
       </div>
 
       {/* Mobile History Sheet Button */}
@@ -1368,9 +1516,11 @@ export default function Proofread() {
               <div className="flex flex-1 flex-col min-h-0">
                 <div className="mb-2 flex items-center justify-between flex-shrink-0">
                   <div className="flex items-center gap-2">
-                    <Label className="text-sm font-medium">
-                      Source Text
-                    </Label>
+                    {!isMobile && (
+                      <Label className="text-sm font-medium">
+                        Source Text
+                      </Label>
+                    )}
                     <Button
                       variant="outline"
                       size="sm"
@@ -1386,36 +1536,97 @@ export default function Proofread() {
                       ) : (
                         <>
                           <FileText className="mr-1 h-3 w-3" />
-                          Load Google Doc
+                          {isMobile ? "Load" : "Load Google Doc"}
                         </>
                       )}
                     </Button>
-                    <Button
-                      variant={isRawView ? "default" : "outline"}
-                      size="sm"
-                      onClick={() => setIsRawView(!isRawView)}
-                      disabled={!selectedProofreadingId}
-                      className="h-7"
-                    >
-                      <Code className="mr-1 h-3 w-3" />
-                      {isRawView ? "Rich Text" : "Raw HTML"}
-                    </Button>
                   </div>
-                  <span className="text-xs text-muted-foreground">
-                    {sourceText ? new DOMParser().parseFromString(sourceText, 'text/html').body.textContent?.length || 0 : 0} characters
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-muted-foreground">
+                      {sourceText ? new DOMParser().parseFromString(sourceText, 'text/html').body.textContent?.length || 0 : 0} characters
+                    </span>
+                    <TooltipProvider>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={handleCopySource}
+                            disabled={!selectedProofreadingId || !sourceText}
+                            className="h-7 w-7 p-0"
+                          >
+                            {copiedSource ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>
+                          <p>Copy text with formatting</p>
+                        </TooltipContent>
+                      </Tooltip>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={handleCreateGoogleDoc}
+                            disabled={isCreatingGoogleDoc || !sourceText || createGoogleDocFromProofreadMutation.isPending}
+                            className="h-7 w-7 p-0"
+                          >
+                            {isCreatingGoogleDoc || createGoogleDocFromProofreadMutation.isPending ? (
+                              <Loader2 className="h-3 w-3 animate-spin" />
+                            ) : (
+                              <FileText className="h-3 w-3" />
+                            )}
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>
+                          <p>Create Google Doc</p>
+                        </TooltipContent>
+                      </Tooltip>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={handleShareLink}
+                            disabled={!selectedProofreadingId}
+                            className="h-7 w-7 p-0"
+                          >
+                            {copiedLink ? <Check className="h-3 w-3" /> : <Share className="h-3 w-3" />}
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>
+                          <p>Copy shareable link</p>
+                        </TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
+                  </div>
                 </div>
                 {isRawView ? (
-                  <textarea
-                    value={sourceText}
-                    onChange={(e) => {
-                      setSourceText(e.target.value);
-                      setHasUnsavedChanges(e.target.value !== lastSavedContent);
-                    }}
-                    placeholder="Raw HTML content..."
-                    disabled={!selectedProofreadingId || !canEditSelected}
-                    className="flex-1 w-full p-4 border rounded-md font-mono text-sm resize-none focus:outline-none focus:ring-2 focus:ring-primary bg-background"
-                  />
+                  <div className="flex-1 flex flex-col border rounded-md bg-background">
+                    <div className="border-b border-border p-1.5 flex items-center">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setIsRawView(false)}
+                        className="h-7 w-7 p-0 bg-accent"
+                        title="Switch to Rich Text"
+                      >
+                        <Code className="h-3.5 w-3.5" />
+                      </Button>
+                      <span className="ml-2 text-xs text-muted-foreground">Raw HTML View</span>
+                    </div>
+                    <textarea
+                      value={sourceText}
+                      onChange={(e) => {
+                        setSourceText(e.target.value);
+                        setHasUnsavedChanges(e.target.value !== lastSavedContent);
+                      }}
+                      placeholder="Raw HTML content..."
+                      disabled={!selectedProofreadingId || !canEditSelected}
+                      className="flex-1 w-full p-4 font-mono text-sm resize-none focus:outline-none bg-background"
+                    />
+                  </div>
                 ) : (
                   <RichTextEditor
                     ref={editorRef}
@@ -1429,6 +1640,9 @@ export default function Proofread() {
                     editable={!!selectedProofreadingId && canEditSelected}
                     className="flex-1 overflow-auto"
                     editorKey={`source-${selectedProofreadingId || 'none'}`}
+                    showRawHtmlButton={true}
+                    isRawView={isRawView}
+                    onRawViewToggle={() => setIsRawView(!isRawView)}
                     onBlur={() => {
                       // Clear highlights when editor loses focus
                       if (selectedCardIndex !== null) {

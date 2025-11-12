@@ -101,7 +101,9 @@ export async function setupAuth(app: Express) {
         "profile",
         "email",
         "https://www.googleapis.com/auth/drive.readonly",
-        "https://www.googleapis.com/auth/documents.readonly"
+        "https://www.googleapis.com/auth/documents.readonly",
+        "https://www.googleapis.com/auth/documents",
+        "https://www.googleapis.com/auth/drive.file"
       ],
       accessType: 'offline',
       prompt: 'consent'

@@ -89,7 +89,7 @@ export function MobileHistorySheet({
         </SheetTrigger>
         <SheetContent side="bottom" className="h-[85vh] flex flex-col max-h-[85vh] w-full max-w-full">
           <SheetHeader className="flex-shrink-0">
-            <SheetTitle>Translation History</SheetTitle>
+            <SheetTitle>History</SheetTitle>
           </SheetHeader>
           
           <div className="flex items-center justify-between gap-4 border-b pb-4 mb-4 flex-shrink-0">

@@ -7,7 +7,7 @@ import { z } from "zod";
 import { encrypt } from "./encryption";
 import { translationService } from "./translationService";
 import { proofreadingService } from "./proofreadingService";
-import { getGoogleAuth, listGoogleDocs, getGoogleDocContent } from "./googleDocsService";
+import { getGoogleAuth, listGoogleDocs, getGoogleDocContent, createGoogleDoc } from "./googleDocsService";
 import {
   insertTranslationSchema,
   insertAiModelSchema,
@@ -564,6 +564,170 @@ export async function registerRoutes(app: Express): Promise<Server> {
       console.error("Error fetching Google Doc content:", error);
       const message = (error as Error)?.message || "Failed to fetch Google Doc content";
       res.status(500).json({ message });
+    }
+  });
+
+  // Create Google Doc from translation output
+  app.post("/api/google/docs/create-from-translation", isAuthenticated, async (req: any, res) => {
+    try {
+      const { translationOutputId, title } = req.body;
+      
+      if (!translationOutputId) {
+        return res.status(400).json({ message: "translationOutputId is required" });
+      }
+      
+      // Get translation output
+      const output = await storage.getTranslationOutput(translationOutputId);
+      if (!output) {
+        return res.status(404).json({ message: "Translation output not found" });
+      }
+      
+      // Check if user can access this translation
+      const translation = await storage.getTranslation(output.translationId);
+      if (!translation) {
+        return res.status(404).json({ message: "Translation not found" });
+      }
+      
+      const isOwner = translation.userId === req.user.id;
+      const isPublic = !translation.isPrivate;
+      if (!isOwner && !isPublic) {
+        return res.status(403).json({ message: "Forbidden" });
+      }
+      
+      // Get translated text (use edited version if available, otherwise use translatedText)
+      const htmlContent = output.translatedText || '';
+      if (!htmlContent) {
+        return res.status(400).json({ message: "No translation content available" });
+      }
+      
+      // Format title: [LANGUAGE] Original Title
+      const docTitle = title || `[${output.languageCode.toUpperCase()}] ${translation.title}`;
+      
+      // Create Google Doc
+      const auth = await getGoogleAuth(req);
+      const result = await createGoogleDoc(auth, docTitle, htmlContent);
+      
+      res.json(result);
+    } catch (error: unknown) {
+      console.error("Error creating Google Doc from translation:", error);
+      const err = error as Error & { code?: number; errors?: Array<{ reason?: string }> };
+      let message = err?.message || "Failed to create Google Doc";
+      let statusCode = 500;
+      
+      // Check for OAuth scope/permission errors
+      if (err?.code === 403 || err?.errors?.[0]?.reason === 'insufficientPermissions' || 
+          message.includes('insufficient') || message.includes('Insufficient Permission')) {
+        statusCode = 403;
+        message = "Insufficient permissions. Please log out and log back in to grant the necessary permissions for creating Google Docs.";
+      }
+      
+      res.status(statusCode).json({ message });
+    }
+  });
+
+  // Create Google Doc from translation source
+  app.post("/api/google/docs/create-from-translation-source", isAuthenticated, async (req: any, res) => {
+    try {
+      const { translationId, title, htmlContent } = req.body;
+      
+      if (!translationId) {
+        return res.status(400).json({ message: "translationId is required" });
+      }
+      
+      // Get translation
+      const translation = await storage.getTranslation(translationId);
+      if (!translation) {
+        return res.status(404).json({ message: "Translation not found" });
+      }
+      
+      // Check if user can access this translation
+      const isOwner = translation.userId === req.user.id;
+      const isPublic = !translation.isPrivate;
+      if (!isOwner && !isPublic) {
+        return res.status(403).json({ message: "Forbidden" });
+      }
+      
+      // Use provided htmlContent (from editor) or fall back to sourceText from DB
+      const contentToUse = htmlContent || translation.sourceText || '';
+      if (!contentToUse) {
+        return res.status(400).json({ message: "No translation content available" });
+      }
+      
+      // Use provided title or original title
+      const docTitle = title || translation.title;
+      
+      // Create Google Doc
+      const auth = await getGoogleAuth(req);
+      const result = await createGoogleDoc(auth, docTitle, contentToUse);
+      
+      res.json(result);
+    } catch (error: unknown) {
+      console.error("Error creating Google Doc from translation source:", error);
+      const err = error as Error & { code?: number; errors?: Array<{ reason?: string }> };
+      let message = err?.message || "Failed to create Google Doc";
+      let statusCode = 500;
+      
+      // Check for OAuth scope/permission errors
+      if (err?.code === 403 || err?.errors?.[0]?.reason === 'insufficientPermissions' || 
+          message.includes('insufficient') || message.includes('Insufficient Permission')) {
+        statusCode = 403;
+        message = "Insufficient permissions. Please log out and log back in to grant the necessary permissions for creating Google Docs.";
+      }
+      
+      res.status(statusCode).json({ message });
+    }
+  });
+
+  // Create Google Doc from proofreading
+  app.post("/api/google/docs/create-from-proofread", isAuthenticated, async (req: any, res) => {
+    try {
+      const { proofreadingId, title, htmlContent } = req.body;
+      
+      if (!proofreadingId) {
+        return res.status(400).json({ message: "proofreadingId is required" });
+      }
+      
+      // Get proofreading
+      const proofreading = await storage.getProofreading(proofreadingId);
+      if (!proofreading) {
+        return res.status(404).json({ message: "Proofreading not found" });
+      }
+      
+      // Check if user can access this proofreading
+      const isOwner = proofreading.userId === req.user.id;
+      const isPublic = !proofreading.isPrivate;
+      if (!isOwner && !isPublic) {
+        return res.status(403).json({ message: "Forbidden" });
+      }
+      
+      // Use provided htmlContent (from editor) or fall back to sourceText from DB
+      const contentToUse = htmlContent || proofreading.sourceText || '';
+      if (!contentToUse) {
+        return res.status(400).json({ message: "No proofreading content available" });
+      }
+      
+      // Use provided title or original title
+      const docTitle = title || proofreading.title;
+      
+      // Create Google Doc
+      const auth = await getGoogleAuth(req);
+      const result = await createGoogleDoc(auth, docTitle, contentToUse);
+      
+      res.json(result);
+    } catch (error: unknown) {
+      console.error("Error creating Google Doc from proofreading:", error);
+      const err = error as Error & { code?: number; errors?: Array<{ reason?: string }> };
+      let message = err?.message || "Failed to create Google Doc";
+      let statusCode = 500;
+      
+      // Check for OAuth scope/permission errors
+      if (err?.code === 403 || err?.errors?.[0]?.reason === 'insufficientPermissions' || 
+          message.includes('insufficient') || message.includes('Insufficient Permission')) {
+        statusCode = 403;
+        message = "Insufficient permissions. Please log out and log back in to grant the necessary permissions for creating Google Docs.";
+      }
+      
+      res.status(statusCode).json({ message });
     }
   });
 

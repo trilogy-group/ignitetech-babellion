@@ -115,8 +115,13 @@ export class ProofreadingService {
     You are to proof read the text given against common grammatical and linguistic errors, and the given <rules>. 
     You must output the proofread changes only in the format of {"results": [{"rule": rule-name, "original_text":..., "suggested_change":....., "rationale":...in English...}]}. 
     You must output this in a valid JSON format. If no changes are needed, you must output {"results": [{"rule": "no changes needed", "original_text": "N/A", "suggested_change": "N/A", "rationale": clean evaluation of the text}]}. 
+    
     If you are correcting common grammatical or spelling errors, use "grammar" or "spelling" as the rule name.
     If there are foreign language terms use, use multi-lingual lenses to evaluate those parts of the text against grammar and spelling errors.
+    If you are removing duplicated text, you MUST include partial text surrounding the duplication to ensure accurate text selection: 
+    -For original_text: {partial text before first occurrence}{first_text}{in between text if any}{duplicated_text}{partial text after second occurrence}. Preserve ALL HTML formatting exactly as it appears.
+    -For suggested_change: {partial text before first occurrence}{corrected text resolving any in between text if any}{partial text after second occurrence}. Preserve ALL HTML formatting exactly as it appears.
+    -The goal is to provide enough surrounding text so the editor can uniquely identify and select the exact location of the duplication.
     
     IGNORE:
     - whitespace such <p></p>, these are acceptable whitespace and should not be corrected.

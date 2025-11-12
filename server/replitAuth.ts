@@ -39,6 +39,15 @@ async function upsertUser(profile: any) {
   return user;
 }
 
+/**
+ * Configures session management, Passport, and Google OAuth routes/strategies on the provided Express app.
+ *
+ * Sets up a PostgreSQL-backed session middleware, initializes Passport (including serialize/deserialize),
+ * and registers routes for login, Google OAuth callback, and logout. Google OAuth strategies are created
+ * dynamically per host so each host uses its own callback URL and stored strategy.
+ *
+ * @param app - The Express application to attach authentication middleware and routes to
+ */
 export async function setupAuth(app: Express) {
   app.set("trust proxy", 1);
   app.use(getSession());

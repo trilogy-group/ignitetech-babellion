@@ -711,43 +711,128 @@ export const RichTextEditor = forwardRef<RichTextEditorRef, RichTextEditorProps>
       if (!editor || !searchText) return;
       
       try {
-        // Check if editor view is available - wrap in try-catch as accessing view can throw
+        // Check if editor view is available
         if (!editor.view || !editor.state) {
           console.warn('Editor view not available yet');
           return;
         }
         
-        // Get plain text content
+        // Normalize search text - trim whitespace
+        const normalizedSearch = searchText.trim();
+        if (!normalizedSearch) return;
+        
+        // Get plain text content from the editor
         const plainText = editor.state.doc.textContent;
         
+        // Escape special regex characters for literal matching
+        const escapedSearch = normalizedSearch.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        
         // Find first occurrence (case-insensitive)
-        const regex = new RegExp(searchText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+        const regex = new RegExp(escapedSearch, 'i');
         const match = regex.exec(plainText);
         
-        if (match) {
-          const from = match.index;
-          const to = match.index + match[0].length;
-          
-          // Set selection and scroll into view
-          editor.commands.setTextSelection({ from, to });
-          
-          // Scroll to the selection using browser's built-in scrollIntoView
-          setTimeout(() => {
+        if (!match) return;
+        
+        const textStartIdx = match.index;
+        const textEndIdx = match.index + match[0].length;
+        
+        // Build position map to convert text positions to document positions
+        const positionMap: Array<{ textIndex: number; docPos: number }> = [];
+        let textOffset = 0;
+        
+        editor.state.doc.descendants((node, pos) => {
+          if (node.isText) {
+            const nodeText = node.text || '';
+            for (let i = 0; i < nodeText.length; i++) {
+              positionMap.push({ textIndex: textOffset + i, docPos: pos + i });
+            }
+            textOffset += nodeText.length;
+          }
+          return true;
+        });
+        
+        // Find document positions for start and end
+        let from = -1;
+        let to = -1;
+        
+        for (const mapping of positionMap) {
+          if (mapping.textIndex === textStartIdx && from === -1) {
+            from = mapping.docPos;
+          }
+          if (mapping.textIndex === textEndIdx - 1 && to === -1) {
+            to = mapping.docPos + 1; // +1 because 'to' is exclusive
+          }
+          if (from !== -1 && to !== -1) break;
+        }
+        
+        if (from === -1 || to === -1) return;
+        
+        // Validate positions
+        if (from < 0 || to <= from || to > editor.state.doc.content.size) {
+          console.warn('Invalid scroll positions:', { from, to });
+          return;
+        }
+        
+        // Use ProseMirror's DOM mapping to find the DOM node
+        setTimeout(() => {
+          try {
+            const { view } = editor;
+            if (!view) return;
+            
+            // Get the DOM coordinates for the document position
+            const startPos = view.coordsAtPos(from);
+            const endPos = view.coordsAtPos(to);
+            
+            if (!startPos || !endPos) return;
+            
+            // Find the editor's scrollable container
+            const editorElement = view.dom.closest('.editor-content-scrollable') as HTMLElement;
+            if (!editorElement) return;
+            
+            // Calculate the middle point of the highlighted text
+            const middleY = (startPos.top + endPos.bottom) / 2;
+            
+            // Get the scroll container's position and dimensions
+            const containerRect = editorElement.getBoundingClientRect();
+            const containerTop = containerRect.top + editorElement.scrollTop;
+            const containerHeight = editorElement.clientHeight;
+            
+            // Calculate the target scroll position to center the text
+            const targetScrollTop = middleY - containerRect.top - (containerHeight / 2) + editorElement.scrollTop;
+            
+            // Smooth scroll to the target position
+            editorElement.scrollTo({
+              top: Math.max(0, targetScrollTop),
+              behavior: 'smooth',
+            });
+          } catch (e) {
+            // Fallback: try using selection-based scrolling
             try {
+              editor.commands.setTextSelection({ from, to });
               const selection = window.getSelection();
               if (selection && selection.rangeCount > 0) {
                 const range = selection.getRangeAt(0);
-                const tempSpan = document.createElement('span');
-                range.insertNode(tempSpan);
-                tempSpan.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                tempSpan.remove();
+                const container = editor.view?.dom.closest('.editor-content-scrollable') as HTMLElement;
+                if (container && range.commonAncestorContainer) {
+                  const node = range.commonAncestorContainer.nodeType === Node.TEXT_NODE
+                    ? range.commonAncestorContainer.parentElement
+                    : range.commonAncestorContainer as HTMLElement;
+                  if (node) {
+                    const nodeRect = node.getBoundingClientRect();
+                    const containerRect = container.getBoundingClientRect();
+                    const scrollTop = container.scrollTop + (nodeRect.top - containerRect.top) - (container.clientHeight / 2);
+                    container.scrollTo({
+                      top: Math.max(0, scrollTop),
+                      behavior: 'smooth',
+                    });
+                  }
+                }
               }
-            } catch (e) {
-              // Ignore scroll errors
-              console.warn('Could not scroll to text:', e);
+            } catch (fallbackError) {
+              console.warn('Could not scroll to text:', fallbackError);
             }
-          }, 100);
-        }
+          }
+        }, 100);
       } catch (error) {
         console.warn('scrollToText error:', error);
       }

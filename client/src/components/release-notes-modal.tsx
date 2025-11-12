@@ -1,13 +1,20 @@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { PanelLeftClose, Search, CheckCircle, Shield, Zap, Database, Share, FileText } from "lucide-react";
+import { PanelLeftClose, Search, CheckCircle, Shield, Zap, Database, Share, FileText, Navigation } from "lucide-react";
 
 interface ReleaseNotesModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }
 
+/**
+ * Render a release notes modal dialog that displays recent changelog entries and feature highlights.
+ *
+ * @param open - Controls whether the modal is visible.
+ * @param onOpenChange - Called with the updated open state when the dialog is opened or closed.
+ * @returns The release notes modal element.
+ */
 export function ReleaseNotesModal({ open, onOpenChange }: ReleaseNotesModalProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -70,6 +77,16 @@ export function ReleaseNotesModal({ open, onOpenChange }: ReleaseNotesModalProps
                     <span className="font-medium text-xs">Improved Duplication Detection:</span>
                     <span className="text-xs text-muted-foreground ml-1">
                       Fixed highlighting and replacement of duplicated content to preserve HTML formatting and accurately detect full duplicated sections
+                    </span>
+                  </div>
+                </div>
+
+                <div className="flex gap-2 items-start">
+                  <Navigation className="h-3 w-3 text-primary mt-[0.125rem] flex-shrink-0" />
+                  <div>
+                    <span className="font-medium text-xs">Auto-Scroll to Highlights:</span>
+                    <span className="text-xs text-muted-foreground ml-1">
+                      When clicking a proofreading suggestion, the editor automatically scrolls to and centers the highlighted text for easier review
                     </span>
                   </div>
                 </div>
@@ -138,4 +155,3 @@ export function ReleaseNotesModal({ open, onOpenChange }: ReleaseNotesModalProps
     </Dialog>
   );
 }
-

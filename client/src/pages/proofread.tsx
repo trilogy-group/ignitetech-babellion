@@ -71,6 +71,18 @@ interface ProofreadingResult {
   status?: 'pending' | 'accepted' | 'rejected';
 }
 
+/**
+ * Renders the Proofread interface for creating, editing, running, and managing proofreading projects and their results.
+ *
+ * Provides a three-pane UI (history, editor, results) that supports:
+ * - creating, renaming, deleting, and selecting proofreadings;
+ * - editing source HTML with a rich text editor or raw HTML view, including load/save and Google Docs import/export;
+ * - selecting rule categories and AI model, executing proofreading, and polling for results;
+ * - viewing suggestions, highlighting source text, accepting single or all suggestions, and sending content to Translate;
+ * - search, shareable links, copy rich text to clipboard, privacy toggles, and unsaved-changes handling.
+ *
+ * @returns The rendered React element for the Proofread component.
+ */
 export default function Proofread() {
   const { toast } = useToast();
   const { user } = useAuth();
@@ -947,21 +959,25 @@ export default function Proofread() {
     const plainText = extractPlainTextFromHTML(result.original_text);
     
     if (plainText) {
-      // Use a longer delay to ensure editor is fully ready
+      // Use a delay to ensure editor is fully ready
       highlightTimeoutRef.current = setTimeout(() => {
         if (editorRef.current) {
+          // First highlight the text
           editorRef.current.highlightText(plainText);
-          // scrollToText can be problematic if editor isn't fully mounted
-          // The highlight itself should bring text into view
-          // Only try to scroll if it's really needed
-          try {
-            editorRef.current.scrollToText(plainText);
-          } catch (e) {
-            // Ignore scroll errors - highlight is the main feature
-            console.warn('Could not scroll to highlighted text');
-          }
+          
+          // Then scroll to it after a short delay to ensure highlights are rendered
+          setTimeout(() => {
+            if (editorRef.current) {
+              try {
+                editorRef.current.scrollToText(plainText);
+              } catch (e) {
+                // Ignore scroll errors - highlight is the main feature
+                console.warn('Could not scroll to highlighted text:', e);
+              }
+            }
+          }, 100);
         }
-      }, 150); // Increased delay
+      }, 150);
     }
   };
 
@@ -1936,4 +1952,3 @@ export default function Proofread() {
     </div>
   );
 }
-

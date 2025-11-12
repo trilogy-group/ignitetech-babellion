@@ -23,7 +23,8 @@ import {
   Link as LinkIcon,
   Undo,
   Redo,
-  MessageSquare
+  MessageSquare,
+  Code
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -65,6 +66,7 @@ export interface RichTextEditorRef {
   highlightText: (searchText: string) => void;
   clearHighlights: () => void;
   replaceText: (oldText: string, newText: string) => void;
+  replaceHTML: (oldHTML: string, newHTML: string) => void;
   scrollToText: (searchText: string) => void;
   getText: () => string;
   getHTML: () => string;
@@ -80,16 +82,25 @@ interface RichTextEditorProps {
   editorKey?: string; // Add unique key for multiple editors
   showFeedbackButton?: boolean; // Show feedback button on text selection
   onFeedbackClick?: (selectedText: string) => void; // Callback when feedback is clicked
+  showRawHtmlButton?: boolean; // Show raw HTML toggle button
+  isRawView?: boolean; // Current state of raw view
+  onRawViewToggle?: () => void; // Callback when raw view is toggled
 }
 
 const MenuBar = ({ 
   editor, 
   showFeedbackButton, 
-  onFeedbackClick 
+  onFeedbackClick,
+  showRawHtmlButton,
+  isRawView,
+  onRawViewToggle
 }: { 
   editor: Editor | null;
   showFeedbackButton?: boolean;
   onFeedbackClick?: (selectedText: string) => void;
+  showRawHtmlButton?: boolean;
+  isRawView?: boolean;
+  onRawViewToggle?: () => void;
 }) => {
   const [hasSelection, setHasSelection] = useState(false);
 
@@ -246,6 +257,21 @@ const MenuBar = ({
       >
         <LinkIcon className="h-3.5 w-3.5" />
       </Button>
+      {showRawHtmlButton && (
+        <>
+          <div className="w-px h-5 bg-border mx-0.5" />
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={onRawViewToggle}
+            className={cn(isRawView && 'bg-accent', 'h-7 w-7 p-0')}
+            title={isRawView ? "Switch to Rich Text" : "Switch to Raw HTML"}
+          >
+            <Code className="h-3.5 w-3.5" />
+          </Button>
+        </>
+      )}
       <div className="w-px h-5 bg-border mx-0.5" />
       <Button
         type="button"
@@ -296,6 +322,9 @@ export const RichTextEditor = forwardRef<RichTextEditorRef, RichTextEditorProps>
   editorKey,
   showFeedbackButton = false,
   onFeedbackClick,
+  showRawHtmlButton = false,
+  isRawView = false,
+  onRawViewToggle,
 }, ref) => {
   // Memoize extensions to prevent duplicate warnings and unnecessary recreations
   // Each extension instance is created once and reused across renders
@@ -436,47 +465,46 @@ export const RichTextEditor = forwardRef<RichTextEditorRef, RichTextEditorProps>
       if (textMatches.length === 0) return;
       
       // Map text positions to document positions
-      // Tiptap's textContent positions map directly to document positions for text nodes
-      const matches: Array<{ from: number; to: number }> = [];
-      
-      // Traverse the document to find the actual positions
+      // Build a complete mapping of text positions to document positions
+      const positionMap: Array<{ textIndex: number; docPos: number }> = [];
       let textOffset = 0;
       
       editor.state.doc.descendants((node, pos) => {
         if (node.isText) {
           const nodeText = node.text || '';
-          const nodeLength = nodeText.length;
-          
-          // Check if any matches fall within this text node
-          for (const textMatch of textMatches) {
-            if (textMatch.index >= textOffset && textMatch.index < textOffset + nodeLength) {
-              // Match starts in this node
-              const from = pos + (textMatch.index - textOffset);
-              const matchEndInText = textMatch.index + textMatch.length;
-              
-              if (matchEndInText <= textOffset + nodeLength) {
-                // Match is entirely within this node
-                const to = pos + (matchEndInText - textOffset);
-                matches.push({ from, to });
-              } else {
-                // Match spans multiple nodes - approximate the end
-                const to = Math.min(pos + nodeLength, pos + (textMatch.index - textOffset) + normalizedSearch.length);
-                matches.push({ from, to });
-              }
-            }
+          for (let i = 0; i < nodeText.length; i++) {
+            positionMap.push({ textIndex: textOffset + i, docPos: pos + i });
           }
-          
-          textOffset += nodeLength;
-        } else if (node.isBlock || node.type.name === 'hardBreak') {
-          // Add space for block boundaries if needed
-          // The textContent includes spaces/newlines, so we need to account for them
-          if (textOffset < plainText.length && plainText[textOffset] === '\n') {
-            textOffset += 1;
-          }
+          textOffset += nodeText.length;
         }
-        
         return true;
       });
+      
+      // Now map all text matches to document positions
+      const matches: Array<{ from: number; to: number }> = [];
+      
+      for (const textMatch of textMatches) {
+        const startIdx = textMatch.index;
+        const endIdx = textMatch.index + textMatch.length - 1;
+        
+        // Find document positions for start and end
+        let from = -1;
+        let to = -1;
+        
+        for (const mapping of positionMap) {
+          if (mapping.textIndex === startIdx) {
+            from = mapping.docPos;
+          }
+          if (mapping.textIndex === endIdx) {
+            to = mapping.docPos + 1; // +1 because 'to' is exclusive
+          }
+          if (from !== -1 && to !== -1) break;
+        }
+        
+        if (from !== -1 && to !== -1) {
+          matches.push({ from, to });
+        }
+      }
       
       // Fallback: if we didn't find matches, try direct character matching
       if (matches.length === 0) {
@@ -593,112 +621,63 @@ export const RichTextEditor = forwardRef<RichTextEditorRef, RichTextEditorProps>
       const normalizedOldText = oldText.trim();
       if (!normalizedOldText) return;
       
+      // Get plain text and find matches
+      const plainText = editor.state.doc.textContent;
+      
       // Escape special regex characters for literal matching
       const escapedSearch = normalizedOldText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       const searchRegex = new RegExp(escapedSearch, 'gi');
       
-      // Use Tiptap's textBetween to find matches by traversing document
-      // Build accumulated text as we traverse to map positions correctly
-      const matches: Array<{ from: number; to: number }> = [];
-      let accumulatedText = '';
+      // Find text matches
+      const textMatches: Array<{ index: number; length: number }> = [];
+      let match;
       
-      // Traverse document and find matches
+      while ((match = searchRegex.exec(plainText)) !== null) {
+        textMatches.push({ index: match.index, length: match[0].length });
+      }
+      
+      if (textMatches.length === 0) return;
+      
+      // Build position map
+      const positionMap: Array<{ textIndex: number; docPos: number }> = [];
+      let textOffset = 0;
+      
       editor.state.doc.descendants((node, pos) => {
         if (node.isText) {
           const nodeText = node.text || '';
-          const textBeforeNode = accumulatedText;
-          const textIncludingNode = accumulatedText + nodeText;
-          
-          // Search for matches that start in or overlap with this node
-          searchRegex.lastIndex = 0;
-          let match;
-          
-          // Search in the accumulated text (including this node)
-          while ((match = searchRegex.exec(textIncludingNode)) !== null) {
-            const matchStartInText = match.index;
-            const matchEndInText = match.index + match[0].length;
-            
-            // Check if match starts in this node or before
-            if (matchStartInText >= textBeforeNode.length && matchStartInText < textIncludingNode.length) {
-              // Match starts in this node
-              const from = pos + (matchStartInText - textBeforeNode.length);
-              
-              if (matchEndInText <= textIncludingNode.length) {
-                // Match ends in this node
-                const to = pos + (matchEndInText - textBeforeNode.length);
-                matches.push({ from, to });
-              } else {
-                // Match spans beyond this node - find the end position
-                let remainingLength = match[0].length - (textIncludingNode.length - matchStartInText);
-                let currentDocPos = pos + nodeText.length;
-                let currentTextPos = textIncludingNode.length;
-                
-                // Traverse forward to find end position
-                editor.state.doc.descendants((endNode, endPos) => {
-                  if (endPos < currentDocPos) return true;
-                  if (remainingLength <= 0) return false;
-                  
-                  if (endNode.isText) {
-                    const endNodeText = endNode.text || '';
-                    const endNodeLength = endNodeText.length;
-                    
-                    if (remainingLength <= endNodeLength) {
-                      const to = endPos + remainingLength;
-                      matches.push({ from, to });
-                      return false;
-                    }
-                    
-                    remainingLength -= endNodeLength;
-                    currentDocPos = endPos + endNodeLength;
-                    currentTextPos += endNodeLength;
-                  }
-                  
-                  return true;
-                });
-              }
-            } else if (matchStartInText < textBeforeNode.length && matchEndInText > textBeforeNode.length) {
-              // Match started in a previous node but continues into this node
-              // Find the start position by traversing backwards
-              let startFound = false;
-              let startDocPos = -1;
-              let searchTextPos = 0;
-              
-              editor.state.doc.descendants((startNode, startPos) => {
-                if (startFound) return false;
-                
-                if (startNode.isText) {
-                  const startNodeText = startNode.text || '';
-                  const startNodeLength = startNodeText.length;
-                  
-                  if (searchTextPos + startNodeLength > matchStartInText) {
-                    startDocPos = startPos + (matchStartInText - searchTextPos);
-                    startFound = true;
-                    
-                    // Now find end position
-                    const matchEnd = matchStartInText + match[0].length;
-                    if (matchEnd <= textIncludingNode.length) {
-                      const to = pos + (matchEnd - textBeforeNode.length);
-                      matches.push({ from: startDocPos, to });
-                    } else {
-                      // End is in a future node - handled above
-                    }
-                    
-                    return false;
-                  }
-                  
-                  searchTextPos += startNodeLength;
-                }
-                
-                return true;
-              });
-            }
+          for (let i = 0; i < nodeText.length; i++) {
+            positionMap.push({ textIndex: textOffset + i, docPos: pos + i });
           }
-          
-          accumulatedText = textIncludingNode;
+          textOffset += nodeText.length;
         }
-        
         return true;
       });
+      
+      // Map text matches to document positions using the position map
+      const matches: Array<{ from: number; to: number }> = [];
+      
+      for (const textMatch of textMatches) {
+        const startIdx = textMatch.index;
+        const endIdx = textMatch.index + textMatch.length - 1;
+        
+        // Find document positions for start and end
+        let from = -1;
+        let to = -1;
+        
+        for (const mapping of positionMap) {
+          if (mapping.textIndex === startIdx) {
+            from = mapping.docPos;
+          }
+          if (mapping.textIndex === endIdx) {
+            to = mapping.docPos + 1; // +1 because 'to' is exclusive
+          }
+          if (from !== -1 && to !== -1) break;
+        }
+        
+        if (from !== -1 && to !== -1) {
+          matches.push({ from, to });
+        }
+      }
       
       // Remove duplicates
       const uniqueMatches = matches.filter((match, index, self) =>
@@ -773,6 +752,25 @@ export const RichTextEditor = forwardRef<RichTextEditorRef, RichTextEditorProps>
         console.warn('scrollToText error:', error);
       }
     },
+    replaceHTML: (oldHTML: string, newHTML: string) => {
+      if (!editor || !oldHTML) return;
+      
+      // Get current HTML content
+      const currentHTML = editor.getHTML();
+      
+      // Do a direct string replacement
+      const updatedHTML = currentHTML.replace(oldHTML, newHTML);
+      
+      // Check if replacement happened
+      if (updatedHTML === currentHTML) {
+        console.warn('No replacement made - old HTML not found');
+        return;
+      }
+      
+      // Set the new HTML content (this will re-render the editor)
+      editor.commands.setContent(updatedHTML);
+    },
+    
     getText: () => {
       if (!editor) return "";
       return editor.state.doc.textContent;
@@ -784,7 +782,7 @@ export const RichTextEditor = forwardRef<RichTextEditorRef, RichTextEditorProps>
   }), [editor]);
 
   return (
-    <div className={cn('border rounded-md bg-background rich-text-wrapper', className)}>
+    <div className={cn('border rounded-md bg-background rich-text-wrapper flex flex-col', className)}>
       <style>{`
         .rich-text-wrapper .ProseMirror * {
           color: inherit !important;
@@ -795,9 +793,15 @@ export const RichTextEditor = forwardRef<RichTextEditorRef, RichTextEditorProps>
         .rich-text-wrapper .ProseMirror a {
           color: hsl(var(--primary)) !important;
         }
+        .rich-text-wrapper .editor-content-scrollable {
+          overflow-y: auto;
+          flex: 1;
+        }
       `}</style>
-      {editable && <MenuBar editor={editor} showFeedbackButton={showFeedbackButton} onFeedbackClick={onFeedbackClick} />}
-      <EditorContent editor={editor} />
+      {editable && <MenuBar editor={editor} showFeedbackButton={showFeedbackButton} onFeedbackClick={onFeedbackClick} showRawHtmlButton={showRawHtmlButton} isRawView={isRawView} onRawViewToggle={onRawViewToggle} />}
+      <div className="editor-content-scrollable">
+        <EditorContent editor={editor} />
+      </div>
     </div>
   );
 });

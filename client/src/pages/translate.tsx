@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation, useInfiniteQuery } from "@tanstack/react-query";
 import { useLocation } from "wouter";
-import { Plus, Trash2, Loader2, Copy, Check, Lock, Globe, Pencil, FileText, Save, X, RotateCw, ChevronLeft, ChevronRight, Square, Search } from "lucide-react";
+import { Plus, Trash2, Loader2, Copy, Check, Lock, Globe, Pencil, FileText, Save, X, RotateCw, ChevronLeft, ChevronRight, Square, Search, Share } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -74,6 +74,11 @@ export default function Translate() {
   const [isLanguageDialogOpen, setIsLanguageDialogOpen] = useState(false);
   const [isEscapePressed, setIsEscapePressed] = useState(false);
   const [copiedOutputId, setCopiedOutputId] = useState<string | null>(null);
+  const [sharedOutputId, setSharedOutputId] = useState<string | null>(null);
+  const [creatingGoogleDocOutputId, setCreatingGoogleDocOutputId] = useState<string | null>(null);
+  const [copiedSource, setCopiedSource] = useState(false);
+  const [copiedLink, setCopiedLink] = useState(false);
+  const [isCreatingGoogleDoc, setIsCreatingGoogleDoc] = useState(false);
   const [activeLanguageTab, setActiveLanguageTab] = useState<string>("");
   const [editedOutputs, setEditedOutputs] = useState<Record<string, string>>({});
   const [isPrivate, setIsPrivate] = useState(false);
@@ -87,7 +92,10 @@ export default function Translate() {
   const [isFeedbackModalOpen, setIsFeedbackModalOpen] = useState(false);
   const [feedbackSelectedText, setFeedbackSelectedText] = useState("");
   const [feedbackOutputId, setFeedbackOutputId] = useState<string | null>(null);
-  const [isLeftPanelCollapsed, setIsLeftPanelCollapsed] = useState(false);
+  const [isLeftPanelCollapsed, setIsLeftPanelCollapsed] = useState(() => {
+    const saved = localStorage.getItem('translate-left-panel-collapsed');
+    return saved ? JSON.parse(saved) : false;
+  });
   const [proofreadChangesDialogOpen, setProofreadChangesDialogOpen] = useState(false);
   const [proofreadChangesOutputId, setProofreadChangesOutputId] = useState<string | null>(null);
   const [stoppedPollingOutputs, setStoppedPollingOutputs] = useState<Set<string>>(new Set());
@@ -102,6 +110,11 @@ export default function Translate() {
       searchInputRef.current.focus();
     }
   }, [isSearchExpanded]);
+
+  // Save left panel collapsed state to localStorage
+  useEffect(() => {
+    localStorage.setItem('translate-left-panel-collapsed', JSON.stringify(isLeftPanelCollapsed));
+  }, [isLeftPanelCollapsed]);
 
   // Fetch translations with infinite scroll and server-side search
   const {
@@ -428,6 +441,170 @@ export default function Translate() {
       });
     },
   });
+
+  // Create Google Doc from translation mutation
+  const createGoogleDocFromTranslationMutation = useMutation({
+    mutationFn: async ({ outputId, title }: { outputId: string; title?: string }) => {
+      const response = await apiRequest("POST", "/api/google/docs/create-from-translation", {
+        translationOutputId: outputId,
+        title,
+      });
+      return await response.json() as { documentId: string; webViewLink: string };
+    },
+    onSuccess: (data, variables) => {
+      setCreatingGoogleDocOutputId(null);
+      // Open document in new tab
+      window.open(data.webViewLink, '_blank');
+      toast({
+        title: "Google Doc created",
+        description: "Your document has been created and opened in a new tab.",
+      });
+    },
+    onError: (error: Error) => {
+      setCreatingGoogleDocOutputId(null);
+      const errorMessage = error.message || "";
+      const isScopeError = errorMessage.toLowerCase().includes("insufficient") || 
+                          errorMessage.includes("log out and log back in") ||
+                          errorMessage.includes("403");
+      
+      if (isScopeError) {
+        toast({
+          title: "Permission required",
+          description: errorMessage.includes("log out") 
+            ? errorMessage 
+            : "Please log out and log back in to grant the necessary permissions for creating Google Docs.",
+          variant: "destructive",
+        });
+      } else {
+        toast({
+          title: "Failed to create Google Doc",
+          description: errorMessage || "Could not create Google Doc. Please check your Google credentials.",
+          variant: "destructive",
+        });
+      }
+    },
+  });
+
+  const handleCreateGoogleDoc = async (outputId: string, languageName: string) => {
+    if (!selectedTranslation) return;
+    
+    setCreatingGoogleDocOutputId(outputId);
+    const docTitle = `[${languageName.toUpperCase()}] ${selectedTranslation.title}`;
+    createGoogleDocFromTranslationMutation.mutate({ outputId, title: docTitle });
+  };
+
+  // Create Google Doc from translation source mutation
+  const createGoogleDocFromTranslationSourceMutation = useMutation({
+    mutationFn: async ({ translationId, title, htmlContent }: { translationId: string; title?: string; htmlContent?: string }) => {
+      const response = await apiRequest("POST", "/api/google/docs/create-from-translation-source", {
+        translationId,
+        title,
+        htmlContent,
+      });
+      return await response.json() as { documentId: string; webViewLink: string };
+    },
+    onSuccess: (data) => {
+      setIsCreatingGoogleDoc(false);
+      // Open document in new tab
+      window.open(data.webViewLink, '_blank');
+      toast({
+        title: "Google Doc created",
+        description: "Your document has been created and opened in a new tab.",
+      });
+    },
+    onError: (error: Error) => {
+      setIsCreatingGoogleDoc(false);
+      const errorMessage = error.message || "";
+      const isScopeError = errorMessage.toLowerCase().includes("insufficient") || 
+                          errorMessage.includes("log out and log back in") ||
+                          errorMessage.includes("403");
+      
+      if (isScopeError) {
+        toast({
+          title: "Permission required",
+          description: errorMessage.includes("log out") 
+            ? errorMessage 
+            : "Please log out and log back in to grant the necessary permissions for creating Google Docs.",
+          variant: "destructive",
+        });
+      } else {
+        toast({
+          title: "Failed to create Google Doc",
+          description: errorMessage || "Could not create Google Doc. Please check your Google credentials.",
+          variant: "destructive",
+        });
+      }
+    },
+  });
+
+  const handleCopySource = async () => {
+    try {
+      // Create a blob with both HTML and plain text
+      const plainText = new DOMParser().parseFromString(sourceText, 'text/html').body.textContent || '';
+      
+      // Use the modern Clipboard API to copy rich HTML
+      const clipboardItem = new ClipboardItem({
+        'text/html': new Blob([sourceText], { type: 'text/html' }),
+        'text/plain': new Blob([plainText], { type: 'text/plain' }),
+      });
+      
+      await navigator.clipboard.write([clipboardItem]);
+      
+      setCopiedSource(true);
+      setTimeout(() => setCopiedSource(false), 2000);
+      toast({
+        title: "Copied to clipboard",
+        description: "Rich formatted text has been copied with style preserved.",
+      });
+    } catch (error: unknown) {
+      console.error('Failed to copy:', error);
+      toast({
+        title: "Copy failed",
+        description: "Could not copy to clipboard.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleShareLink = async () => {
+    if (!selectedTranslationId) return;
+    
+    try {
+      const shareUrl = `${window.location.origin}${window.location.pathname}#${selectedTranslationId}`;
+      await navigator.clipboard.writeText(shareUrl);
+      
+      setCopiedLink(true);
+      setTimeout(() => setCopiedLink(false), 2000);
+      toast({
+        title: "Link copied",
+        description: "Shareable link has been copied to clipboard.",
+      });
+    } catch (error: unknown) {
+      console.error('Failed to copy link:', error);
+      toast({
+        title: "Copy failed",
+        description: "Could not copy link to clipboard.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleCreateGoogleDocFromSource = () => {
+    if (!selectedTranslationId) return;
+    
+    setIsCreatingGoogleDoc(true);
+    // Get the current HTML content from the editor (edited or original)
+    const htmlContent = sourceText;
+    
+    // Use the current title
+    const currentTitle = title || "Untitled Translation";
+    
+    createGoogleDocFromTranslationSourceMutation.mutate({
+      translationId: selectedTranslationId,
+      title: currentTitle,
+      htmlContent,
+    });
+  };
 
   const handleSelectTranslation = (translation: Translation) => {
     setSelectedTranslationId(translation.id);
@@ -841,6 +1018,29 @@ export default function Translate() {
     }
   };
 
+  const handleShareOutput = async (outputId: string) => {
+    if (!selectedTranslationId) return;
+    
+    try {
+      const shareUrl = `${window.location.origin}${window.location.pathname}#${selectedTranslationId}`;
+      await navigator.clipboard.writeText(shareUrl);
+      
+      setSharedOutputId(outputId);
+      setTimeout(() => setSharedOutputId(null), 2000);
+      toast({
+        title: "Link copied",
+        description: "Shareable link has been copied to clipboard.",
+      });
+    } catch (error: unknown) {
+      console.error('Failed to copy link:', error);
+      toast({
+        title: "Copy failed",
+        description: "Could not copy link to clipboard.",
+        variant: "destructive",
+      });
+    }
+  };
+
   const handleLanguageToggle = (languageCode: string) => {
     setTempSelectedLanguages(prev =>
       prev.includes(languageCode)
@@ -976,7 +1176,7 @@ export default function Translate() {
       {/* Left Sidebar - Translation History (Desktop only) */}
       <div className={`hidden md:flex ${isLeftPanelCollapsed ? 'w-12' : 'w-80'} flex-col border-r bg-sidebar flex-none transition-all duration-200`}>
         <div className={`flex items-center ${isLeftPanelCollapsed ? 'flex-col justify-start gap-2' : 'justify-between'} border-b p-4`}>
-          {!isLeftPanelCollapsed && !isSearchExpanded && <h2 className="text-lg font-semibold">Translation History</h2>}
+          {!isLeftPanelCollapsed && !isSearchExpanded && <h2 className="text-lg font-semibold">History</h2>}
           {!isLeftPanelCollapsed && isSearchExpanded ? (
             <div className="flex-1 flex items-center gap-2 w-full">
               <Input
@@ -1404,9 +1604,11 @@ export default function Translate() {
             <div className="flex flex-1 flex-col min-h-0">
               <div className="mb-2 flex items-center justify-between flex-shrink-0">
                 <div className="flex items-center gap-2">
-                  <Label className="text-sm font-medium">
-                    Source Text
-                  </Label>
+                  {!isMobile && (
+                    <Label className="text-sm font-medium">
+                      Source Text
+                    </Label>
+                  )}
                   <Button
                     variant="outline"
                     size="sm"
@@ -1422,7 +1624,7 @@ export default function Translate() {
                     ) : (
                       <>
                         <FileText className="mr-1 h-3 w-3" />
-                        Load Google Doc
+                        {isMobile ? "Load" : "Load Google Doc"}
                       </>
                     )}
                   </Button>
@@ -1431,53 +1633,60 @@ export default function Translate() {
                   <span className="text-xs text-muted-foreground">
                     {sourceText ? new DOMParser().parseFromString(sourceText, 'text/html').body.textContent?.length || 0 : 0} characters
                   </span>
-                  {sourceText && (
+                  <TooltipProvider>
                     <Tooltip>
                       <TooltipTrigger asChild>
                         <Button
                           variant="ghost"
-                          size="icon"
-                          className="h-6 w-6"
-                          onClick={async () => {
-                            try {
-                              // Get plain text version for fallback
-                              const plainText = new DOMParser().parseFromString(sourceText, 'text/html').body.textContent || '';
-                              
-                              // Try to copy with HTML formatting
-                              if (navigator.clipboard.write) {
-                                const htmlBlob = new Blob([sourceText], { type: 'text/html' });
-                                const textBlob = new Blob([plainText], { type: 'text/plain' });
-                                const clipboardItem = new ClipboardItem({
-                                  'text/html': htmlBlob,
-                                  'text/plain': textBlob,
-                                });
-                                await navigator.clipboard.write([clipboardItem]);
-                              } else {
-                                // Fallback to plain text
-                                await navigator.clipboard.writeText(plainText);
-                              }
-                              
-                              toast({
-                                title: "Copied to clipboard",
-                                description: "Source text copied with formatting",
-                              });
-                            } catch (error) {
-                              toast({
-                                title: "Failed to copy",
-                                description: "Could not copy to clipboard",
-                                variant: "destructive",
-                              });
-                            }
-                          }}
+                          size="sm"
+                          onClick={handleCopySource}
+                          disabled={!selectedTranslationId || !sourceText}
+                          className="h-7 w-7 p-0"
                         >
-                          <Copy className="h-3 w-3" />
+                          {copiedSource ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
                         </Button>
                       </TooltipTrigger>
                       <TooltipContent>
                         <p>Copy text with formatting</p>
                       </TooltipContent>
                     </Tooltip>
-                  )}
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={handleCreateGoogleDocFromSource}
+                          disabled={isCreatingGoogleDoc || !sourceText || createGoogleDocFromTranslationSourceMutation.isPending}
+                          className="h-7 w-7 p-0"
+                        >
+                          {isCreatingGoogleDoc || createGoogleDocFromTranslationSourceMutation.isPending ? (
+                            <Loader2 className="h-3 w-3 animate-spin" />
+                          ) : (
+                            <FileText className="h-3 w-3" />
+                          )}
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>
+                        <p>Create Google Doc</p>
+                      </TooltipContent>
+                    </Tooltip>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={handleShareLink}
+                          disabled={!selectedTranslationId}
+                          className="h-7 w-7 p-0"
+                        >
+                          {copiedLink ? <Check className="h-3 w-3" /> : <Share className="h-3 w-3" />}
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>
+                        <p>Copy shareable link</p>
+                      </TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
                 </div>
               </div>
               <RichTextEditor
@@ -1608,36 +1817,36 @@ export default function Translate() {
                     </div>
                   ) : isProofreading && output ? (
                     <div className="flex flex-col h-full px-6 pt-4 pb-6 gap-4">
-                      {/* Header with language and copy button */}
-                      <div className="flex items-center justify-between flex-shrink-0">
-                        <div className="flex items-center gap-2">
+                      {/* Header with language, status, and View Changes */}
+                      <div className="flex items-center justify-between flex-shrink-0 gap-2">
+                        <div className="flex items-center gap-2 flex-wrap">
                           <Label className="text-sm font-medium">
                             {output.languageName}
-                            {output.translationStatus === 'completed' && (
-                              <span className="ml-2 inline-flex items-center gap-1 text-green-600">
-                                <Check className="h-3 w-3" />
-                                <span className="text-xs">Translated</span>
-                              </span>
-                            )}
-                            {output.proofreadStatus === 'completed' && (
-                              <span className="ml-2 inline-flex items-center gap-1 text-green-600">
-                                <Check className="h-3 w-3" />
-                                <span className="text-xs">Proof read</span>
-                              </span>
-                            )}
-                            {output.proofreadProposedChanges != null && (
-                              <Badge 
-                                variant="secondary" 
-                                className="ml-2 cursor-pointer hover:bg-secondary/80"
-                                onClick={() => {
-                                  setProofreadChangesOutputId(output.id);
-                                  setProofreadChangesDialogOpen(true);
-                                }}
-                              >
-                                View Changes
-                              </Badge>
-                            )}
                           </Label>
+                          {output.translationStatus === 'completed' && (
+                            <span className="inline-flex items-center gap-1 text-green-600">
+                              <Check className="h-3 w-3" />
+                              <span className="text-xs">Translated</span>
+                            </span>
+                          )}
+                          {output.proofreadStatus === 'completed' && (
+                            <span className="inline-flex items-center gap-1 text-green-600">
+                              <Check className="h-3 w-3" />
+                              <span className="text-xs">Proof read</span>
+                            </span>
+                          )}
+                          {output.proofreadProposedChanges != null && (
+                            <Badge 
+                              variant="secondary" 
+                              className="cursor-pointer hover:bg-secondary/80"
+                              onClick={() => {
+                                setProofreadChangesOutputId(output.id);
+                                setProofreadChangesDialogOpen(true);
+                              }}
+                            >
+                              View Changes
+                            </Badge>
+                          )}
                           {stoppedPollingOutputs.has(output.id) ? (
                             <Badge variant="outline" className="text-xs text-orange-600">
                               Polling stopped
@@ -1669,7 +1878,64 @@ export default function Translate() {
                             </>
                           )}
                         </div>
-                        <div className="flex items-center gap-1">
+                        {/* Icons - desktop only */}
+                        {!isMobile && (
+                          <div className="flex items-center gap-1">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleRerunLanguage(langCode)}
+                              disabled={isTranslating}
+                              data-testid={`button-rerun-${output.id}`}
+                              title="Rerun translation"
+                            >
+                              <RotateCw className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleCopyOutput(editedOutputs[output.id] ?? output.translatedText ?? '', output.id)}
+                              data-testid={`button-copy-${output.id}`}
+                            >
+                              {copiedOutputId === output.id ? (
+                                <Check className="h-4 w-4" />
+                              ) : (
+                                <Copy className="h-4 w-4" />
+                              )}
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleCreateGoogleDoc(output.id, output.languageName)}
+                              disabled={!output.translatedText || creatingGoogleDocOutputId === output.id || isTranslating || isProofreading}
+                              data-testid={`button-create-google-doc-proofreading-${output.id}`}
+                              title="Create Google Doc"
+                            >
+                              {creatingGoogleDocOutputId === output.id ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                              ) : (
+                                <FileText className="h-4 w-4" />
+                              )}
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleShareOutput(output.id)}
+                              data-testid={`button-share-${output.id}`}
+                            >
+                              {sharedOutputId === output.id ? (
+                                <Check className="h-4 w-4" />
+                              ) : (
+                                <Share className="h-4 w-4" />
+                              )}
+                            </Button>
+                          </div>
+                        )}
+                      </div>
+                      
+                      {/* Icons row - mobile only */}
+                      {isMobile && (
+                        <div className="flex items-center gap-1 flex-shrink-0">
                           <Button
                             variant="ghost"
                             size="sm"
@@ -1692,8 +1958,34 @@ export default function Translate() {
                               <Copy className="h-4 w-4" />
                             )}
                           </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleCreateGoogleDoc(output.id, output.languageName)}
+                            disabled={!output.translatedText || creatingGoogleDocOutputId === output.id || isTranslating || isProofreading}
+                            data-testid={`button-create-google-doc-proofreading-${output.id}`}
+                            title="Create Google Doc"
+                          >
+                            {creatingGoogleDocOutputId === output.id ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <FileText className="h-4 w-4" />
+                            )}
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleShareOutput(output.id)}
+                            data-testid={`button-share-${output.id}`}
+                          >
+                            {sharedOutputId === output.id ? (
+                              <Check className="h-4 w-4" />
+                            ) : (
+                              <Share className="h-4 w-4" />
+                            )}
+                          </Button>
                         </div>
-                      </div>
+                      )}
 
                       {/* Show restart button if polling is stopped */}
                       {stoppedPollingOutputs.has(output.id) && (
@@ -1759,18 +2051,20 @@ export default function Translate() {
                     </div>
                   ) : output ? (
                     <div className="flex flex-col h-full px-4 md:px-6 pt-3 md:pt-4 pb-4 md:pb-6 gap-3 md:gap-4">
-                      {/* Header with language and copy button */}
+                      {/* Header with language, status, and View Changes */}
                       <div className="flex items-center justify-between flex-shrink-0 gap-2">
-                        <Label className="text-sm font-medium">
-                          {output.languageName}
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <Label className="text-sm font-medium">
+                            {output.languageName}
+                          </Label>
                           {output.translationStatus === 'completed' && (
-                            <span className="ml-2 inline-flex items-center gap-1 text-green-600">
+                            <span className="inline-flex items-center gap-1 text-green-600">
                               <Check className="h-3 w-3" />
                               <span className="text-xs">Translated</span>
                             </span>
                           )}
                           {output.proofreadStatus === 'completed' && (
-                            <span className="ml-2 inline-flex items-center gap-1 text-green-600">
+                            <span className="inline-flex items-center gap-1 text-green-600">
                               <Check className="h-3 w-3" />
                               <span className="text-xs">Proof read</span>
                             </span>
@@ -1778,7 +2072,7 @@ export default function Translate() {
                           {output.proofreadProposedChanges != null && (
                             <Badge 
                               variant="secondary" 
-                              className="ml-2 cursor-pointer hover:bg-secondary/80"
+                              className="cursor-pointer hover:bg-secondary/80"
                               onClick={() => {
                                 setProofreadChangesOutputId(output.id);
                                 setProofreadChangesDialogOpen(true);
@@ -1787,8 +2081,65 @@ export default function Translate() {
                               View Changes
                             </Badge>
                           )}
-                        </Label>
-                        <div className="flex items-center gap-1">
+                        </div>
+                        {/* Icons - desktop only */}
+                        {!isMobile && (
+                          <div className="flex items-center gap-1">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleRerunLanguage(langCode)}
+                              disabled={isTranslating}
+                              data-testid={`button-rerun-${output.id}`}
+                              title="Rerun translation"
+                            >
+                              <RotateCw className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleCopyOutput(editedOutputs[output.id] ?? output.translatedText ?? '', output.id)}
+                              data-testid={`button-copy-${output.id}`}
+                            >
+                              {copiedOutputId === output.id ? (
+                                <Check className="h-4 w-4" />
+                              ) : (
+                                <Copy className="h-4 w-4" />
+                              )}
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleCreateGoogleDoc(output.id, output.languageName)}
+                              disabled={!output.translatedText || creatingGoogleDocOutputId === output.id || isTranslating || isProofreading}
+                              data-testid={`button-create-google-doc-proofreading-${output.id}`}
+                              title="Create Google Doc"
+                            >
+                              {creatingGoogleDocOutputId === output.id ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                              ) : (
+                                <FileText className="h-4 w-4" />
+                              )}
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleShareOutput(output.id)}
+                              data-testid={`button-share-${output.id}`}
+                            >
+                              {sharedOutputId === output.id ? (
+                                <Check className="h-4 w-4" />
+                              ) : (
+                                <Share className="h-4 w-4" />
+                              )}
+                            </Button>
+                          </div>
+                        )}
+                      </div>
+                      
+                      {/* Icons row - mobile only */}
+                      {isMobile && (
+                        <div className="flex items-center gap-1 flex-shrink-0">
                           <Button
                             variant="ghost"
                             size="sm"
@@ -1811,8 +2162,34 @@ export default function Translate() {
                               <Copy className="h-4 w-4" />
                             )}
                           </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleCreateGoogleDoc(output.id, output.languageName)}
+                            disabled={!output.translatedText || creatingGoogleDocOutputId === output.id || isTranslating || isProofreading}
+                            data-testid={`button-create-google-doc-proofreading-${output.id}`}
+                            title="Create Google Doc"
+                          >
+                            {creatingGoogleDocOutputId === output.id ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <FileText className="h-4 w-4" />
+                            )}
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleShareOutput(output.id)}
+                            data-testid={`button-share-${output.id}`}
+                          >
+                            {sharedOutputId === output.id ? (
+                              <Check className="h-4 w-4" />
+                            ) : (
+                              <Share className="h-4 w-4" />
+                            )}
+                          </Button>
                         </div>
-                      </div>
+                      )}
 
                       {/* Editor with internal scrolling */}
                       <RichTextEditor

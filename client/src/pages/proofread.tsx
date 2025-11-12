@@ -71,6 +71,18 @@ interface ProofreadingResult {
   status?: 'pending' | 'accepted' | 'rejected';
 }
 
+/**
+ * Renders the Proofread interface for creating, editing, running, and managing proofreading projects and their results.
+ *
+ * Provides a three-pane UI (history, editor, results) that supports:
+ * - creating, renaming, deleting, and selecting proofreadings;
+ * - editing source HTML with a rich text editor or raw HTML view, including load/save and Google Docs import/export;
+ * - selecting rule categories and AI model, executing proofreading, and polling for results;
+ * - viewing suggestions, highlighting source text, accepting single or all suggestions, and sending content to Translate;
+ * - search, shareable links, copy rich text to clipboard, privacy toggles, and unsaved-changes handling.
+ *
+ * @returns The rendered React element for the Proofread component.
+ */
 export default function Proofread() {
   const { toast } = useToast();
   const { user } = useAuth();
@@ -1936,4 +1948,3 @@ export default function Proofread() {
     </div>
   );
 }
-

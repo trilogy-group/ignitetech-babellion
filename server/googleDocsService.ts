@@ -29,7 +29,12 @@ export async function getGoogleAuth(req: Request): Promise<Auth.OAuth2Client> {
   return oauth2Client;
 }
 
-// List Google Docs with pagination to get all docs
+/**
+ * Retrieve Google Docs files matching an optional name filter, paging through results.
+ *
+ * @param searchQuery - Optional substring to match against document names; single quotes are escaped automatically
+ * @returns An array of file objects (id, name, createdTime, modifiedTime, mimeType, thumbnailLink, webViewLink). At most 500 files are returned due to a safety limit.
+ */
 export async function listGoogleDocs(auth: Auth.OAuth2Client, searchQuery?: string) {
   const drive = google.drive({ version: 'v3', auth });
   
@@ -70,7 +75,13 @@ export async function listGoogleDocs(auth: Auth.OAuth2Client, searchQuery?: stri
   return allFiles;
 }
 
-// Get Google Doc content as HTML using export API
+/**
+ * Retrieves a Google Docs document's title and body HTML by exporting the document as HTML and performing minimal cleanup.
+ *
+ * @param auth - OAuth2 client used for Drive and Docs API requests
+ * @param documentId - The Google Docs document ID to fetch
+ * @returns An object with `title` (the document title or `"Untitled"`) and `html` (the document body HTML with document-level styles, ids, and classes removed; returns `"<p></p>"` if empty)
+ */
 export async function getGoogleDocContent(auth: Auth.OAuth2Client, documentId: string) {
   const drive = google.drive({ version: 'v3', auth });
   const docs = google.docs({ version: 'v1', auth });
@@ -113,7 +124,14 @@ export async function getGoogleDocContent(auth: Auth.OAuth2Client, documentId: s
 }
 
 // Convert HTML to Google Docs API batchUpdate requests
-// Uses a simpler approach: extract text segments with their formatting
+/**
+ * Generate Google Docs batchUpdate requests from simplified HTML with basic text formatting.
+ *
+ * Supports bold, italic, underline, line breaks, paragraphs, and list-item boundaries; script and style tags are removed before conversion.
+ *
+ * @param html - HTML string to convert into Google Docs requests
+ * @returns An array of batchUpdate request objects suitable for the Google Docs API that insert the document text and apply text styles (bold, italic, underline) and line breaks. Requests use Google Docs indexing (document indices start at 1).
+ */
 function convertHtmlToGoogleDocsRequests(html: string): Array<Record<string, unknown>> {
   const requests: Array<Record<string, unknown>> = [];
   
@@ -294,7 +312,16 @@ function convertHtmlToGoogleDocsRequests(html: string): Array<Record<string, unk
   return requests;
 }
 
-// Create a new Google Doc with HTML content
+/**
+ * Creates a Google Docs document from the provided HTML content and returns its identifiers.
+ *
+ * Attempts to convert the HTML to a Google Docs file, applies a default paragraph spacing where possible, and does not fail if spacing adjustment cannot be applied.
+ *
+ * @param auth - OAuth2 client authorized to modify Drive and Docs for the target account
+ * @param title - The title to assign to the new document
+ * @param htmlContent - HTML fragment or document body to convert into the new Google Doc
+ * @returns An object containing `documentId` of the created document and `webViewLink` to open it in a browser
+ */
 export async function createGoogleDoc(
   auth: Auth.OAuth2Client,
   title: string,
@@ -391,5 +418,4 @@ ${htmlContent}
     webViewLink: file.data.webViewLink || `https://docs.google.com/document/d/${documentId}/edit`,
   };
 }
-
 

@@ -57,6 +57,15 @@ import { useIsMobile } from "@/hooks/use-mobile";
 import { MobileHistorySheet } from "@/components/mobile-history-sheet";
 import { History } from "lucide-react";
 
+/**
+ * Render the Translate page UI for creating, editing, translating, and managing translation projects.
+ *
+ * Provides the full translation workflow including history, source editor, language and model selection,
+ * translation outputs with per-language tabs, Google Docs import/export, copy/share actions, feedback submission,
+ * proofreading creation, and related server interactions (create, update, delete, translate, and fetch).
+ *
+ * @returns A JSX element that renders the translation management interface.
+ */
 export default function Translate() {
   const { toast } = useToast();
   const { user } = useAuth();

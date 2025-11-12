@@ -18,6 +18,13 @@ import { useIsMobile } from "@/hooks/use-mobile";
 import { useState } from "react";
 import { ReleaseNotesModal } from "./release-notes-modal";
 
+/**
+ * Renders the application header containing brand navigation, primary navigation links, feedback and theme controls, and the user menu with release notes and logout.
+ *
+ * The header adapts for mobile and desktop layouts, highlights the active route, conditionally shows admin options, and controls the visibility of the release notes modal.
+ *
+ * @returns The header element for the app's top navigation bar
+ */
 export function AppHeader() {
   const [location] = useLocation();
   const { user } = useAuth();

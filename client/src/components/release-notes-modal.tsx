@@ -8,6 +8,13 @@ interface ReleaseNotesModalProps {
   onOpenChange: (open: boolean) => void;
 }
 
+/**
+ * Render a release notes modal dialog that displays recent changelog entries and feature highlights.
+ *
+ * @param open - Controls whether the modal is visible.
+ * @param onOpenChange - Called with the updated open state when the dialog is opened or closed.
+ * @returns The release notes modal element.
+ */
 export function ReleaseNotesModal({ open, onOpenChange }: ReleaseNotesModalProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -138,4 +145,3 @@ export function ReleaseNotesModal({ open, onOpenChange }: ReleaseNotesModalProps
     </Dialog>
   );
 }
-

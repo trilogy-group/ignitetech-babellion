@@ -44,6 +44,27 @@ interface MobileHistorySheetProps {
   trigger?: React.ReactNode;
 }
 
+/**
+ * Render a mobile-accessible "History" sheet for viewing and managing translations.
+ *
+ * The sheet lists translations, shows loading and empty states, and exposes controls to
+ * select, create, rename, and delete translations according to the provided callbacks
+ * and permissions.
+ *
+ * @param translations - Array of translation entries to display
+ * @param isLoading - Whether the translation list is currently loading
+ * @param selectedTranslationId - Id of the currently selected translation, if any
+ * @param onSelectTranslation - Called with a translation when the user selects it
+ * @param onNewTranslation - Called when the user requests creating a new translation
+ * @param isCreating - Whether a new translation is currently being created
+ * @param onRename - Called with (id, newTitle) to commit a rename
+ * @param onDelete - Called with an id to delete the corresponding translation
+ * @param canEdit - Function that returns whether the current user may edit a translation
+ * @param getOwnershipTooltip - Function that returns tooltip text describing ownership for a translation
+ * @param trigger - Optional custom trigger element to open the sheet; defaults to a mobile-only button
+ *
+ * @returns The History sheet React element
+ */
 export function MobileHistorySheet({
   translations,
   isLoading,
@@ -263,4 +284,3 @@ export function MobileHistorySheet({
     </>
   );
 }
-

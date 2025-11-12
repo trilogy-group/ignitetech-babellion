@@ -21,6 +21,16 @@ import {
 import { logInfo, logError } from "./vite";
 import { retryOnDatabaseError } from "./retry";
 
+/**
+ * Register and configure all API routes on the given Express application and return a configured HTTP server.
+ *
+ * Routes registered include authentication, translations and translation outputs (including async translate pipeline),
+ * models, languages, admin endpoints (API keys, settings, models, languages, users), Google Docs helpers, feedback,
+ * proofreading (admin and user flows, including async proofreading execution), and supporting pagination/access controls.
+ *
+ * @param app - The Express application to attach routes and middleware to.
+ * @returns An HTTP server instance with extended timeouts and keep-alive settings tuned for long-running AI requests.
+ */
 export async function registerRoutes(app: Express): Promise<Server> {
   // Auth middleware
   await setupAuth(app);

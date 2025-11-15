@@ -42,11 +42,15 @@ import { Switch } from "@/components/ui/switch";
 import { useAuth } from "@/hooks/useAuth";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { cn } from "@/lib/utils";
+import { useSaveLastVisitedPage } from "@/hooks/useLastVisitedPage";
 
 export default function Settings() {
   const { toast } = useToast();
   const { user: currentUser } = useAuth();
   const isMobile = useIsMobile();
+  
+  // Save this page as last visited
+  useSaveLastVisitedPage("/settings");
   const [openaiKey, setOpenaiKey] = useState("");
   const [anthropicKey, setAnthropicKey] = useState("");
   const [systemPrompt, setSystemPrompt] = useState("");

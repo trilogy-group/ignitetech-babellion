@@ -1084,46 +1084,46 @@ export default function Proofread() {
     // Clear all highlights first
     editorRef.current?.clearHighlights();
     
-    // Apply all changes in editor first
-    for (const index of acceptedIndices) {
-      const result = results[index];
-      // Replace HTML content directly to preserve formatting
-      editorRef.current?.replaceHTML(result.original_text, result.suggested_change);
-      // Small delay between replacements
-      await new Promise(resolve => setTimeout(resolve, 50));
-    }
-    
-    // Get the updated content from editor
-    const updatedHTML = editorRef.current?.getHTML() || "";
-    
-    // Sequentially update each suggestion status in backend
+    // Process each suggestion step by step: change → save → update status → next
     try {
       for (const index of acceptedIndices) {
+        const result = results[index];
+        
         // Update progress index to show which card is currently processing
         setAcceptAllProgressIndex(index);
         
-        // Update status in backend
+        // Step 1: Apply change in editor
+        editorRef.current?.replaceHTML(result.original_text, result.suggested_change);
+        
+        // Small delay to ensure editor has updated
+        await new Promise(resolve => setTimeout(resolve, 100));
+        
+        // Step 2: Get the updated content and save the document
+        const updatedHTML = editorRef.current?.getHTML() || "";
+        
+        if (updatedHTML) {
+          await updateMutation.mutateAsync({
+            id: selectedProofreadingId,
+            data: {
+              sourceText: updatedHTML,
+              title,
+              selectedCategories,
+              isPrivate,
+              lastUsedModelId: selectedModel,
+            },
+          }, { suppressToast: true });
+          
+          // Update the last saved content
+          setLastSavedContent(updatedHTML);
+          setHasUnsavedChanges(false);
+        }
+        
+        // Step 3: Update suggestion status in backend
         await apiRequest('PATCH', `/api/proofreadings/${selectedProofreadingId}/output/suggestion/${index}`, { status: 'accepted' });
         
-        // Asynchronously refresh the query to update card status (fire-and-forget)
+        // Step 4: Refresh the query to update card status (fire-and-forget)
         queryClient.invalidateQueries({ queryKey: ["/api/proofreadings", selectedProofreadingId, "output"] });
       }
-      
-      // Save the updated document text once after all status updates
-      await updateMutation.mutateAsync({
-        id: selectedProofreadingId,
-        data: {
-          sourceText: updatedHTML,
-          title,
-          selectedCategories,
-          isPrivate,
-          lastUsedModelId: selectedModel,
-        },
-      }, { suppressToast: true });
-      
-      // Update the last saved content and clear unsaved changes flag
-      setLastSavedContent(updatedHTML);
-      setHasUnsavedChanges(false);
       
       // Final refresh to ensure consistent state
       await queryClient.invalidateQueries({ queryKey: ["/api/proofreadings", selectedProofreadingId, "output"] });

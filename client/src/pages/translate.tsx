@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation, useInfiniteQuery } from "@tanstack/react-query";
 import { useLocation } from "wouter";
-import { Plus, Trash2, Loader2, Copy, Check, Lock, Globe, Pencil, FileText, Save, X, RotateCw, ChevronLeft, ChevronRight, Square, Search, Share } from "lucide-react";
+import { Plus, Trash2, Loader2, Copy, Check, Lock, Globe, Pencil, FileText, Save, X, RotateCw, ChevronLeft, ChevronRight, Square, Search, Share, Link2 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -45,6 +45,12 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { useToast } from "@/hooks/use-toast";
 import { ToastAction } from "@/components/ui/toast";
 import { useAuth } from "@/hooks/useAuth";
@@ -1642,60 +1648,55 @@ export default function Translate() {
                   <span className="text-xs text-muted-foreground">
                     {sourceText ? new DOMParser().parseFromString(sourceText, 'text/html').body.textContent?.length || 0 : 0} characters
                   </span>
-                  <TooltipProvider>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={handleCopySource}
-                          disabled={!selectedTranslationId || !sourceText}
-                          className="h-7 w-7 p-0"
-                        >
-                          {copiedSource ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent>
-                        <p>Copy text with formatting</p>
-                      </TooltipContent>
-                    </Tooltip>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={handleCreateGoogleDocFromSource}
-                          disabled={isCreatingGoogleDoc || !sourceText || createGoogleDocFromTranslationSourceMutation.isPending}
-                          className="h-7 w-7 p-0"
-                        >
-                          {isCreatingGoogleDoc || createGoogleDocFromTranslationSourceMutation.isPending ? (
-                            <Loader2 className="h-3 w-3 animate-spin" />
-                          ) : (
-                            <FileText className="h-3 w-3" />
-                          )}
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent>
-                        <p>Create Google Doc</p>
-                      </TooltipContent>
-                    </Tooltip>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={handleShareLink}
-                          disabled={!selectedTranslationId}
-                          className="h-7 w-7 p-0"
-                        >
-                          {copiedLink ? <Check className="h-3 w-3" /> : <Share className="h-3 w-3" />}
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent>
-                        <p>Copy shareable link</p>
-                      </TooltipContent>
-                    </Tooltip>
-                  </TooltipProvider>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        disabled={!selectedTranslationId || !sourceText}
+                        className="h-7 w-7 p-0"
+                      >
+                        <Share className="h-3 w-3" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuItem
+                        onClick={handleCopySource}
+                        disabled={!selectedTranslationId || !sourceText}
+                      >
+                        {copiedSource ? (
+                          <Check className="mr-2 h-4 w-4" />
+                        ) : (
+                          <Copy className="mr-2 h-4 w-4" />
+                        )}
+                        Copy Text
+                      </DropdownMenuItem>
+                      
+                      <DropdownMenuItem
+                        onClick={handleCreateGoogleDocFromSource}
+                        disabled={isCreatingGoogleDoc || !sourceText || createGoogleDocFromTranslationSourceMutation.isPending}
+                      >
+                        {isCreatingGoogleDoc || createGoogleDocFromTranslationSourceMutation.isPending ? (
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        ) : (
+                          <FileText className="mr-2 h-4 w-4" />
+                        )}
+                        Create Google Doc
+                      </DropdownMenuItem>
+                      
+                      <DropdownMenuItem
+                        onClick={handleShareLink}
+                        disabled={!selectedTranslationId}
+                      >
+                        {copiedLink ? (
+                          <Check className="mr-2 h-4 w-4" />
+                        ) : (
+                          <Link2 className="mr-2 h-4 w-4" />
+                        )}
+                        Share Link
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 </div>
               </div>
               <RichTextEditor
@@ -1900,44 +1901,56 @@ export default function Translate() {
                             >
                               <RotateCw className="h-4 w-4" />
                             </Button>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => handleCopyOutput(editedOutputs[output.id] ?? output.translatedText ?? '', output.id)}
-                              data-testid={`button-copy-${output.id}`}
-                            >
-                              {copiedOutputId === output.id ? (
-                                <Check className="h-4 w-4" />
-                              ) : (
-                                <Copy className="h-4 w-4" />
-                              )}
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => handleCreateGoogleDoc(output.id, output.languageName)}
-                              disabled={!output.translatedText || creatingGoogleDocOutputId === output.id || isTranslating || isProofreading}
-                              data-testid={`button-create-google-doc-proofreading-${output.id}`}
-                              title="Create Google Doc"
-                            >
-                              {creatingGoogleDocOutputId === output.id ? (
-                                <Loader2 className="h-4 w-4 animate-spin" />
-                              ) : (
-                                <FileText className="h-4 w-4" />
-                              )}
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => handleShareOutput(output.id)}
-                              data-testid={`button-share-${output.id}`}
-                            >
-                              {sharedOutputId === output.id ? (
-                                <Check className="h-4 w-4" />
-                              ) : (
-                                <Share className="h-4 w-4" />
-                              )}
-                            </Button>
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  disabled={!output.translatedText}
+                                  data-testid={`button-share-${output.id}`}
+                                >
+                                  <Share className="h-4 w-4" />
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end">
+                                <DropdownMenuItem
+                                  onClick={() => handleCopyOutput(editedOutputs[output.id] ?? output.translatedText ?? '', output.id)}
+                                  data-testid={`button-copy-${output.id}`}
+                                >
+                                  {copiedOutputId === output.id ? (
+                                    <Check className="mr-2 h-4 w-4" />
+                                  ) : (
+                                    <Copy className="mr-2 h-4 w-4" />
+                                  )}
+                                  Copy Text
+                                </DropdownMenuItem>
+                                
+                                <DropdownMenuItem
+                                  onClick={() => handleCreateGoogleDoc(output.id, output.languageName)}
+                                  disabled={!output.translatedText || creatingGoogleDocOutputId === output.id || isTranslating || isProofreading}
+                                  data-testid={`button-create-google-doc-proofreading-${output.id}`}
+                                >
+                                  {creatingGoogleDocOutputId === output.id ? (
+                                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                  ) : (
+                                    <FileText className="mr-2 h-4 w-4" />
+                                  )}
+                                  Create Google Doc
+                                </DropdownMenuItem>
+                                
+                                <DropdownMenuItem
+                                  onClick={() => handleShareOutput(output.id)}
+                                  data-testid={`button-share-link-${output.id}`}
+                                >
+                                  {sharedOutputId === output.id ? (
+                                    <Check className="mr-2 h-4 w-4" />
+                                  ) : (
+                                    <Link2 className="mr-2 h-4 w-4" />
+                                  )}
+                                  Share Link
+                                </DropdownMenuItem>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
                           </div>
                         )}
                       </div>
@@ -2104,44 +2117,56 @@ export default function Translate() {
                             >
                               <RotateCw className="h-4 w-4" />
                             </Button>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => handleCopyOutput(editedOutputs[output.id] ?? output.translatedText ?? '', output.id)}
-                              data-testid={`button-copy-${output.id}`}
-                            >
-                              {copiedOutputId === output.id ? (
-                                <Check className="h-4 w-4" />
-                              ) : (
-                                <Copy className="h-4 w-4" />
-                              )}
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => handleCreateGoogleDoc(output.id, output.languageName)}
-                              disabled={!output.translatedText || creatingGoogleDocOutputId === output.id || isTranslating || isProofreading}
-                              data-testid={`button-create-google-doc-proofreading-${output.id}`}
-                              title="Create Google Doc"
-                            >
-                              {creatingGoogleDocOutputId === output.id ? (
-                                <Loader2 className="h-4 w-4 animate-spin" />
-                              ) : (
-                                <FileText className="h-4 w-4" />
-                              )}
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => handleShareOutput(output.id)}
-                              data-testid={`button-share-${output.id}`}
-                            >
-                              {sharedOutputId === output.id ? (
-                                <Check className="h-4 w-4" />
-                              ) : (
-                                <Share className="h-4 w-4" />
-                              )}
-                            </Button>
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  disabled={!output.translatedText}
+                                  data-testid={`button-share-${output.id}`}
+                                >
+                                  <Share className="h-4 w-4" />
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end">
+                                <DropdownMenuItem
+                                  onClick={() => handleCopyOutput(editedOutputs[output.id] ?? output.translatedText ?? '', output.id)}
+                                  data-testid={`button-copy-${output.id}`}
+                                >
+                                  {copiedOutputId === output.id ? (
+                                    <Check className="mr-2 h-4 w-4" />
+                                  ) : (
+                                    <Copy className="mr-2 h-4 w-4" />
+                                  )}
+                                  Copy Text
+                                </DropdownMenuItem>
+                                
+                                <DropdownMenuItem
+                                  onClick={() => handleCreateGoogleDoc(output.id, output.languageName)}
+                                  disabled={!output.translatedText || creatingGoogleDocOutputId === output.id || isTranslating || isProofreading}
+                                  data-testid={`button-create-google-doc-proofreading-${output.id}`}
+                                >
+                                  {creatingGoogleDocOutputId === output.id ? (
+                                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                  ) : (
+                                    <FileText className="mr-2 h-4 w-4" />
+                                  )}
+                                  Create Google Doc
+                                </DropdownMenuItem>
+                                
+                                <DropdownMenuItem
+                                  onClick={() => handleShareOutput(output.id)}
+                                  data-testid={`button-share-link-${output.id}`}
+                                >
+                                  {sharedOutputId === output.id ? (
+                                    <Check className="mr-2 h-4 w-4" />
+                                  ) : (
+                                    <Link2 className="mr-2 h-4 w-4" />
+                                  )}
+                                  Share Link
+                                </DropdownMenuItem>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
                           </div>
                         )}
                       </div>

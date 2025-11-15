@@ -22,7 +22,7 @@ export function ReleaseNotesModal({ open, onOpenChange }: ReleaseNotesModalProps
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-base">
             Release Notes
-            <Badge variant="secondary" className="text-xs">v1.4</Badge>
+            <Badge variant="secondary" className="text-xs">v1.4.1</Badge>
           </DialogTitle>
           <DialogDescription className="text-xs">
             What's new in this release
@@ -31,11 +31,71 @@ export function ReleaseNotesModal({ open, onOpenChange }: ReleaseNotesModalProps
         
         <ScrollArea className="max-h-[50vh] pr-4">
           <div className="space-y-6">
-            {/* Version 1.4 */}
+            {/* Version 1.4.1 */}
             <div className="space-y-3">
               <div className="border-l-4 border-purple-600 pl-4">
+                <h3 className="font-semibold text-base">Version 1.4.1</h3>
+                <p className="text-xs text-muted-foreground">Latest Release</p>
+              </div>
+              
+              <div className="space-y-2 ml-4">
+                <div className="flex gap-2 items-start">
+                  <CheckCircle className="h-3 w-3 text-primary mt-[0.125rem] flex-shrink-0" />
+                  <div>
+                    <span className="font-medium text-xs">Color-Coded Highlights:</span>
+                    <span className="text-xs text-muted-foreground ml-1">
+                      Click any suggestion card to find and highlight the text in your document - green for accepted changes, yellow for pending suggestions.
+                    </span>
+                  </div>
+                </div>
+
+                <div className="flex gap-2 items-start">
+                  <CheckCircle className="h-3 w-3 text-primary mt-[0.125rem] flex-shrink-0" />
+                  <div>
+                    <span className="font-medium text-xs">Rich Formatting in Cards:</span>
+                    <span className="text-xs text-muted-foreground ml-1">
+                      Proofreading suggestion cards now display original and suggested text with full HTML formatting (bold, italic, lists) for better readability.
+                    </span>
+                  </div>
+                </div>
+
+                <div className="flex gap-2 items-start">
+                  <CheckCircle className="h-3 w-3 text-primary mt-[0.125rem] flex-shrink-0" />
+                  <div>
+                    <span className="font-medium text-xs">Collapsed Share Menu:</span>
+                    <span className="text-xs text-muted-foreground ml-1">
+                      Share actions (Copy, Create Google Doc, Share Link) are now organized in a single dropdown menu for a cleaner interface on both Translate and Proofread pages.
+                    </span>
+                  </div>
+                </div>
+
+                <div className="flex gap-2 items-start">
+                  <CheckCircle className="h-3 w-3 text-primary mt-[0.125rem] flex-shrink-0" />
+                  <div>
+                    <span className="font-medium text-xs">Accept All Progress:</span>
+                    <span className="text-xs text-muted-foreground ml-1">
+                      Real-time progress states (Running, Pending, Accepted) when accepting all suggestions, with visual feedback as each change is applied.
+                    </span>
+                  </div>
+                </div>
+
+                <div className="flex gap-2 items-start">
+                  <CheckCircle className="h-3 w-3 text-primary mt-[0.125rem] flex-shrink-0" />
+                  <div>
+                    <span className="font-medium text-xs">Fixed Accept All Race Condition:</span>
+                    <span className="text-xs text-muted-foreground ml-1">
+                      Resolved data consistency issue by processing suggestions sequentially instead of in parallel.
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Version 1.4 */}
+            <div className="space-y-3 pt-4 border-t">
+              <div className="border-l-4 border-gray-400 pl-4">
                 <h3 className="font-semibold text-base">Version 1.4</h3>
-                <p className="text-xs text-muted-foreground">November 12, 2025 • Latest Release</p>
+                <p className="text-xs text-muted-foreground">November 12, 2025</p>
               </div>
               
               <div className="space-y-2 ml-4">

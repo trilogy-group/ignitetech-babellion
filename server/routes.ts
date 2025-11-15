@@ -1007,11 +1007,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!proofreading) {
         return res.status(404).json({ message: "Proofreading not found" });
       }
-      
-      // Check if user is owner
-      if (proofreading.userId !== req.user.id) {
-        return res.status(403).json({ message: "Forbidden" });
-      }
 
       const output = await storage.getProofreadingOutputByProofreadingId(req.params.id);
       if (!output) {

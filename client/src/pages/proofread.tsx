@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation, useInfiniteQuery } from "@tanstack/react-query";
 import { useLocation } from "wouter";
-import { Plus, Trash2, Loader2, Check, Lock, Globe, Pencil, FileText, Save, X, History, Code, ChevronDown, ArrowRight, Square, RotateCw, Search, ChevronLeft, ChevronRight, Copy, Share } from "lucide-react";
+import { Plus, Trash2, Loader2, Check, Lock, Globe, Pencil, FileText, Save, X, History, Code, ChevronDown, ArrowRight, Square, RotateCw, Search, ChevronLeft, ChevronRight, Copy, Share, Link2 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -53,6 +53,12 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
 import { queryClient, apiRequest } from "@/lib/queryClient";
@@ -123,6 +129,8 @@ export default function Proofread() {
   });
   const [copiedSource, setCopiedSource] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
+  const [acceptAllInProgress, setAcceptAllInProgress] = useState(false);
+  const [acceptAllProgressIndex, setAcceptAllProgressIndex] = useState<number | null>(null);
 
   // Auto-focus search input when expanded
   useEffect(() => {
@@ -955,15 +963,23 @@ export default function Proofread() {
     
     setSelectedCardIndex(index);
     
-    // Extract plain text from HTML original_text for highlighting
-    const plainText = extractPlainTextFromHTML(result.original_text);
+    // If the suggestion is accepted, highlight the suggested text (what was changed to) in green
+    // Otherwise, highlight the original text (what needs to be changed) in yellow
+    const isAccepted = result.status === 'accepted';
+    const textToHighlight = isAccepted 
+      ? result.suggested_change 
+      : result.original_text;
+    const highlightColor = isAccepted ? 'green' : 'yellow';
+    
+    // Extract plain text from HTML for searching in the editor
+    const plainText = extractPlainTextFromHTML(textToHighlight);
     
     if (plainText) {
       // Use a delay to ensure editor is fully ready
       highlightTimeoutRef.current = setTimeout(() => {
         if (editorRef.current) {
-          // First highlight the text
-          editorRef.current.highlightText(plainText);
+          // First highlight the text with the appropriate color
+          editorRef.current.highlightText(plainText, highlightColor);
           
           // Then scroll to it after a short delay to ensure highlights are rendered
           setTimeout(() => {
@@ -983,6 +999,9 @@ export default function Proofread() {
 
   const handleAccept = async (result: ProofreadingResult, index: number) => {
     if (!selectedProofreadingId) return;
+    
+    // Prevent individual accept during Accept All operation
+    if (acceptAllInProgress) return;
     
     // Clear all highlights first
     editorRef.current?.clearHighlights();
@@ -1040,20 +1059,36 @@ export default function Proofread() {
   const handleAcceptAll = async () => {
     if (!output || !output.results || !Array.isArray(output.results) || !selectedProofreadingId) return;
     
-    // Clear all highlights first
-    editorRef.current?.clearHighlights();
-    
     const results = output.results as unknown as ProofreadingResult[];
     const acceptedIndices: number[] = [];
     
+    // Collect indices of non-accepted suggestions
     for (const [index, result] of results.entries()) {
-      // Skip already accepted suggestions
       if (result.status === 'accepted') continue;
-      
+      acceptedIndices.push(index);
+    }
+    
+    // Short-circuit if no eligible suggestions
+    if (acceptedIndices.length === 0) {
+      toast({
+        title: "No changes to accept",
+        description: "All suggestions have already been accepted.",
+      });
+      return;
+    }
+    
+    // Set accept-all in progress state
+    setAcceptAllInProgress(true);
+    setAcceptAllProgressIndex(null);
+    
+    // Clear all highlights first
+    editorRef.current?.clearHighlights();
+    
+    // Apply all changes in editor first
+    for (const index of acceptedIndices) {
+      const result = results[index];
       // Replace HTML content directly to preserve formatting
       editorRef.current?.replaceHTML(result.original_text, result.suggested_change);
-      acceptedIndices.push(index);
-      
       // Small delay between replacements
       await new Promise(resolve => setTimeout(resolve, 50));
     }
@@ -1061,15 +1096,20 @@ export default function Proofread() {
     // Get the updated content from editor
     const updatedHTML = editorRef.current?.getHTML() || "";
     
-    // Update all accepted suggestions in backend and save document
+    // Sequentially update each suggestion status in backend
     try {
-      await Promise.all(
-        acceptedIndices.map(index =>
-          apiRequest('PATCH', `/api/proofreadings/${selectedProofreadingId}/output/suggestion/${index}`, { status: 'accepted' })
-        )
-      );
+      for (const index of acceptedIndices) {
+        // Update progress index to show which card is currently processing
+        setAcceptAllProgressIndex(index);
+        
+        // Update status in backend
+        await apiRequest('PATCH', `/api/proofreadings/${selectedProofreadingId}/output/suggestion/${index}`, { status: 'accepted' });
+        
+        // Asynchronously refresh the query to update card status (fire-and-forget)
+        queryClient.invalidateQueries({ queryKey: ["/api/proofreadings", selectedProofreadingId, "output"] });
+      }
       
-      // Save the updated document text
+      // Save the updated document text once after all status updates
       await updateMutation.mutateAsync({
         id: selectedProofreadingId,
         data: {
@@ -1085,7 +1125,7 @@ export default function Proofread() {
       setLastSavedContent(updatedHTML);
       setHasUnsavedChanges(false);
       
-      // Refresh the output to get updated statuses
+      // Final refresh to ensure consistent state
       await queryClient.invalidateQueries({ queryKey: ["/api/proofreadings", selectedProofreadingId, "output"] });
       
       setSelectedCardIndex(null);
@@ -1100,6 +1140,10 @@ export default function Proofread() {
         description: error instanceof Error ? error.message : "Could not save changes",
         variant: "destructive",
       });
+    } finally {
+      // Reset accept-all progress state
+      setAcceptAllInProgress(false);
+      setAcceptAllProgressIndex(null);
     }
   };
 
@@ -1561,60 +1605,55 @@ export default function Proofread() {
                     <span className="text-xs text-muted-foreground">
                       {sourceText ? new DOMParser().parseFromString(sourceText, 'text/html').body.textContent?.length || 0 : 0} characters
                     </span>
-                    <TooltipProvider>
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={handleCopySource}
-                            disabled={!selectedProofreadingId || !sourceText}
-                            className="h-7 w-7 p-0"
-                          >
-                            {copiedSource ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
-                          </Button>
-                        </TooltipTrigger>
-                        <TooltipContent>
-                          <p>Copy text with formatting</p>
-                        </TooltipContent>
-                      </Tooltip>
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={handleCreateGoogleDoc}
-                            disabled={isCreatingGoogleDoc || !sourceText || createGoogleDocFromProofreadMutation.isPending}
-                            className="h-7 w-7 p-0"
-                          >
-                            {isCreatingGoogleDoc || createGoogleDocFromProofreadMutation.isPending ? (
-                              <Loader2 className="h-3 w-3 animate-spin" />
-                            ) : (
-                              <FileText className="h-3 w-3" />
-                            )}
-                          </Button>
-                        </TooltipTrigger>
-                        <TooltipContent>
-                          <p>Create Google Doc</p>
-                        </TooltipContent>
-                      </Tooltip>
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={handleShareLink}
-                            disabled={!selectedProofreadingId}
-                            className="h-7 w-7 p-0"
-                          >
-                            {copiedLink ? <Check className="h-3 w-3" /> : <Share className="h-3 w-3" />}
-                          </Button>
-                        </TooltipTrigger>
-                        <TooltipContent>
-                          <p>Copy shareable link</p>
-                        </TooltipContent>
-                      </Tooltip>
-                    </TooltipProvider>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          disabled={!selectedProofreadingId || !sourceText}
+                          className="h-7 w-7 p-0"
+                        >
+                          <Share className="h-3 w-3" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem
+                          onClick={handleCopySource}
+                          disabled={!selectedProofreadingId || !sourceText}
+                        >
+                          {copiedSource ? (
+                            <Check className="mr-2 h-4 w-4" />
+                          ) : (
+                            <Copy className="mr-2 h-4 w-4" />
+                          )}
+                          Copy Text
+                        </DropdownMenuItem>
+                        
+                        <DropdownMenuItem
+                          onClick={handleCreateGoogleDoc}
+                          disabled={isCreatingGoogleDoc || !sourceText || createGoogleDocFromProofreadMutation.isPending}
+                        >
+                          {isCreatingGoogleDoc || createGoogleDocFromProofreadMutation.isPending ? (
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          ) : (
+                            <FileText className="mr-2 h-4 w-4" />
+                          )}
+                          Create Google Doc
+                        </DropdownMenuItem>
+                        
+                        <DropdownMenuItem
+                          onClick={handleShareLink}
+                          disabled={!selectedProofreadingId}
+                        >
+                          {copiedLink ? (
+                            <Check className="mr-2 h-4 w-4" />
+                          ) : (
+                            <Link2 className="mr-2 h-4 w-4" />
+                          )}
+                          Share Link
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
                   </div>
                 </div>
                 {isRawView ? (
@@ -1703,8 +1742,16 @@ export default function Proofread() {
                 onClick={handleAcceptAll}
                 size="sm"
                 variant="default"
+                disabled={acceptAllInProgress}
               >
-                Accept All
+                {acceptAllInProgress ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Accepting all...
+                  </>
+                ) : (
+                  'Accept All'
+                )}
               </Button>
             )}
           </div>
@@ -1814,14 +1861,38 @@ export default function Proofread() {
                 <div className="space-y-4 p-4 md:p-6">
                   {results.map((result, index) => {
                     const isAccepted = result.status === 'accepted';
+                    const isLocked = acceptAllInProgress;
+                    const isRunning = acceptAllInProgress && acceptAllProgressIndex === index;
+                    const isPending = acceptAllInProgress && acceptAllProgressIndex !== null && index > acceptAllProgressIndex && !isAccepted;
+                    
+                    // Determine button label and state
+                    let buttonLabel = 'Accept';
+                    let buttonVariant: "default" | "secondary" = "default";
+                    let showSpinner = false;
+                    
+                    if (isAccepted) {
+                      buttonLabel = 'Accepted';
+                      buttonVariant = "secondary";
+                    } else if (isRunning) {
+                      buttonLabel = 'Running...';
+                      showSpinner = true;
+                    } else if (isPending) {
+                      buttonLabel = 'Pending';
+                      buttonVariant = "secondary";
+                    }
+                    
                     return (
                     <Card
                       key={index}
                       data-proofreading-card
-                      className={`cursor-pointer transition-all ${
+                      className={`transition-all ${
                         selectedCardIndex === index ? 'ring-2 ring-primary' : ''
-                      }`}
-                      onClick={() => handleCardClick(index, result)}
+                      } ${isLocked ? 'cursor-not-allowed opacity-75' : 'cursor-pointer'}`}
+                      onClick={() => {
+                        if (!isLocked) {
+                          handleCardClick(index, result);
+                        }
+                      }}
                     >
                       <div className="p-3 space-y-2">
                         <div className="flex items-center justify-between gap-2">
@@ -1831,24 +1902,33 @@ export default function Proofread() {
                           <Button
                             size="sm"
                             className="h-7 text-xs px-2"
-                            disabled={isAccepted}
-                            variant={isAccepted ? "secondary" : "default"}
+                            disabled={isAccepted || isLocked}
+                            variant={buttonVariant}
                             onClick={(e) => {
                               e.stopPropagation();
-                              handleAccept(result, index);
+                              if (!isLocked && !isAccepted) {
+                                handleAccept(result, index);
+                              }
                             }}
                           >
-                            {isAccepted ? 'Accepted' : 'Accept'}
+                            {showSpinner && <Loader2 className="mr-1 h-3 w-3 animate-spin" />}
+                            {buttonLabel}
                           </Button>
                         </div>
                         <div className="grid grid-cols-2 gap-2">
                           <div className="flex flex-col">
                             <p className="text-xs font-medium text-muted-foreground mb-1">Original:</p>
-                            <div className="text-xs bg-muted/50 p-2 rounded break-words flex-1">{result.original_text}</div>
+                            <div 
+                              className="text-xs bg-muted/50 p-2 rounded break-words flex-1 prose prose-sm max-w-none"
+                              dangerouslySetInnerHTML={{ __html: result.original_text }}
+                            />
                           </div>
                           <div className="flex flex-col">
                             <p className="text-xs font-medium text-muted-foreground mb-1">Suggested:</p>
-                            <div className="text-xs bg-green-50 dark:bg-green-950/20 p-2 rounded break-words flex-1">{result.suggested_change}</div>
+                            <div 
+                              className="text-xs bg-green-50 dark:bg-green-950/20 p-2 rounded break-words flex-1 prose prose-sm max-w-none"
+                              dangerouslySetInnerHTML={{ __html: result.suggested_change }}
+                            />
                           </div>
                         </div>
                         {result.rationale && (

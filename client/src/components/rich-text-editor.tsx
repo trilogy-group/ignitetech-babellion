@@ -32,6 +32,22 @@ import { cn } from '@/lib/utils';
 // Custom Highlight mark extension
 const Highlight = Mark.create({
   name: 'highlight',
+  addAttributes() {
+    return {
+      color: {
+        default: 'yellow',
+        parseHTML: element => element.getAttribute('data-color') || 'yellow',
+        renderHTML: attributes => {
+          if (!attributes.color) {
+            return {};
+          }
+          return {
+            'data-color': attributes.color,
+          };
+        },
+      },
+    };
+  },
   addOptions() {
     return {
       HTMLAttributes: {},
@@ -41,19 +57,39 @@ const Highlight = Mark.create({
     return [
       {
         tag: 'mark',
+        getAttrs: (node) => {
+          if (typeof node === 'string') return {};
+          const element = node as HTMLElement;
+          const color = element.getAttribute('data-color') || 'yellow';
+          return { color };
+        },
       },
     ];
   },
-  renderHTML({ HTMLAttributes }) {
-    return ['mark', { ...this.options.HTMLAttributes, ...HTMLAttributes, style: 'background-color: rgb(254 243 199); padding: 2px 0;' }, 0];
+  renderHTML({ HTMLAttributes, mark }) {
+    // Get color from mark attributes (when created programmatically) or HTMLAttributes (when parsing from HTML)
+    const color = mark?.attrs?.color || HTMLAttributes?.['data-color'] || 'yellow';
+    
+    // Use CSS variables for better dark mode support
+    const backgroundColorClass = color === 'green' 
+      ? 'bg-green-200 dark:bg-green-700/60' 
+      : 'bg-yellow-200 dark:bg-yellow-600/60';
+    
+    return ['mark', { 
+      ...this.options.HTMLAttributes, 
+      ...HTMLAttributes, 
+      'data-color': color,
+      class: backgroundColorClass,
+      style: 'padding: 2px 0;' 
+    }, 0];
   },
   addCommands() {
     return {
-      setHighlight: () => ({ commands }) => {
-        return commands.setMark(this.name);
+      setHighlight: (attributes?: { color?: string }) => ({ commands }) => {
+        return commands.setMark(this.name, attributes);
       },
-      toggleHighlight: () => ({ commands }) => {
-        return commands.toggleMark(this.name);
+      toggleHighlight: (attributes?: { color?: string }) => ({ commands }) => {
+        return commands.toggleMark(this.name, attributes);
       },
       unsetHighlight: () => ({ commands }) => {
         return commands.unsetMark(this.name);
@@ -63,7 +99,7 @@ const Highlight = Mark.create({
 });
 
 export interface RichTextEditorRef {
-  highlightText: (searchText: string) => void;
+  highlightText: (searchText: string, color?: 'yellow' | 'green') => void;
   clearHighlights: () => void;
   replaceText: (oldText: string, newText: string) => void;
   replaceHTML: (oldHTML: string, newHTML: string) => void;
@@ -415,7 +451,7 @@ export const RichTextEditor = forwardRef<RichTextEditorRef, RichTextEditorProps>
 
   // Expose methods via ref
   useImperativeHandle(ref, () => ({
-    highlightText: (searchText: string) => {
+    highlightText: (searchText: string, color: 'yellow' | 'green' = 'yellow') => {
       if (!editor || !searchText) return;
       
       // Check if editor view is available
@@ -555,7 +591,7 @@ export const RichTextEditor = forwardRef<RichTextEditorRef, RichTextEditorProps>
           // Validate positions
           if (from < to && from >= 0 && to <= editor.state.doc.content.size) {
             try {
-              tr.addMark(from, to, editor.schema.marks.highlight.create());
+              tr.addMark(from, to, editor.schema.marks.highlight.create({ color }));
             } catch (e) {
               // Ignore invalid position errors
               console.warn('Invalid highlight position:', { from, to, error: e });

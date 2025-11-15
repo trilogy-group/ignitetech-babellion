@@ -14,14 +14,18 @@ import Settings from "@/pages/settings";
 import Privacy from "@/pages/privacy";
 import Terms from "@/pages/terms";
 import NotFound from "@/pages/not-found";
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import { useToast } from "@/hooks/use-toast";
+import { useSaveLastVisitedPage, useLastVisitedPage } from "@/hooks/useLastVisitedPage";
 
 // Wrapper component to handle unauthenticated access to /translate
 function ProtectedTranslate() {
   const { isAuthenticated, isLoading } = useAuth();
   const { toast } = useToast();
   const [_location, setLocation] = useLocation();
+
+  // Save this page as last visited
+  useSaveLastVisitedPage("/translate");
 
   useEffect(() => {
     if (!isLoading && !isAuthenticated) {
@@ -50,6 +54,9 @@ function ProtectedProofread() {
   const { isAuthenticated, isLoading } = useAuth();
   const { toast } = useToast();
   const [_location, setLocation] = useLocation();
+
+  // Save this page as last visited
+  useSaveLastVisitedPage("/proofread");
 
   useEffect(() => {
     if (!isLoading && !isAuthenticated) {
@@ -104,6 +111,17 @@ function ProtectedFeedback() {
 // Reference: javascript_log_in_with_replit blueprint
 function Router() {
   const { isAuthenticated, isLoading, user } = useAuth();
+  const { getLastVisitedPage } = useLastVisitedPage();
+
+  // Get the last visited page or default to /translate
+  const redirectPath = useMemo(() => {
+    const lastPage = getLastVisitedPage();
+    // Only redirect to settings if user is admin
+    if (lastPage === "/settings" && !user?.isAdmin) {
+      return "/translate";
+    }
+    return lastPage || "/translate";
+  }, [getLastVisitedPage, user?.isAdmin]);
 
   return (
     <Switch>
@@ -111,9 +129,9 @@ function Router() {
       <Route path="/privacy" component={Privacy} />
       <Route path="/terms-and-conditions" component={Terms} />
       
-      {/* Landing page for unauthenticated users, redirect to /translate for authenticated */}
+      {/* Landing page for unauthenticated users, redirect to last visited page (or /translate) for authenticated */}
       <Route path="/">
-        {!isLoading && isAuthenticated ? <Redirect to="/translate" /> : <Landing />}
+        {!isLoading && isAuthenticated ? <Redirect to={redirectPath} /> : <Landing />}
       </Route>
       
       {/* Protected proofread route */}

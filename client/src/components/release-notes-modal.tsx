@@ -1,7 +1,7 @@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { PanelLeftClose, Search, CheckCircle, Shield, Zap, Database, Share, FileText, Navigation } from "lucide-react";
+import { PanelLeftClose, Search, CheckCircle, Shield, Zap, Database, Share, FileText, Navigation, Upload } from "lucide-react";
 
 interface ReleaseNotesModalProps {
   open: boolean;
@@ -22,7 +22,7 @@ export function ReleaseNotesModal({ open, onOpenChange }: ReleaseNotesModalProps
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-base">
             Release Notes
-            <Badge variant="secondary" className="text-xs">v1.4.2</Badge>
+            <Badge variant="secondary" className="text-xs">v1.4.3</Badge>
           </DialogTitle>
           <DialogDescription className="text-xs">
             What's new in this release
@@ -31,11 +31,31 @@ export function ReleaseNotesModal({ open, onOpenChange }: ReleaseNotesModalProps
         
         <ScrollArea className="max-h-[50vh] pr-4">
           <div className="space-y-6">
-            {/* Version 1.4.2 */}
+            {/* Version 1.4.3 */}
             <div className="space-y-3">
               <div className="border-l-4 border-purple-600 pl-4">
-                <h3 className="font-semibold text-base">Version 1.4.2</h3>
+                <h3 className="font-semibold text-base">Version 1.4.3</h3>
                 <p className="text-xs text-muted-foreground">Latest Release</p>
+              </div>
+              
+              <div className="space-y-2 ml-4">
+                <div className="flex gap-2 items-start">
+                  <Upload className="h-3 w-3 text-primary mt-[0.125rem] flex-shrink-0" />
+                  <div>
+                    <span className="font-medium text-xs">PDF Import:</span>
+                    <span className="text-xs text-muted-foreground ml-1">
+                      Import PDF documents directly into the editor with Quick (basic text) or Advanced (AI-enhanced formatting with real-time streaming) options.
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Version 1.4.2 */}
+            <div className="space-y-3 pt-4 border-t">
+              <div className="border-l-4 border-gray-400 pl-4">
+                <h3 className="font-semibold text-base">Version 1.4.2</h3>
+                <p className="text-xs text-muted-foreground">November 2025</p>
               </div>
               
               <div className="space-y-2 ml-4">

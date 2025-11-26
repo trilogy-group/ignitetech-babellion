@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation, useInfiniteQuery } from "@tanstack/react-query";
 import { useLocation } from "wouter";
-import { Plus, Trash2, Loader2, Copy, Check, Lock, Globe, Pencil, FileText, Save, X, RotateCw, ChevronLeft, ChevronRight, Square, Search, Share, Link2 } from "lucide-react";
+import { Plus, Trash2, Loader2, Copy, Check, Lock, Globe, Pencil, FileText, Save, X, RotateCw, ChevronLeft, ChevronRight, Square, Search, Share, Link2, Upload, Zap, Sparkles } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -104,6 +104,9 @@ export default function Translate() {
   const [proofreadRuntimes, setProofreadRuntimes] = useState<Record<string, Record<string, number>>>({});
   const [isGoogleDocsPickerOpen, setIsGoogleDocsPickerOpen] = useState(false);
   const [isLoadingGoogleDoc, setIsLoadingGoogleDoc] = useState(false);
+  const [isImportingPdf, setIsImportingPdf] = useState(false);
+  const [pdfImportType, setPdfImportType] = useState<'quick' | 'deep' | null>(null);
+  const pdfInputRef = useRef<HTMLInputElement>(null);
   const [isFeedbackModalOpen, setIsFeedbackModalOpen] = useState(false);
   const [feedbackSelectedText, setFeedbackSelectedText] = useState("");
   const [feedbackOutputId, setFeedbackOutputId] = useState<string | null>(null);
@@ -826,6 +829,185 @@ export default function Translate() {
       throw error;
     } finally {
       setIsLoadingGoogleDoc(false);
+    }
+  };
+
+  // PDF Import handlers
+  const handlePdfImportClick = (type: 'quick' | 'deep') => {
+    setPdfImportType(type);
+    pdfInputRef.current?.click();
+  };
+
+  const handlePdfFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !pdfImportType) {
+      // Reset the input
+      if (pdfInputRef.current) {
+        pdfInputRef.current.value = '';
+      }
+      return;
+    }
+
+    if (file.type !== 'application/pdf') {
+      toast({
+        title: "Invalid file type",
+        description: "Please select a PDF file",
+        variant: "destructive",
+      });
+      if (pdfInputRef.current) {
+        pdfInputRef.current.value = '';
+      }
+      return;
+    }
+
+    setIsImportingPdf(true);
+    const importType = pdfImportType;
+    const fileName = file.name.replace(/\.pdf$/i, '');
+
+    // Update title early
+    if (!title || title === "Untitled Translation") {
+      setTitle(fileName);
+      setEditedTitle(fileName);
+    }
+
+    try {
+      const formData = new FormData();
+      formData.append('pdf', file);
+
+      if (importType === 'quick') {
+        // Quick import - non-streaming
+        const response = await fetch('/api/pdf/quick-import', {
+          method: 'POST',
+          body: formData,
+          credentials: 'include',
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json();
+          throw new Error(errorData.message || 'Failed to import PDF');
+        }
+
+        const data = await response.json() as { html: string; text: string; pageCount: number };
+        setSourceText(data.html);
+
+        // Save the changes
+        if (selectedTranslationId) {
+          updateMutation.mutate({
+            id: selectedTranslationId,
+            data: { 
+              sourceText: data.html, 
+              title: !title || title === "Untitled Translation" ? fileName : title 
+            },
+          });
+          // Mark as saved to clear unsaved changes indicator
+          setLastSavedContent(data.html);
+          setHasUnsavedChanges(false);
+        }
+
+        const tempDiv = document.createElement('div');
+        tempDiv.innerHTML = data.html;
+        const charCount = tempDiv.textContent?.length || 0;
+
+        toast({
+          title: `✓ PDF imported successfully (Quick)`,
+          description: `"${fileName}" (${data.pageCount} page${data.pageCount !== 1 ? 's' : ''}, ${charCount.toLocaleString()} characters)`,
+        });
+      } else {
+        // Deep import - streaming for real-time updates
+        const response = await fetch('/api/pdf/deep-import-stream', {
+          method: 'POST',
+          body: formData,
+          credentials: 'include',
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json();
+          throw new Error(errorData.message || 'Failed to import PDF');
+        }
+
+        const reader = response.body?.getReader();
+        if (!reader) throw new Error('No response body');
+
+        const decoder = new TextDecoder();
+        let accumulatedHtml = '';
+        let pageCount = 0;
+
+        // Process the SSE stream
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          const text = decoder.decode(value, { stream: true });
+          const lines = text.split('\n');
+
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              try {
+                const data = JSON.parse(line.slice(6));
+                
+                if (data.type === 'start') {
+                  pageCount = data.pageCount;
+                } else if (data.type === 'chunk') {
+                  accumulatedHtml += data.content;
+                  // Update the editor in real-time
+                  setSourceText(accumulatedHtml);
+                } else if (data.type === 'complete') {
+                  // Final cleanup of html
+                  let finalHtml = data.html || accumulatedHtml;
+                  if (finalHtml.startsWith('```html')) {
+                    finalHtml = finalHtml.replace(/^```html\s*/, '').replace(/\s*```$/, '');
+                  } else if (finalHtml.startsWith('```')) {
+                    finalHtml = finalHtml.replace(/^```\s*/, '').replace(/\s*```$/, '');
+                  }
+                  setSourceText(finalHtml);
+                  accumulatedHtml = finalHtml;
+                } else if (data.type === 'error') {
+                  throw new Error(data.message);
+                }
+              } catch (parseError) {
+                // Skip invalid JSON lines
+              }
+            }
+          }
+        }
+
+        // Save the final content
+        if (selectedTranslationId && accumulatedHtml) {
+          updateMutation.mutate({
+            id: selectedTranslationId,
+            data: { 
+              sourceText: accumulatedHtml, 
+              title: !title || title === "Untitled Translation" ? fileName : title 
+            },
+          });
+          // Mark as saved to clear unsaved changes indicator
+          setLastSavedContent(accumulatedHtml);
+          setHasUnsavedChanges(false);
+        }
+
+        const tempDiv = document.createElement('div');
+        tempDiv.innerHTML = accumulatedHtml;
+        const charCount = tempDiv.textContent?.length || 0;
+
+        toast({
+          title: `✓ PDF imported successfully (Advanced)`,
+          description: `"${fileName}" (${pageCount} page${pageCount !== 1 ? 's' : ''}, ${charCount.toLocaleString()} characters)`,
+        });
+      }
+    } catch (error: unknown) {
+      const message = (error as Error)?.message || "Failed to import PDF";
+      toast({
+        title: "Error importing PDF",
+        description: message,
+        variant: "destructive",
+      });
+    } finally {
+      setIsImportingPdf(false);
+      setPdfImportType(null);
+      // Reset the input so the same file can be selected again
+      if (pdfInputRef.current) {
+        pdfInputRef.current.value = '';
+      }
     }
   };
 
@@ -1712,25 +1894,61 @@ export default function Translate() {
                       Source Text
                     </Label>
                   )}
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setIsGoogleDocsPickerOpen(true)}
-                    disabled={!selectedTranslationId || !canEditSelected || isLoadingGoogleDoc}
-                    className="h-7"
-                  >
-                    {isLoadingGoogleDoc ? (
-                      <>
-                        <Loader2 className="mr-1 h-3 w-3 animate-spin" />
-                        Loading...
-                      </>
-                    ) : (
-                      <>
-                        <FileText className="mr-1 h-3 w-3" />
-                        {isMobile ? "Load" : "Load Google Doc"}
-                      </>
-                    )}
-                  </Button>
+                  {/* Unified Import Dropdown */}
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={!selectedTranslationId || !canEditSelected || isLoadingGoogleDoc || isImportingPdf}
+                        className="h-7"
+                      >
+                        {(isLoadingGoogleDoc || isImportingPdf) ? (
+                          <>
+                            <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                            {isMobile ? "..." : "Importing..."}
+                          </>
+                        ) : (
+                          <>
+                            <Upload className="mr-1 h-3 w-3" />
+                            {isMobile ? "Import" : "Import"}
+                          </>
+                        )}
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="start">
+                      <DropdownMenuItem
+                        onClick={() => setIsGoogleDocsPickerOpen(true)}
+                        disabled={isLoadingGoogleDoc || isImportingPdf}
+                      >
+                        <FileText className="mr-2 h-4 w-4" />
+                        <div className="flex flex-col">
+                          <span>Google Doc</span>
+                          <span className="text-xs text-muted-foreground">Import from Google Drive</span>
+                        </div>
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        onClick={() => handlePdfImportClick('quick')}
+                        disabled={isLoadingGoogleDoc || isImportingPdf}
+                      >
+                        <Zap className="mr-2 h-4 w-4" />
+                        <div className="flex flex-col">
+                          <span>Quick PDF Import</span>
+                          <span className="text-xs text-muted-foreground">Basic text extraction</span>
+                        </div>
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        onClick={() => handlePdfImportClick('deep')}
+                        disabled={isLoadingGoogleDoc || isImportingPdf}
+                      >
+                        <Sparkles className="mr-2 h-4 w-4" />
+                        <div className="flex flex-col">
+                          <span>Advanced PDF Import</span>
+                          <span className="text-xs text-muted-foreground">AI-enhanced formatting</span>
+                        </div>
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="text-xs text-muted-foreground">
@@ -2452,6 +2670,15 @@ export default function Translate() {
         open={isGoogleDocsPickerOpen}
         onOpenChange={setIsGoogleDocsPickerOpen}
         onDocumentSelect={handleLoadGoogleDoc}
+      />
+
+      {/* Hidden PDF File Input */}
+      <input
+        ref={pdfInputRef}
+        type="file"
+        accept="application/pdf"
+        onChange={handlePdfFileSelected}
+        className="hidden"
       />
 
       {/* Feedback Modal */}

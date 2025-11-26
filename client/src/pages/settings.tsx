@@ -68,6 +68,7 @@ export default function Settings() {
   const [newModel, setNewModel] = useState({ name: "", provider: "openai", modelIdentifier: "", isDefault: false });
   const [newLanguage, setNewLanguage] = useState({ code: "", name: "", nativeName: "" });
   const [newRule, setNewRule] = useState({ title: "", categoryId: "", categoryName: "", ruleText: "", isActive: true });
+  const [pdfCleanupModel, setPdfCleanupModel] = useState("");
 
   // Fetch API keys status
   const { data: apiKeysStatus } = useQuery({
@@ -113,6 +114,17 @@ export default function Settings() {
   // Fetch proofreading rules
   const { data: rules = [], isLoading: rulesLoading } = useQuery<ProofreadingRule[]>({
     queryKey: ["/api/admin/proofreading-rules"],
+  });
+
+  // Fetch PDF cleanup model setting
+  const { data: pdfCleanupModelSetting } = useQuery<{ value: string; isDefault: boolean }>({
+    queryKey: ["/api/settings/pdf-cleanup-model"],
+    select: (data) => {
+      if (data?.value && !pdfCleanupModel) {
+        setPdfCleanupModel(data.value);
+      }
+      return data;
+    },
   });
 
   // Save API key mutation
@@ -161,6 +173,20 @@ export default function Settings() {
       toast({
         title: "Proofreading prompt saved",
         description: "Proofreading system prompt has been updated.",
+      });
+    },
+  });
+
+  // Save PDF cleanup model mutation
+  const savePdfCleanupModelMutation = useMutation({
+    mutationFn: async (value: string) => {
+      return await apiRequest("POST", "/api/admin/settings/pdf-cleanup-model", { value });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/settings/pdf-cleanup-model"] });
+      toast({
+        title: "PDF cleanup model saved",
+        description: "The model for PDF Deep Import has been updated.",
       });
     },
   });
@@ -636,6 +662,60 @@ export default function Settings() {
                   </TableBody>
                 </Table>
               )}
+            </CardContent>
+          </Card>
+
+          {/* PDF Deep Import Model */}
+          <Card>
+            <CardHeader>
+              <CardTitle>PDF Deep Import Model</CardTitle>
+              <CardDescription>
+                Select the Anthropic model to use for PDF Deep Import (AI-enhanced formatting)
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="pdf-cleanup-model">Anthropic Model</Label>
+                <Select
+                  value={pdfCleanupModel}
+                  onValueChange={setPdfCleanupModel}
+                >
+                  <SelectTrigger id="pdf-cleanup-model" data-testid="select-pdf-cleanup-model">
+                    <SelectValue placeholder="Select a model..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {models
+                      .filter(m => m.provider === 'anthropic' && m.isActive)
+                      .map((model) => (
+                        <SelectItem key={model.id} value={model.modelIdentifier}>
+                          {model.name} ({model.modelIdentifier})
+                        </SelectItem>
+                      ))}
+                    {/* Fallback options if no Anthropic models configured */}
+                    {models.filter(m => m.provider === 'anthropic' && m.isActive).length === 0 && (
+                      <>
+                        <SelectItem value="claude-sonnet-4-20250514">Claude Sonnet 4 (claude-sonnet-4-20250514)</SelectItem>
+                        <SelectItem value="claude-3-5-sonnet-20241022">Claude 3.5 Sonnet (claude-3-5-sonnet-20241022)</SelectItem>
+                        <SelectItem value="claude-3-haiku-20240307">Claude 3 Haiku (claude-3-haiku-20240307)</SelectItem>
+                      </>
+                    )}
+                  </SelectContent>
+                </Select>
+                {pdfCleanupModelSetting?.isDefault && (
+                  <p className="text-xs text-muted-foreground">
+                    Using default model. Select a model to customize.
+                  </p>
+                )}
+              </div>
+              <Button
+                onClick={() => savePdfCleanupModelMutation.mutate(pdfCleanupModel)}
+                disabled={!pdfCleanupModel || savePdfCleanupModelMutation.isPending}
+                data-testid="button-save-pdf-cleanup-model"
+              >
+                {savePdfCleanupModelMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                <Save className="mr-2 h-4 w-4" />
+                Save PDF Model
+              </Button>
             </CardContent>
           </Card>
         </TabsContent>

@@ -107,17 +107,6 @@ export class PdfService {
    * Use Claude's native PDF document support to convert PDF to HTML
    */
   private async formatPdfWithClaude(pdfBuffer: Buffer, modelIdentifier: string): Promise<string> {
-    let fullText = '';
-    for await (const chunk of this.streamPdfWithClaude(pdfBuffer, modelIdentifier)) {
-      fullText += chunk;
-    }
-    return this.cleanHtmlOutput(fullText);
-  }
-
-  /**
-   * Stream PDF conversion with Claude - yields HTML chunks as they're generated
-   */
-  async *streamPdfWithClaude(pdfBuffer: Buffer, modelIdentifier: string): AsyncGenerator<string, void, unknown> {
     const apiKey = await this.getAnthropicApiKey();
     const anthropic = new Anthropic({ apiKey });
 
@@ -145,7 +134,7 @@ Guidelines:
 6. Do NOT wrap the result in \`\`\`html or any code blocks
 7. Output ONLY the HTML content, nothing else`;
 
-    console.log(`[PDF] Starting native PDF streaming with model: ${modelIdentifier}`);
+    console.log(`[PDF] Starting native PDF processing with model: ${modelIdentifier}`);
     const startTime = Date.now();
 
     // Use streaming for long operations
@@ -174,22 +163,19 @@ Guidelines:
       ],
     });
 
-    // Yield chunks as they arrive
+    // Collect streamed text
+    let fullText = '';
     for await (const event of stream) {
       if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') {
-        yield event.delta.text;
+        fullText += event.delta.text;
       }
     }
 
     const duration = Math.round((Date.now() - startTime) / 1000);
-    console.log(`[PDF] Native PDF streaming completed in ${duration}s`);
-  }
+    console.log(`[PDF] Native PDF processing completed in ${duration}s`);
 
-  /**
-   * Clean up HTML output from Claude
-   */
-  private cleanHtmlOutput(text: string): string {
-    let html = text.trim();
+    // Clean up any accidental code block wrappers
+    let html = fullText.trim();
     if (html.startsWith('```html')) {
       html = html.replace(/^```html\s*/, '').replace(/\s*```$/, '');
     } else if (html.startsWith('```')) {
@@ -340,4 +326,3 @@ ${truncatedText}`;
 }
 
 export const pdfService = new PdfService();
-

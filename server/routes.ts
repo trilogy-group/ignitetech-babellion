@@ -1305,6 +1305,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.setHeader('Cache-Control', 'no-cache');
       res.setHeader('Connection', 'keep-alive');
       res.setHeader('X-Accel-Buffering', 'no'); // Disable nginx proxy buffering (Replit, etc.)
+      res.setHeader('X-Content-Type-Options', 'nosniff'); // Prevent MIME type sniffing
       res.flushHeaders();
 
       // Get page count first
@@ -1315,6 +1316,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const pageCount = infoResult.total;
 
       // Send initial event with page count
+      // Add 2KB of padding to force flush through any proxies (like Replit's)
+      const padding = ' '.repeat(2048);
+      res.write(`: ${padding}\n\n`);
       res.write(`data: ${JSON.stringify({ type: 'start', pageCount })}\n\n`);
 
       // Stream the HTML chunks

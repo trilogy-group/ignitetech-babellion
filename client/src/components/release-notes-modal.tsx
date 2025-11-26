@@ -72,9 +72,9 @@ export function ReleaseNotesModal({ open, onOpenChange }: ReleaseNotesModalProps
                 <div className="flex gap-2 items-start">
                   <CheckCircle className="h-3 w-3 text-primary mt-[0.125rem] flex-shrink-0" />
                   <div>
-                    <span className="font-medium text-xs">Fixed New Proofreading Editor:</span>
+                    <span className="font-medium text-xs">Fixed New Document Editor:</span>
                     <span className="text-xs text-muted-foreground ml-1">
-                      The text editor is now immediately editable after creating a new Proofreading, without needing to switch away and back.
+                      The text editor is now immediately editable after creating a new Translation or Proofreading, without needing to switch away and back.
                     </span>
                   </div>
                 </div>

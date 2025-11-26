@@ -14,16 +14,16 @@ import { decrypt } from './encryption';
 // Parse PDF buffer using pdf-parse v2 API
 async function parsePdf(buffer: Buffer): Promise<{ text: string; numpages: number; info: unknown }> {
   const parser = new PDFParse({ data: buffer });
-  
+
   // Get text content
   const textResult = await parser.getText();
-  
+
   // Get info for page count
   const infoResult = await parser.getInfo();
-  
+
   // Clean up
   await parser.destroy();
-  
+
   return {
     text: textResult.text,
     numpages: infoResult.total,
@@ -64,13 +64,13 @@ export class PdfService {
    */
   async quickImport(pdfBuffer: Buffer): Promise<PdfImportResult> {
     const data = await parsePdf(pdfBuffer);
-    
+
     // Extract raw text
     const rawText = data.text;
-    
+
     // Apply basic heuristics to convert to HTML
     const html = this.textToBasicHtml(rawText);
-    
+
     return {
       text: rawText,
       html,
@@ -88,13 +88,13 @@ export class PdfService {
   async deepImport(pdfBuffer: Buffer, options: DeepImportOptions): Promise<PdfImportResult> {
     // Get page count using pdf-parse (for metadata)
     const data = await parsePdf(pdfBuffer);
-    
+
     // Use Claude's native PDF support for better formatting preservation
     const html = await this.formatPdfWithClaude(pdfBuffer, options.modelIdentifier);
-    
+
     // Extract plain text for the text field (from the HTML)
     const tempDiv = html ? html.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim() : '';
-    
+
     return {
       text: tempDiv,
       html,
@@ -106,7 +106,21 @@ export class PdfService {
   /**
    * Use Claude's native PDF document support to convert PDF to HTML
    */
+  /**
+   * Use Claude's native PDF document support to convert PDF to HTML
+   */
   private async formatPdfWithClaude(pdfBuffer: Buffer, modelIdentifier: string): Promise<string> {
+    let fullText = '';
+    for await (const chunk of this.streamPdfWithClaude(pdfBuffer, modelIdentifier)) {
+      fullText += chunk;
+    }
+    return this.cleanHtmlOutput(fullText);
+  }
+
+  /**
+   * Stream PDF conversion with Claude - yields HTML chunks as they're generated
+   */
+  async *streamPdfWithClaude(pdfBuffer: Buffer, modelIdentifier: string): AsyncGenerator<string, void, unknown> {
     const apiKey = await this.getAnthropicApiKey();
     const anthropic = new Anthropic({ apiKey });
 
@@ -134,7 +148,7 @@ Guidelines:
 6. Do NOT wrap the result in \`\`\`html or any code blocks
 7. Output ONLY the HTML content, nothing else`;
 
-    console.log(`[PDF] Starting native PDF processing with model: ${modelIdentifier}`);
+    console.log(`[PDF] Starting native PDF streaming with model: ${modelIdentifier}`);
     const startTime = Date.now();
 
     // Use streaming for long operations
@@ -163,19 +177,22 @@ Guidelines:
       ],
     });
 
-    // Collect streamed text
-    let fullText = '';
+    // Yield chunks as they arrive
     for await (const event of stream) {
       if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') {
-        fullText += event.delta.text;
+        yield event.delta.text;
       }
     }
 
     const duration = Math.round((Date.now() - startTime) / 1000);
-    console.log(`[PDF] Native PDF processing completed in ${duration}s`);
+    console.log(`[PDF] Native PDF streaming completed in ${duration}s`);
+  }
 
-    // Clean up any accidental code block wrappers
-    let html = fullText.trim();
+  /**
+   * Clean up HTML output from Claude
+   */
+  private cleanHtmlOutput(text: string): string {
+    let html = text.trim();
     if (html.startsWith('```html')) {
       html = html.replace(/^```html\s*/, '').replace(/\s*```$/, '');
     } else if (html.startsWith('```')) {
@@ -194,19 +211,19 @@ Guidelines:
 
     // Split by double newlines to identify paragraphs
     const sections = text.split(/\n\s*\n/);
-    
+
     const htmlParts: string[] = [];
-    
+
     for (const section of sections) {
       const trimmed = section.trim();
       if (!trimmed) continue;
-      
+
       // Check if it looks like a heading (short, no ending punctuation, possibly all caps or title case)
       const isShortLine = trimmed.length < 100;
       const endsWithPunctuation = /[.!?:;,]$/.test(trimmed);
       const isAllCaps = trimmed === trimmed.toUpperCase() && /[A-Z]/.test(trimmed);
       const looksLikeHeading = isShortLine && !endsWithPunctuation && (isAllCaps || /^(Chapter|Section|\d+\.|[IVX]+\.)/i.test(trimmed));
-      
+
       if (looksLikeHeading) {
         // Determine heading level based on characteristics
         if (isAllCaps && trimmed.length < 50) {
@@ -220,7 +237,7 @@ Guidelines:
         // Check for list items
         const lines = trimmed.split('\n');
         const listItems = lines.filter(line => /^[\s]*[-•*]\s/.test(line) || /^[\s]*\d+[.)]\s/.test(line));
-        
+
         if (listItems.length > 1 && listItems.length === lines.length) {
           // It's a list
           const isOrdered = lines.every(line => /^[\s]*\d+[.)]\s/.test(line));
@@ -237,7 +254,7 @@ Guidelines:
         }
       }
     }
-    
+
     return htmlParts.join('\n');
   }
 
@@ -250,7 +267,7 @@ Guidelines:
 
     // Truncate text if it's too long (Claude has context limits)
     const maxChars = 100000;
-    const truncatedText = text.length > maxChars 
+    const truncatedText = text.length > maxChars
       ? text.substring(0, maxChars) + '\n\n[Content truncated due to length]'
       : text;
 

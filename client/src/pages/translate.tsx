@@ -121,6 +121,8 @@ export default function Translate() {
   const [unsavedChangesAction, setUnsavedChangesAction] = useState<{ type: 'switch' | 'new'; data?: Translation } | null>(null);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [lastSavedContent, setLastSavedContent] = useState<string>("");
+  // Store the currently selected translation object to avoid race conditions with list refresh
+  const [selectedTranslationData, setSelectedTranslationData] = useState<Translation | null>(null);
 
   // Auto-focus search input when expanded
   useEffect(() => {
@@ -392,6 +394,7 @@ export default function Translate() {
       queryClient.invalidateQueries({ queryKey: ["/api/translations"] });
       if (selectedTranslationId === deletedId) {
         setSelectedTranslationId(null);
+        setSelectedTranslationData(null);
         setSourceText("");
         setTitle("Untitled Translation");
       }
@@ -645,6 +648,7 @@ export default function Translate() {
     }
     
     setSelectedTranslationId(translation.id);
+    setSelectedTranslationData(translation); // Store full object for immediate canEdit checks
     setSourceText(translation.sourceText);
     setTitle(translation.title);
     setSelectedLanguages(translation.selectedLanguages || []);
@@ -731,6 +735,7 @@ export default function Translate() {
       // Continue with switching translation
       const translation = unsavedChangesAction.data;
       setSelectedTranslationId(translation.id);
+      setSelectedTranslationData(translation); // Store full object for immediate canEdit checks
       setSourceText(translation.sourceText);
       setTitle(translation.title);
       setSelectedLanguages(translation.selectedLanguages || []);
@@ -1231,8 +1236,10 @@ export default function Translate() {
     return `Owned by ${translation.userId}`;
   };
 
-  // Get currently selected translation
-  const selectedTranslation = translations.find(t => t.id === selectedTranslationId) || null;
+  // Get currently selected translation - use stored data first (for newly created items), fall back to list lookup
+  const selectedTranslation = selectedTranslationData?.id === selectedTranslationId 
+    ? selectedTranslationData 
+    : translations.find(t => t.id === selectedTranslationId) || null;
   const canEditSelected = canEdit(selectedTranslation);
   const isMobile = useIsMobile();
 

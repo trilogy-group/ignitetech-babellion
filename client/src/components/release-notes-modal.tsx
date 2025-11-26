@@ -22,7 +22,7 @@ export function ReleaseNotesModal({ open, onOpenChange }: ReleaseNotesModalProps
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-base">
             Release Notes
-            <Badge variant="secondary" className="text-xs">v1.4.1</Badge>
+            <Badge variant="secondary" className="text-xs">v1.4.2</Badge>
           </DialogTitle>
           <DialogDescription className="text-xs">
             What's new in this release
@@ -31,11 +31,81 @@ export function ReleaseNotesModal({ open, onOpenChange }: ReleaseNotesModalProps
         
         <ScrollArea className="max-h-[50vh] pr-4">
           <div className="space-y-6">
-            {/* Version 1.4.1 */}
+            {/* Version 1.4.2 */}
             <div className="space-y-3">
               <div className="border-l-4 border-purple-600 pl-4">
-                <h3 className="font-semibold text-base">Version 1.4.1</h3>
+                <h3 className="font-semibold text-base">Version 1.4.2</h3>
                 <p className="text-xs text-muted-foreground">Latest Release</p>
+              </div>
+              
+              <div className="space-y-2 ml-4">
+                <div className="flex gap-2 items-start">
+                  <CheckCircle className="h-3 w-3 text-primary mt-[0.125rem] flex-shrink-0" />
+                  <div>
+                    <span className="font-medium text-xs">Unsaved Changes Protection:</span>
+                    <span className="text-xs text-muted-foreground ml-1">
+                      Added warning dialog and discard/save buttons to the Translation editor.
+                    </span>
+                  </div>
+                </div>
+
+                <div className="flex gap-2 items-start">
+                  <CheckCircle className="h-3 w-3 text-primary mt-[0.125rem] flex-shrink-0" />
+                  <div>
+                    <span className="font-medium text-xs">Autosave on Translate:</span>
+                    <span className="text-xs text-muted-foreground ml-1">
+                      Unsaved changes are automatically saved when you click the Translate button.
+                    </span>
+                  </div>
+                </div>
+
+                <div className="flex gap-2 items-start">
+                  <CheckCircle className="h-3 w-3 text-primary mt-[0.125rem] flex-shrink-0" />
+                  <div>
+                    <span className="font-medium text-xs">Fixed Accept Changes:</span>
+                    <span className="text-xs text-muted-foreground ml-1">
+                      Proofreading suggestions are now only marked as "Accepted" when the change is actually applied, with clear feedback when a change cannot be applied.
+                    </span>
+                  </div>
+                </div>
+
+                <div className="flex gap-2 items-start">
+                  <CheckCircle className="h-3 w-3 text-primary mt-[0.125rem] flex-shrink-0" />
+                  <div>
+                    <span className="font-medium text-xs">Fixed New Proofreading Editor:</span>
+                    <span className="text-xs text-muted-foreground ml-1">
+                      The text editor is now immediately editable after creating a new Proofreading, without needing to switch away and back.
+                    </span>
+                  </div>
+                </div>
+
+                <div className="flex gap-2 items-start">
+                  <CheckCircle className="h-3 w-3 text-primary mt-[0.125rem] flex-shrink-0" />
+                  <div>
+                    <span className="font-medium text-xs">Fixed Suggestion Highlight:</span>
+                    <span className="text-xs text-muted-foreground ml-1">
+                      Clicking a proofreading suggestion to highlight text no longer triggers the "Discard Changes" option, as view-only highlights are now correctly recognized as non-edits.
+                    </span>
+                  </div>
+                </div>
+
+                <div className="flex gap-2 items-start">
+                  <CheckCircle className="h-3 w-3 text-primary mt-[0.125rem] flex-shrink-0" />
+                  <div>
+                    <span className="font-medium text-xs">Fixed Google Docs Session Expiry:</span>
+                    <span className="text-xs text-muted-foreground ml-1">
+                      Google Docs access no longer expires after an hour. Your credentials are now automatically refreshed, so you can load from and export to Google Docs without needing to log out and log back in.
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Version 1.4.1 */}
+            <div className="space-y-3 pt-4 border-t">
+              <div className="border-l-4 border-gray-400 pl-4">
+                <h3 className="font-semibold text-base">Version 1.4.1</h3>
+                <p className="text-xs text-muted-foreground">November 2025</p>
               </div>
               
               <div className="space-y-2 ml-4">

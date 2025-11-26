@@ -21,6 +21,23 @@ export async function getGoogleAuth(req: Request): Promise<Auth.OAuth2Client> {
     throw new Error('No Google access token found. Please log out and log back in to grant access to your Google Docs.');
   }
 
+  // Set up listener for token refresh events
+  // When the access token expires, googleapis will automatically use the refresh token
+  // This listener captures the new tokens and saves them to the database
+  oauth2Client.on('tokens', async (tokens) => {
+    try {
+      // Only update if we got a new access token
+      if (tokens.access_token) {
+        // Use the existing refresh token if a new one wasn't provided
+        const refreshToken = tokens.refresh_token || dbUser.googleRefreshToken || '';
+        await storage.updateUserGoogleTokens(user.id, tokens.access_token, refreshToken);
+        console.log(`[GoogleAuth] Refreshed tokens for user ${user.id}`);
+      }
+    } catch (error) {
+      console.error('[GoogleAuth] Failed to save refreshed tokens:', error);
+    }
+  });
+
   oauth2Client.setCredentials({
     access_token: dbUser.googleAccessToken,
     refresh_token: dbUser.googleRefreshToken || undefined,

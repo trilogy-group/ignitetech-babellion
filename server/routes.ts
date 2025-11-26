@@ -7,6 +7,7 @@ import { z } from "zod";
 import { encrypt } from "./encryption";
 import { translationService } from "./translationService";
 import { proofreadingService } from "./proofreadingService";
+import { pdfService } from "./pdfService";
 import { getGoogleAuth, listGoogleDocs, getGoogleDocContent, createGoogleDoc } from "./googleDocsService";
 import {
   insertTranslationSchema,
@@ -20,6 +21,7 @@ import {
 } from "@shared/schema";
 import { logInfo, logError } from "./vite";
 import { retryOnDatabaseError } from "./retry";
+import multer from "multer";
 
 /**
  * Register and configure all API routes on the given Express application and return a configured HTTP server.
@@ -1166,6 +1168,210 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Error starting proofreading:", error);
       res.status(500).json({ message: error instanceof Error ? error.message : "Failed to start proofreading" });
+    }
+  });
+
+  // ===== PDF IMPORT ROUTES =====
+  
+  // Configure multer for memory storage (we process the file in memory)
+  const upload = multer({
+    storage: multer.memoryStorage(),
+    limits: {
+      fileSize: 50 * 1024 * 1024, // 50MB max file size
+    },
+    fileFilter: (_req, file, cb) => {
+      if (file.mimetype === 'application/pdf') {
+        cb(null, true);
+      } else {
+        cb(new Error('Only PDF files are allowed'));
+      }
+    },
+  });
+
+  // Quick Import - Basic text extraction from PDF
+  app.post("/api/pdf/quick-import", isAuthenticated, upload.single('pdf'), async (req: any, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ message: "No PDF file provided" });
+      }
+
+      logInfo(`Quick PDF import started, file size: ${req.file.size} bytes`, "PDF");
+      const startTime = Date.now();
+
+      const result = await pdfService.quickImport(req.file.buffer);
+
+      const duration = Math.round((Date.now() - startTime) / 1000);
+      logInfo(`Quick PDF import completed in ${duration}s, pages: ${result.pageCount}`, "PDF");
+
+      res.json({
+        success: true,
+        html: result.html,
+        text: result.text,
+        pageCount: result.pageCount,
+      });
+    } catch (error: unknown) {
+      console.error("Error in quick PDF import:", error);
+      const message = error instanceof Error ? error.message : "Failed to import PDF";
+      res.status(500).json({ message });
+    }
+  });
+
+  // Deep Import - Text extraction + LLM-based formatting
+  app.post("/api/pdf/deep-import", isAuthenticated, upload.single('pdf'), async (req: any, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ message: "No PDF file provided" });
+      }
+
+      // Get the model identifier from settings or use default
+      let modelIdentifier: string;
+      
+      // Check if a specific model was provided in the request
+      const requestedModelId = req.body.modelId;
+      if (requestedModelId) {
+        const model = await storage.getModel(requestedModelId);
+        if (!model) {
+          return res.status(400).json({ message: "Specified model not found" });
+        }
+        if (model.provider !== 'anthropic') {
+          return res.status(400).json({ message: "Deep import only supports Anthropic models" });
+        }
+        modelIdentifier = model.modelIdentifier;
+      } else {
+        // Try to get the PDF cleanup model from settings
+        const pdfModelSetting = await storage.getSetting('pdf_cleanup_model');
+        if (pdfModelSetting?.value) {
+          modelIdentifier = pdfModelSetting.value;
+        } else {
+          // Fallback to default Anthropic model
+          modelIdentifier = 'claude-sonnet-4-20250514';
+        }
+      }
+
+      logInfo(`Deep PDF import started, file size: ${req.file.size} bytes, model: ${modelIdentifier}`, "PDF");
+      const startTime = Date.now();
+
+      const result = await pdfService.deepImport(req.file.buffer, { modelIdentifier });
+
+      const duration = Math.round((Date.now() - startTime) / 1000);
+      logInfo(`Deep PDF import completed in ${duration}s, pages: ${result.pageCount}`, "PDF");
+
+      res.json({
+        success: true,
+        html: result.html,
+        text: result.text,
+        pageCount: result.pageCount,
+      });
+    } catch (error: unknown) {
+      console.error("Error in deep PDF import:", error);
+      const message = error instanceof Error ? error.message : "Failed to import PDF";
+      res.status(500).json({ message });
+    }
+  });
+
+  // Deep Import with Streaming - Streams HTML chunks as they're generated
+  app.post("/api/pdf/deep-import-stream", isAuthenticated, upload.single('pdf'), async (req: any, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ message: "No PDF file provided" });
+      }
+
+      // Get the model identifier from settings or use default
+      let modelIdentifier: string;
+      
+      const requestedModelId = req.body.modelId;
+      if (requestedModelId) {
+        const model = await storage.getModel(requestedModelId);
+        if (!model) {
+          return res.status(400).json({ message: "Specified model not found" });
+        }
+        if (model.provider !== 'anthropic') {
+          return res.status(400).json({ message: "Deep import only supports Anthropic models" });
+        }
+        modelIdentifier = model.modelIdentifier;
+      } else {
+        const pdfModelSetting = await storage.getSetting('pdf_cleanup_model');
+        if (pdfModelSetting?.value) {
+          modelIdentifier = pdfModelSetting.value;
+        } else {
+          modelIdentifier = 'claude-sonnet-4-20250514';
+        }
+      }
+
+      logInfo(`Streaming PDF import started, file size: ${req.file.size} bytes, model: ${modelIdentifier}`, "PDF");
+
+      // Set up SSE headers
+      res.setHeader('Content-Type', 'text/event-stream');
+      res.setHeader('Cache-Control', 'no-cache');
+      res.setHeader('Connection', 'keep-alive');
+      res.flushHeaders();
+
+      // Get page count first
+      const { PDFParse } = await import('pdf-parse');
+      const parser = new PDFParse({ data: req.file.buffer });
+      const infoResult = await parser.getInfo();
+      await parser.destroy();
+      const pageCount = infoResult.total;
+
+      // Send initial event with page count
+      res.write(`data: ${JSON.stringify({ type: 'start', pageCount })}\n\n`);
+
+      // Stream the HTML chunks
+      let fullHtml = '';
+      for await (const chunk of pdfService.streamPdfWithClaude(req.file.buffer, modelIdentifier)) {
+        fullHtml += chunk;
+        res.write(`data: ${JSON.stringify({ type: 'chunk', content: chunk })}\n\n`);
+      }
+
+      // Send completion event
+      res.write(`data: ${JSON.stringify({ type: 'complete', html: fullHtml })}\n\n`);
+      res.end();
+
+      logInfo(`Streaming PDF import completed, pages: ${pageCount}`, "PDF");
+    } catch (error: unknown) {
+      console.error("Error in streaming PDF import:", error);
+      const message = error instanceof Error ? error.message : "Failed to import PDF";
+      // Try to send error as SSE if headers not sent
+      if (!res.headersSent) {
+        res.status(500).json({ message });
+      } else {
+        res.write(`data: ${JSON.stringify({ type: 'error', message })}\n\n`);
+        res.end();
+      }
+    }
+  });
+
+  // Get PDF cleanup model setting
+  app.get("/api/settings/pdf-cleanup-model", isAuthenticated, async (req, res) => {
+    try {
+      const setting = await storage.getSetting('pdf_cleanup_model');
+      res.json({ 
+        value: setting?.value || 'claude-sonnet-4-20250514',
+        isDefault: !setting?.value
+      });
+    } catch (error) {
+      console.error("Error fetching PDF cleanup model setting:", error);
+      res.status(500).json({ message: "Failed to fetch setting" });
+    }
+  });
+
+  // Update PDF cleanup model setting (admin only)
+  app.post("/api/admin/settings/pdf-cleanup-model", isAuthenticated, isAdmin, async (req, res) => {
+    try {
+      const { value } = req.body;
+      if (!value || typeof value !== 'string') {
+        return res.status(400).json({ message: "Model identifier is required" });
+      }
+      
+      const setting = await storage.upsertSetting({
+        key: 'pdf_cleanup_model',
+        value,
+      });
+      
+      res.json(setting);
+    } catch (error) {
+      console.error("Error saving PDF cleanup model setting:", error);
+      res.status(500).json({ message: "Failed to save setting" });
     }
   });
 

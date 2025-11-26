@@ -118,6 +118,9 @@ export default function Translate() {
   const [searchQuery, setSearchQuery] = useState("");
   const [searchTerm, setSearchTerm] = useState(""); // Actual search term used for API
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const [unsavedChangesAction, setUnsavedChangesAction] = useState<{ type: 'switch' | 'new'; data?: Translation } | null>(null);
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [lastSavedContent, setLastSavedContent] = useState<string>("");
 
   // Auto-focus search input when expanded
   useEffect(() => {
@@ -130,6 +133,19 @@ export default function Translate() {
   useEffect(() => {
     localStorage.setItem('translate-left-panel-collapsed', JSON.stringify(isLeftPanelCollapsed));
   }, [isLeftPanelCollapsed]);
+
+  // Warn user before leaving page with unsaved changes
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (hasUnsavedChanges) {
+        e.preventDefault();
+        e.returnValue = ''; // Chrome requires returnValue to be set
+      }
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [hasUnsavedChanges]);
 
   // Fetch translations with infinite scroll and server-side search
   const {
@@ -622,6 +638,12 @@ export default function Translate() {
   };
 
   const handleSelectTranslation = (translation: Translation) => {
+    // Check for unsaved changes
+    if (hasUnsavedChanges) {
+      setUnsavedChangesAction({ type: 'switch', data: translation });
+      return;
+    }
+    
     setSelectedTranslationId(translation.id);
     setSourceText(translation.sourceText);
     setTitle(translation.title);
@@ -632,6 +654,8 @@ export default function Translate() {
       setSelectedModel(translation.lastUsedModelId);
     }
     setEditedOutputs({});
+    setHasUnsavedChanges(false);
+    setLastSavedContent(translation.sourceText);
     // Don't clear progress state - preserve it per translation ID
     // Progress is tracked per translation ID, so switching cards doesn't lose progress
     
@@ -644,7 +668,11 @@ export default function Translate() {
   };
 
   const handleNewTranslation = () => {
-    // Create immediately
+    // Check for unsaved changes
+    if (hasUnsavedChanges) {
+      setUnsavedChangesAction({ type: 'new' });
+      return;
+    }
     createMutation.mutate();
   };
 
@@ -696,13 +724,56 @@ export default function Translate() {
     setIsEditingTitle(false);
   };
 
+  const handleConfirmDiscardAndContinue = () => {
+    if (!unsavedChangesAction) return;
+    
+    if (unsavedChangesAction.type === 'switch' && unsavedChangesAction.data) {
+      // Continue with switching translation
+      const translation = unsavedChangesAction.data;
+      setSelectedTranslationId(translation.id);
+      setSourceText(translation.sourceText);
+      setTitle(translation.title);
+      setSelectedLanguages(translation.selectedLanguages || []);
+      setIsPrivate(translation.isPrivate ?? false);
+      if (translation.lastUsedModelId) {
+        setSelectedModel(translation.lastUsedModelId);
+      }
+      setEditedOutputs({});
+      setHasUnsavedChanges(false);
+      setLastSavedContent(translation.sourceText);
+      
+      // Auto-select first language tab if languages exist
+      if (translation.selectedLanguages && translation.selectedLanguages.length > 0) {
+        setActiveLanguageTab(translation.selectedLanguages[0]);
+      } else {
+        setActiveLanguageTab("");
+      }
+    } else if (unsavedChangesAction.type === 'new') {
+      // Continue with creating new translation
+      setHasUnsavedChanges(false);
+      createMutation.mutate();
+    }
+    
+    setUnsavedChangesAction(null);
+  };
+
   const handleSaveSource = () => {
     if (selectedTranslationId) {
       updateMutation.mutate({
         id: selectedTranslationId,
         data: { sourceText, title, selectedLanguages, isPrivate },
       });
+      
+      // Update last saved content and clear unsaved changes flag
+      setLastSavedContent(sourceText);
+      setHasUnsavedChanges(false);
     }
+  };
+
+  const handleDiscardChanges = () => {
+    // Reset editor content to last saved state
+    setSourceText(lastSavedContent);
+    setHasUnsavedChanges(false);
   };
 
   const handleLoadGoogleDoc = async (documentId: string, docTitle: string) => {
@@ -916,11 +987,21 @@ export default function Translate() {
       return;
     }
 
-    // Save the model used for this translation
-    updateMutation.mutate({
-      id: selectedTranslationId,
-      data: { lastUsedModelId: selectedModel },
-    });
+    // Autosave if there are unsaved changes before translating
+    if (hasUnsavedChanges) {
+      await updateMutation.mutateAsync({
+        id: selectedTranslationId,
+        data: { sourceText, title, selectedLanguages, isPrivate, lastUsedModelId: selectedModel },
+      });
+      setLastSavedContent(sourceText);
+      setHasUnsavedChanges(false);
+    } else {
+      // Just save the model used for this translation
+      updateMutation.mutate({
+        id: selectedTranslationId,
+        data: { lastUsedModelId: selectedModel },
+      });
+    }
 
     const currentTranslationId = selectedTranslationId;
     if (!currentTranslationId) return;
@@ -1701,16 +1782,31 @@ export default function Translate() {
               </div>
               <RichTextEditor
                 content={sourceText}
-                onChange={setSourceText}
+                onChange={(value) => {
+                  setSourceText(value);
+                  // Check if content has changed from last saved
+                  setHasUnsavedChanges(value !== lastSavedContent);
+                }}
                 placeholder="Enter text to translate..."
                 editable={!!selectedTranslationId && canEditSelected}
                 className="flex-1 overflow-auto"
                 editorKey={`source-${selectedTranslationId || 'none'}`}
               />
-              <div className="mt-2 flex justify-end flex-shrink-0">
+              <div className="mt-2 flex justify-end gap-2 flex-shrink-0">
+                {hasUnsavedChanges && (
+                  <Button
+                    onClick={handleDiscardChanges}
+                    variant="outline"
+                    disabled={!selectedTranslationId || !canEditSelected}
+                    size="sm"
+                  >
+                    <X className="mr-2 h-4 w-4" />
+                    Discard
+                  </Button>
+                )}
                 <Button
                   onClick={handleSaveSource}
-                  disabled={!selectedTranslationId || !canEditSelected || updateMutation.isPending}
+                  disabled={!selectedTranslationId || !canEditSelected || !hasUnsavedChanges || updateMutation.isPending}
                   size="sm"
                   data-testid="button-save-source"
                 >
@@ -2415,6 +2511,27 @@ export default function Translate() {
             >
               {deleteMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Unsaved Changes Warning */}
+      <AlertDialog open={!!unsavedChangesAction} onOpenChange={(open) => !open && setUnsavedChangesAction(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Unsaved Changes</AlertDialogTitle>
+            <AlertDialogDescription>
+              You have unsaved changes that will be lost if you continue. Would you like to save your changes first?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleConfirmDiscardAndContinue}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Discard Changes
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

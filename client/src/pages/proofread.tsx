@@ -131,6 +131,8 @@ export default function Proofread() {
   const [copiedLink, setCopiedLink] = useState(false);
   const [acceptAllInProgress, setAcceptAllInProgress] = useState(false);
   const [acceptAllProgressIndex, setAcceptAllProgressIndex] = useState<number | null>(null);
+  // Store the currently selected proofreading object to avoid race conditions with list refresh
+  const [selectedProofreadingData, setSelectedProofreadingData] = useState<Proofreading | null>(null);
 
   // Auto-focus search input when expanded
   useEffect(() => {
@@ -486,6 +488,7 @@ export default function Proofread() {
       queryClient.invalidateQueries({ queryKey: ["/api/proofreadings"] });
       if (selectedProofreadingId === deletedId) {
         setSelectedProofreadingId(null);
+        setSelectedProofreadingData(null);
         setSourceText("");
         setTitle("Untitled Proofreading");
       }
@@ -661,6 +664,7 @@ export default function Proofread() {
     editorRef.current?.clearHighlights();
     
     setSelectedProofreadingId(proofreading.id);
+    setSelectedProofreadingData(proofreading); // Store full object for immediate canEdit checks
     setSourceText(proofreading.sourceText);
     setTitle(proofreading.title);
     setSelectedCategories(proofreading.selectedCategories || []);
@@ -692,6 +696,7 @@ export default function Proofread() {
       const proofreading = unsavedChangesAction.data;
       editorRef.current?.clearHighlights();
       setSelectedProofreadingId(proofreading.id);
+      setSelectedProofreadingData(proofreading); // Store full object for immediate canEdit checks
       setSourceText(proofreading.sourceText);
       setTitle(proofreading.title);
       setSelectedCategories(proofreading.selectedCategories || []);
@@ -1007,7 +1012,17 @@ export default function Proofread() {
     editorRef.current?.clearHighlights();
     
     // Replace HTML content directly to preserve formatting
-    editorRef.current?.replaceHTML(result.original_text, result.suggested_change);
+    const replacementSucceeded = editorRef.current?.replaceHTML(result.original_text, result.suggested_change);
+    
+    // Check if replacement actually happened
+    if (!replacementSucceeded) {
+      toast({
+        title: "Could not apply change",
+        description: "The original text was not found in the document. It may have been modified or already changed.",
+        variant: "destructive",
+      });
+      return;
+    }
     
     // Small delay to ensure editor has updated
     await new Promise(resolve => setTimeout(resolve, 100));
@@ -1015,44 +1030,41 @@ export default function Proofread() {
     // Get the updated content from editor
     const updatedHTML = editorRef.current?.getHTML() || "";
     
-    if (updatedHTML) {
+    // Update status in backend and save the document
+    try {
+      await apiRequest('PATCH', `/api/proofreadings/${selectedProofreadingId}/output/suggestion/${index}`, { status: 'accepted' });
       
-      // Update status in backend and save the document
-      try {
-        await apiRequest('PATCH', `/api/proofreadings/${selectedProofreadingId}/output/suggestion/${index}`, { status: 'accepted' });
-        
-        // Save the updated document text
-        await updateMutation.mutateAsync({
-          id: selectedProofreadingId,
-          data: {
-            sourceText: updatedHTML,
-            title,
-            selectedCategories,
-            isPrivate,
-            lastUsedModelId: selectedModel,
-          },
-        }, { suppressToast: true });
-        
-        // Update the last saved content and clear unsaved changes flag
-        setLastSavedContent(updatedHTML);
-        setHasUnsavedChanges(false);
-        
-        // Refresh the output to get updated status
-        await queryClient.invalidateQueries({ queryKey: ["/api/proofreadings", selectedProofreadingId, "output"] });
-        
-        setSelectedCardIndex(null);
-        
-        toast({
-          title: "Change applied and saved",
-          description: "The suggested change has been applied and saved to your document.",
-        });
-      } catch (error) {
-        toast({
-          title: "Failed to update",
-          description: error instanceof Error ? error.message : "Could not save changes",
-          variant: "destructive",
-        });
-      }
+      // Save the updated document text
+      await updateMutation.mutateAsync({
+        id: selectedProofreadingId,
+        data: {
+          sourceText: updatedHTML,
+          title,
+          selectedCategories,
+          isPrivate,
+          lastUsedModelId: selectedModel,
+        },
+      }, { suppressToast: true });
+      
+      // Update the last saved content and clear unsaved changes flag
+      setLastSavedContent(updatedHTML);
+      setHasUnsavedChanges(false);
+      
+      // Refresh the output to get updated status
+      await queryClient.invalidateQueries({ queryKey: ["/api/proofreadings", selectedProofreadingId, "output"] });
+      
+      setSelectedCardIndex(null);
+      
+      toast({
+        title: "Change applied and saved",
+        description: "The suggested change has been applied and saved to your document.",
+      });
+    } catch (error) {
+      toast({
+        title: "Failed to update",
+        description: error instanceof Error ? error.message : "Could not save changes",
+        variant: "destructive",
+      });
     }
   };
 
@@ -1084,6 +1096,10 @@ export default function Proofread() {
     // Clear all highlights first
     editorRef.current?.clearHighlights();
     
+    // Track successful and failed changes
+    let successCount = 0;
+    let failedCount = 0;
+    
     // Process each suggestion step by step: change → save → update status → next
     try {
       for (const index of acceptedIndices) {
@@ -1093,7 +1109,14 @@ export default function Proofread() {
         setAcceptAllProgressIndex(index);
         
         // Step 1: Apply change in editor
-        editorRef.current?.replaceHTML(result.original_text, result.suggested_change);
+        const replacementSucceeded = editorRef.current?.replaceHTML(result.original_text, result.suggested_change);
+        
+        // Skip this suggestion if replacement failed (don't mark as accepted)
+        if (!replacementSucceeded) {
+          console.warn(`Failed to replace suggestion ${index}: text not found in document`);
+          failedCount++;
+          continue;
+        }
         
         // Small delay to ensure editor has updated
         await new Promise(resolve => setTimeout(resolve, 100));
@@ -1101,25 +1124,24 @@ export default function Proofread() {
         // Step 2: Get the updated content and save the document
         const updatedHTML = editorRef.current?.getHTML() || "";
         
-        if (updatedHTML) {
-          await updateMutation.mutateAsync({
-            id: selectedProofreadingId,
-            data: {
-              sourceText: updatedHTML,
-              title,
-              selectedCategories,
-              isPrivate,
-              lastUsedModelId: selectedModel,
-            },
-          }, { suppressToast: true });
-          
-          // Update the last saved content
-          setLastSavedContent(updatedHTML);
-          setHasUnsavedChanges(false);
-        }
+        await updateMutation.mutateAsync({
+          id: selectedProofreadingId,
+          data: {
+            sourceText: updatedHTML,
+            title,
+            selectedCategories,
+            isPrivate,
+            lastUsedModelId: selectedModel,
+          },
+        }, { suppressToast: true });
         
-        // Step 3: Update suggestion status in backend
+        // Update the last saved content
+        setLastSavedContent(updatedHTML);
+        setHasUnsavedChanges(false);
+        
+        // Step 3: Update suggestion status in backend (only if replacement succeeded)
         await apiRequest('PATCH', `/api/proofreadings/${selectedProofreadingId}/output/suggestion/${index}`, { status: 'accepted' });
+        successCount++;
         
         // Step 4: Refresh the query to update card status (fire-and-forget)
         queryClient.invalidateQueries({ queryKey: ["/api/proofreadings", selectedProofreadingId, "output"] });
@@ -1130,10 +1152,25 @@ export default function Proofread() {
       
       setSelectedCardIndex(null);
       
-      toast({
-        title: "All changes applied and saved",
-        description: `${acceptedIndices.length} suggested changes have been applied and saved.`,
-      });
+      // Show appropriate toast based on results
+      if (failedCount > 0 && successCount > 0) {
+        toast({
+          title: "Some changes applied",
+          description: `${successCount} changes applied successfully, ${failedCount} could not be applied (text may have been modified).`,
+          variant: "default",
+        });
+      } else if (failedCount > 0 && successCount === 0) {
+        toast({
+          title: "Could not apply changes",
+          description: `${failedCount} changes could not be applied. The text may have been modified since proofreading.`,
+          variant: "destructive",
+        });
+      } else {
+        toast({
+          title: "All changes applied and saved",
+          description: `${successCount} suggested changes have been applied and saved.`,
+        });
+      }
     } catch (error) {
       toast({
         title: "Failed to update",
@@ -1167,7 +1204,10 @@ export default function Proofread() {
     return `Owned by ${proofreading.userId}`;
   };
 
-  const selectedProofreading = proofreadings.find(p => p.id === selectedProofreadingId) || null;
+  // Use stored proofreading data first (for newly created items), fall back to list lookup
+  const selectedProofreading = selectedProofreadingData?.id === selectedProofreadingId 
+    ? selectedProofreadingData 
+    : proofreadings.find(p => p.id === selectedProofreadingId) || null;
   const canEditSelected = canEdit(selectedProofreading);
   const isMobile = useIsMobile();
   const activeCategories = categories.filter(c => c.isActive);

@@ -1,5 +1,5 @@
 import { useEditor, EditorContent, Editor } from '@tiptap/react';
-import { useEffect, useMemo, useState, useImperativeHandle, forwardRef } from 'react';
+import { useEffect, useMemo, useState, useImperativeHandle, forwardRef, useRef } from 'react';
 import StarterKit from '@tiptap/starter-kit';
 import Placeholder from '@tiptap/extension-placeholder';
 import Link from '@tiptap/extension-link';
@@ -102,7 +102,7 @@ export interface RichTextEditorRef {
   highlightText: (searchText: string, color?: 'yellow' | 'green') => void;
   clearHighlights: () => void;
   replaceText: (oldText: string, newText: string) => void;
-  replaceHTML: (oldHTML: string, newHTML: string) => void;
+  replaceHTML: (oldHTML: string, newHTML: string) => boolean;
   scrollToText: (searchText: string) => void;
   getText: () => string;
   getHTML: () => string;
@@ -362,6 +362,9 @@ export const RichTextEditor = forwardRef<RichTextEditorRef, RichTextEditorProps>
   isRawView = false,
   onRawViewToggle,
 }, ref) => {
+  // Track when we're applying view-only highlights (shouldn't trigger onChange)
+  const isApplyingHighlightsRef = useRef(false);
+  
   // Memoize extensions to prevent duplicate warnings and unnecessary recreations
   // Each extension instance is created once and reused across renders
   const extensions = useMemo(() => {
@@ -397,6 +400,10 @@ export const RichTextEditor = forwardRef<RichTextEditorRef, RichTextEditorProps>
     content,
     editable,
     onUpdate: ({ editor }) => {
+      // Skip onChange when applying view-only highlights to prevent false "unsaved changes"
+      if (isApplyingHighlightsRef.current) {
+        return;
+      }
       onChange(editor.getHTML());
     },
     onBlur: () => {
@@ -460,6 +467,9 @@ export const RichTextEditor = forwardRef<RichTextEditorRef, RichTextEditorProps>
         return;
       }
       
+      // Set flag to prevent onChange from being called (view-only highlights)
+      isApplyingHighlightsRef.current = true;
+      
       // Clear existing highlights first using our clearHighlights method
       // This ensures all marks are removed before applying new ones
       const { tr, doc } = editor.state;
@@ -481,7 +491,10 @@ export const RichTextEditor = forwardRef<RichTextEditorRef, RichTextEditorProps>
       
       // Normalize search text - trim whitespace
       const normalizedSearch = searchText.trim();
-      if (!normalizedSearch) return;
+      if (!normalizedSearch) {
+        isApplyingHighlightsRef.current = false;
+        return;
+      }
       
       // Get plain text content from the editor
       const plainText = editor.state.doc.textContent;
@@ -498,7 +511,10 @@ export const RichTextEditor = forwardRef<RichTextEditorRef, RichTextEditorProps>
         textMatches.push({ index: match.index, length: match[0].length });
       }
       
-      if (textMatches.length === 0) return;
+      if (textMatches.length === 0) {
+        isApplyingHighlightsRef.current = false;
+        return;
+      }
       
       // Map text positions to document positions
       // Build a complete mapping of text positions to document positions
@@ -583,6 +599,7 @@ export const RichTextEditor = forwardRef<RichTextEditorRef, RichTextEditorProps>
         // Double-check editor view is still available before dispatching
         if (!editor.view) {
           console.warn('Editor view not available for highlighting');
+          isApplyingHighlightsRef.current = false;
           return;
         }
         
@@ -611,10 +628,16 @@ export const RichTextEditor = forwardRef<RichTextEditorRef, RichTextEditorProps>
           }
         }
       }
+      
+      // Clear the flag after highlight operation completes
+      isApplyingHighlightsRef.current = false;
     },
     
     clearHighlights: () => {
       if (!editor || !editor.view) return;
+      
+      // Set flag to prevent onChange from being called (view-only highlights)
+      isApplyingHighlightsRef.current = true;
       
       try {
         // Use a transaction to remove all highlight marks from the entire document
@@ -641,6 +664,9 @@ export const RichTextEditor = forwardRef<RichTextEditorRef, RichTextEditorProps>
         } catch (err) {
           console.warn('Failed to clear highlights:', err);
         }
+      } finally {
+        // Clear the flag after highlight operation completes
+        isApplyingHighlightsRef.current = false;
       }
     },
     
@@ -873,8 +899,8 @@ export const RichTextEditor = forwardRef<RichTextEditorRef, RichTextEditorProps>
         console.warn('scrollToText error:', error);
       }
     },
-    replaceHTML: (oldHTML: string, newHTML: string) => {
-      if (!editor || !oldHTML) return;
+    replaceHTML: (oldHTML: string, newHTML: string): boolean => {
+      if (!editor || !oldHTML) return false;
       
       // Get current HTML content
       const currentHTML = editor.getHTML();
@@ -884,12 +910,15 @@ export const RichTextEditor = forwardRef<RichTextEditorRef, RichTextEditorProps>
       
       // Check if replacement happened
       if (updatedHTML === currentHTML) {
-        console.warn('No replacement made - old HTML not found');
-        return;
+        console.warn('No replacement made - old HTML not found in editor content');
+        console.warn('Looking for:', oldHTML.substring(0, 200));
+        console.warn('In content:', currentHTML.substring(0, 500));
+        return false;
       }
       
       // Set the new HTML content (this will re-render the editor)
       editor.commands.setContent(updatedHTML);
+      return true;
     },
     
     getText: () => {

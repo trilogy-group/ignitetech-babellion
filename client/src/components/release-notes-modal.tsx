@@ -1,7 +1,7 @@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { PanelLeftClose, Search, CheckCircle, Shield, Zap, Database, Share, FileText, Navigation, Upload } from "lucide-react";
+import { PanelLeftClose, Search, CheckCircle, Shield, Zap, Database, Share, FileText, Image, Navigation, Upload, Calendar, BarChart3 } from "lucide-react";
 
 interface ReleaseNotesModalProps {
   open: boolean;
@@ -22,7 +22,7 @@ export function ReleaseNotesModal({ open, onOpenChange }: ReleaseNotesModalProps
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-base">
             Release Notes
-            <Badge variant="secondary" className="text-xs">v1.4.3</Badge>
+            <Badge variant="secondary" className="text-xs">v1.5</Badge>
           </DialogTitle>
           <DialogDescription className="text-xs">
             What's new in this release
@@ -31,11 +31,72 @@ export function ReleaseNotesModal({ open, onOpenChange }: ReleaseNotesModalProps
         
         <ScrollArea className="max-h-[50vh] pr-4">
           <div className="space-y-6">
-            {/* Version 1.4.3 */}
+            {/* Version 1.5 */}
             <div className="space-y-3">
               <div className="border-l-4 border-purple-600 pl-4">
-                <h3 className="font-semibold text-base">Version 1.4.3</h3>
+                <h3 className="font-semibold text-base">Version 1.5</h3>
                 <p className="text-xs text-muted-foreground">Latest Release</p>
+              </div>
+
+              {/* IMAGE TRANSLATION update with icon and bold header */}
+              <div className="flex gap-2 items-start ml-4">
+                <Image className="h-3 w-3 text-primary mt-[0.125rem] flex-shrink-0" />
+                <div>
+                  <span className="font-bold text-xs text-primary">Image Translation:</span>
+                  <span className="text-xs text-muted-foreground ml-1">
+                    Using <span className="font-semibold">Nano Banana Pro</span>, you can now translate text in images directly in Babellion! Supports dozens of languages, automatic layout detection, and high quality exports.
+                  </span>
+                </div>
+              </div>
+
+              <div className="space-y-2 ml-4">
+                <div className="flex gap-2 items-start">
+                  <BarChart3 className="h-3 w-3 text-primary mt-[0.125rem] flex-shrink-0" />
+                  <div>
+                    <span className="font-medium text-xs">Admin Analytics Dashboard:</span>
+                    <span className="text-xs text-muted-foreground ml-1">
+                      New analytics tab in Settings with usage charts, top languages, model usage, feedback sentiment, and active user rankings.
+                    </span>
+                  </div>
+                </div>
+
+                <div className="flex gap-2 items-start">
+                  <Calendar className="h-3 w-3 text-primary mt-[0.125rem] flex-shrink-0" />
+                  <div>
+                    <span className="font-medium text-xs">Improved Date Display:</span>
+                    <span className="text-xs text-muted-foreground ml-1">
+                      All dates now show both the full date and relative time (e.g., "Dec 04, 2025 (2 days ago)") for better context.
+                    </span>
+                  </div>
+                </div>
+
+                <div className="flex gap-2 items-start">
+                  <Zap className="h-3 w-3 text-primary mt-[0.125rem] flex-shrink-0" />
+                  <div>
+                    <span className="font-medium text-xs">Faster Page Loading:</span>
+                    <span className="text-xs text-muted-foreground ml-1">
+                      Translate and Proofread pages now load significantly faster with on-demand content fetching.
+                    </span>
+                  </div>
+                </div>
+
+                <div className="flex gap-2 items-start">
+                  <Navigation className="h-3 w-3 text-primary mt-[0.125rem] flex-shrink-0" />
+                  <div>
+                    <span className="font-medium text-xs">Smart Delete Navigation:</span>
+                    <span className="text-xs text-muted-foreground ml-1">
+                      Deleting an item now automatically selects the next (or previous) item instead of clearing the view.
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Version 1.4.3 */}
+            <div className="space-y-3 pt-4 border-t">
+              <div className="border-l-4 border-gray-400 pl-4">
+                <h3 className="font-semibold text-base">Version 1.4.3</h3>
+                <p className="text-xs text-muted-foreground">December 2025</p>
               </div>
               
               <div className="space-y-2 ml-4">

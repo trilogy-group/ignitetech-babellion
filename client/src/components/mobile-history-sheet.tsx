@@ -28,19 +28,19 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import type { Translation } from "@shared/schema";
+import type { Translation, TranslationMetadata } from "@shared/schema";
 
 interface MobileHistorySheetProps {
-  translations: Translation[];
+  translations: TranslationMetadata[];
   isLoading: boolean;
   selectedTranslationId: string | null;
-  onSelectTranslation: (translation: Translation) => void;
+  onSelectTranslation: (translation: TranslationMetadata) => void;
   onNewTranslation: () => void;
   isCreating: boolean;
   onRename: (id: string, newTitle: string) => void;
   onDelete: (id: string) => void;
-  canEdit: (translation: Translation | null) => boolean;
-  getOwnershipTooltip: (translation: Translation) => string;
+  canEdit: (translation: TranslationMetadata | Translation | null) => boolean;
+  getOwnershipTooltip: (translation: TranslationMetadata) => string;
   trigger?: React.ReactNode;
 }
 
@@ -84,7 +84,7 @@ export function MobileHistorySheet({
   const [isEscapePressed, setIsEscapePressed] = useState(false);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
 
-  const handleSelectAndClose = (translation: Translation) => {
+  const handleSelectAndClose = (translation: TranslationMetadata) => {
     onSelectTranslation(translation);
     setIsOpen(false);
   };

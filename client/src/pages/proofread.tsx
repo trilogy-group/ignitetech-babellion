@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation, useInfiniteQuery } from "@tanstack/react-query";
-import { useLocation } from "wouter";
+import { useLocation, useParams } from "wouter";
 import { Plus, Trash2, Loader2, Check, Lock, Globe, Pencil, FileText, Save, X, History, Code, ChevronDown, ArrowRight, Square, RotateCw, Search, ChevronLeft, ChevronRight, Copy, Share, Link2, Upload, Zap, Sparkles } from "lucide-react";
-import { formatDistanceToNow } from "date-fns";
+import { formatDate } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
@@ -62,7 +62,7 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
 import { queryClient, apiRequest } from "@/lib/queryClient";
-import type { Proofreading, ProofreadingOutput, AiModel, ProofreadingRuleCategory } from "@shared/schema";
+import type { Proofreading, ProofreadingMetadata, ProofreadingOutput, AiModel, ProofreadingRuleCategory } from "@shared/schema";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
@@ -92,8 +92,9 @@ interface ProofreadingResult {
 export default function Proofread() {
   const { toast } = useToast();
   const { user } = useAuth();
-  const [location, setLocation] = useLocation();
-  const [selectedProofreadingId, setSelectedProofreadingId] = useState<string | null>(null);
+  const [_location, setLocation] = useLocation();
+  const params = useParams<{ id?: string }>();
+  const [selectedProofreadingId, setSelectedProofreadingId] = useState<string | null>(params.id || null);
   const [sourceText, setSourceText] = useState("");
   const [title, setTitle] = useState("Untitled Proofreading");
   const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
@@ -114,7 +115,7 @@ export default function Proofread() {
   const [isImportingPdf, setIsImportingPdf] = useState(false);
   const [pdfImportType, setPdfImportType] = useState<'quick' | 'deep' | null>(null);
   const pdfInputRef = useRef<HTMLInputElement>(null);
-  const [unsavedChangesAction, setUnsavedChangesAction] = useState<{ type: 'switch' | 'new'; data?: Proofreading } | null>(null);
+  const [unsavedChangesAction, setUnsavedChangesAction] = useState<{ type: 'switch' | 'new'; data?: ProofreadingMetadata | Proofreading } | null>(null);
   const [selectedCardIndex, setSelectedCardIndex] = useState<number | null>(null);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [lastSavedContent, setLastSavedContent] = useState<string>("");
@@ -210,7 +211,7 @@ export default function Proofread() {
       });
       const response = await apiRequest("GET", `/api/proofreadings?${params}`);
       return await response.json() as {
-        data: Proofreading[];
+        data: ProofreadingMetadata[];
         pagination: {
           page: number;
           limit: number;
@@ -228,6 +229,16 @@ export default function Proofread() {
 
   // Flatten paginated proofreadings
   const proofreadings = proofreadingsData?.pages.flatMap(page => page.data) ?? [];
+
+  // Fetch full proofreading data when a proofreading is selected
+  const { data: selectedProofreadingFull, isLoading: isLoadingSelectedProofreading } = useQuery<Proofreading>({
+    queryKey: ["/api/proofreadings", selectedProofreadingId],
+    queryFn: async () => {
+      const response = await apiRequest("GET", `/api/proofreadings/${selectedProofreadingId}`);
+      return await response.json() as Proofreading;
+    },
+    enabled: !!selectedProofreadingId,
+  });
 
   // Fetch models
   const { data: models = [] } = useQuery<AiModel[]>({
@@ -294,11 +305,6 @@ export default function Proofread() {
 
   // Track if we've initialized to avoid loops
   const hasInitialized = useRef(false);
-  const selectedProofreadingIdRef = useRef<string | null>(null);
-  
-  useEffect(() => {
-    selectedProofreadingIdRef.current = selectedProofreadingId;
-  }, [selectedProofreadingId]);
 
   // Handle search
   const handleSearch = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -359,7 +365,7 @@ export default function Proofread() {
     if (!selectedProofreadingId) return;
     
     try {
-      const shareUrl = `${window.location.origin}${window.location.pathname}#${selectedProofreadingId}`;
+      const shareUrl = `${window.location.origin}/proofread/${selectedProofreadingId}`;
       await navigator.clipboard.writeText(shareUrl);
       
       setCopiedLink(true);
@@ -378,24 +384,43 @@ export default function Proofread() {
     }
   };
 
-  // Handle hash-based URL navigation on initial load only
+  // Handle URL param changes
   useEffect(() => {
-    if (!proofreadingsLoading && proofreadings.length > 0 && !hasInitialized.current && !selectedProofreadingId) {
+    if (params.id && params.id !== selectedProofreadingId) {
+      setSelectedProofreadingId(params.id);
+    }
+  }, [params.id]);
+
+  // Auto-select first proofreading if none selected and no ID in URL
+  useEffect(() => {
+    if (!proofreadingsLoading && proofreadings.length > 0 && !selectedProofreadingId && !params.id && !hasInitialized.current) {
       hasInitialized.current = true;
-      const hash = window.location.hash.slice(1);
-      if (hash) {
-        const proofreading = proofreadings.find(p => p.id === hash);
-        if (proofreading) {
-          handleSelectProofreading(proofreading);
-          return;
-        }
-      }
       const firstProofreading = proofreadings[0];
       if (firstProofreading) {
-        handleSelectProofreading(firstProofreading);
+        setLocation(`/proofread/${firstProofreading.id}`);
       }
     }
-  }, [proofreadingsLoading, proofreadings, selectedProofreadingId]);
+  }, [proofreadingsLoading, proofreadings, selectedProofreadingId, params.id, setLocation]);
+
+  // Populate state when full proofreading data is loaded
+  useEffect(() => {
+    if (selectedProofreadingFull && selectedProofreadingId) {
+      // IMPORTANT: Set lastSavedContent BEFORE sourceText to prevent false unsaved changes detection
+      setLastSavedContent(selectedProofreadingFull.sourceText);
+      setHasUnsavedChanges(false);
+      
+      setSelectedProofreadingData(selectedProofreadingFull);
+      setSourceText(selectedProofreadingFull.sourceText);
+      setTitle(selectedProofreadingFull.title);
+      setSelectedCategories(selectedProofreadingFull.selectedCategories || []);
+      setIsPrivate(selectedProofreadingFull.isPrivate ?? false);
+      if (selectedProofreadingFull.lastUsedModelId) {
+        setSelectedModel(selectedProofreadingFull.lastUsedModelId);
+      }
+      setSelectedCardIndex(null);
+      editorRef.current?.clearHighlights();
+    }
+  }, [selectedProofreadingFull, selectedProofreadingId]);
 
   // Warn user before leaving page with unsaved changes
   useEffect(() => {
@@ -409,41 +434,6 @@ export default function Proofread() {
     window.addEventListener('beforeunload', handleBeforeUnload);
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
   }, [hasUnsavedChanges]);
-
-  const isUpdatingHashRef = useRef(false);
-
-  useEffect(() => {
-    const handleHashChange = () => {
-      if (isUpdatingHashRef.current) {
-        return;
-      }
-      if (!proofreadingsLoading && proofreadings.length > 0) {
-        const hash = window.location.hash.slice(1);
-        if (hash) {
-          const proofreading = proofreadings.find(p => p.id === hash);
-          if (proofreading && proofreading.id !== selectedProofreadingIdRef.current) {
-            handleSelectProofreading(proofreading);
-          }
-        }
-      }
-    };
-
-    window.addEventListener('hashchange', handleHashChange);
-    return () => window.removeEventListener('hashchange', handleHashChange);
-  }, [proofreadings, proofreadingsLoading]);
-
-  useEffect(() => {
-    if (selectedProofreadingId && hasInitialized.current) {
-      const currentHash = window.location.hash.slice(1);
-      if (currentHash !== selectedProofreadingId) {
-        isUpdatingHashRef.current = true;
-        window.history.replaceState(null, '', `${window.location.pathname}#${selectedProofreadingId}`);
-        setTimeout(() => {
-          isUpdatingHashRef.current = false;
-        }, 100);
-      }
-    }
-  }, [selectedProofreadingId]);
 
   // Create new proofreading mutation
   const createMutation = useMutation({
@@ -488,12 +478,36 @@ export default function Proofread() {
       return await apiRequest("DELETE", `/api/proofreadings/${id}`, {});
     },
     onSuccess: (_, deletedId) => {
+      // Find the index of deleted proofreading to navigate to next/previous
+      const deletedIndex = proofreadings.findIndex(p => p.id === deletedId);
+      
+      // Determine next proofreading to select
+      let nextProofreading: ProofreadingMetadata | null = null;
+      if (deletedIndex !== -1) {
+        // Try next proofreading first
+        if (deletedIndex < proofreadings.length - 1) {
+          nextProofreading = proofreadings[deletedIndex + 1];
+        }
+        // If no next, try previous
+        else if (deletedIndex > 0) {
+          nextProofreading = proofreadings[deletedIndex - 1];
+        }
+      }
+      
       queryClient.invalidateQueries({ queryKey: ["/api/proofreadings"] });
+      
       if (selectedProofreadingId === deletedId) {
-        setSelectedProofreadingId(null);
-        setSelectedProofreadingData(null);
-        setSourceText("");
-        setTitle("Untitled Proofreading");
+        if (nextProofreading) {
+          // Navigate to next/previous proofreading
+          setLocation(`/proofread/${nextProofreading.id}`);
+        } else {
+          // No proofreadings left, go to base proofread page
+          setSelectedProofreadingId(null);
+          setSelectedProofreadingData(null);
+          setSourceText("");
+          setTitle("Untitled Proofreading");
+          setLocation('/proofread');
+        }
       }
       setDeleteConfirmId(null);
       toast({
@@ -656,7 +670,7 @@ export default function Proofread() {
     },
   });
 
-  const handleSelectProofreading = (proofreading: Proofreading) => {
+  const handleSelectProofreading = (proofreading: ProofreadingMetadata | Proofreading) => {
     // Check for unsaved changes
     if (hasUnsavedChanges) {
       setUnsavedChangesAction({ type: 'switch', data: proofreading });
@@ -665,21 +679,10 @@ export default function Proofread() {
     
     // Clear highlights before switching
     editorRef.current?.clearHighlights();
-    
-    setSelectedProofreadingId(proofreading.id);
-    setSelectedProofreadingData(proofreading); // Store full object for immediate canEdit checks
-    setSourceText(proofreading.sourceText);
-    setTitle(proofreading.title);
-    setSelectedCategories(proofreading.selectedCategories || []);
-    setIsPrivate(proofreading.isPrivate ?? false);
-    if (proofreading.lastUsedModelId) {
-      setSelectedModel(proofreading.lastUsedModelId);
-    }
     setSelectedCardIndex(null);
-    setHasUnsavedChanges(false);
-    setLastSavedContent(proofreading.sourceText);
     
-    // Note: Status is now tracked via server-side polling, no need for local state
+    // Navigate to the proofreading URL - state will be populated by the effect watching selectedProofreadingFull
+    setLocation(`/proofread/${proofreading.id}`);
   };
 
   const handleNewProofreading = () => {
@@ -694,26 +697,16 @@ export default function Proofread() {
   const handleConfirmDiscardAndContinue = () => {
     if (!unsavedChangesAction) return;
     
+    // Reset unsaved changes flag before any navigation
+    setHasUnsavedChanges(false);
+    
     if (unsavedChangesAction.type === 'switch' && unsavedChangesAction.data) {
-      // Continue with switching proofreading
-      const proofreading = unsavedChangesAction.data;
+      // Navigate to the proofreading - state will be populated by the effect watching selectedProofreadingFull
       editorRef.current?.clearHighlights();
-      setSelectedProofreadingId(proofreading.id);
-      setSelectedProofreadingData(proofreading); // Store full object for immediate canEdit checks
-      setSourceText(proofreading.sourceText);
-      setTitle(proofreading.title);
-      setSelectedCategories(proofreading.selectedCategories || []);
-      setIsPrivate(proofreading.isPrivate ?? false);
-      if (proofreading.lastUsedModelId) {
-        setSelectedModel(proofreading.lastUsedModelId);
-      }
       setSelectedCardIndex(null);
-      setHasUnsavedChanges(false);
-      setLastSavedContent(proofreading.sourceText);
-      // Note: Status is now tracked via server-side polling, no need for local state
+      setLocation(`/proofread/${unsavedChangesAction.data.id}`);
     } else if (unsavedChangesAction.type === 'new') {
       // Continue with creating new proofreading
-      setHasUnsavedChanges(false);
       createMutation.mutate();
     }
     
@@ -1366,14 +1359,14 @@ export default function Proofread() {
     }
   };
 
-  const canEdit = (proofreading: Proofreading | null) => {
+  const canEdit = (proofreading: ProofreadingMetadata | Proofreading | null) => {
     if (!user || !proofreading) return false;
     if (proofreading.userId === user.id) return true;
     if (user.isAdmin && !proofreading.isPrivate) return true;
     return false;
   };
 
-  const getOwnershipTooltip = (proofreading: Proofreading) => {
+  const getOwnershipTooltip = (proofreading: ProofreadingMetadata | Proofreading) => {
     if (!user) return "";
     if (proofreading.userId === user.id) {
       return "Owned by me";
@@ -1386,10 +1379,8 @@ export default function Proofread() {
     return `Owned by ${proofreading.userId}`;
   };
 
-  // Use stored proofreading data first (for newly created items), fall back to list lookup
-  const selectedProofreading = selectedProofreadingData?.id === selectedProofreadingId 
-    ? selectedProofreadingData 
-    : proofreadings.find(p => p.id === selectedProofreadingId) || null;
+  // Get currently selected proofreading - use fetched full data first, fall back to stored data for newly created items
+  const selectedProofreading = selectedProofreadingFull || selectedProofreadingData;
   const canEditSelected = canEdit(selectedProofreading);
   const isMobile = useIsMobile();
   const activeCategories = categories.filter(c => c.isActive);
@@ -1546,7 +1537,7 @@ export default function Proofread() {
                           </div>
                         )}
                         <p className="text-xs text-muted-foreground mt-1 truncate">
-                          {new Date(proofreading.updatedAt!).toLocaleDateString()}
+                          {formatDate(proofreading.updatedAt)}
                         </p>
                       </div>
                       {canEdit(proofreading) && (

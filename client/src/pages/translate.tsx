@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation, useInfiniteQuery } from "@tanstack/react-query";
-import { useLocation } from "wouter";
+import { useLocation, useParams } from "wouter";
 import { Plus, Trash2, Loader2, Copy, Check, Lock, Globe, Pencil, FileText, Save, X, RotateCw, ChevronLeft, ChevronRight, Square, Search, Share, Link2, Upload, Zap, Sparkles } from "lucide-react";
-import { formatDistanceToNow } from "date-fns";
+import { formatDate } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -55,7 +55,7 @@ import { useToast } from "@/hooks/use-toast";
 import { ToastAction } from "@/components/ui/toast";
 import { useAuth } from "@/hooks/useAuth";
 import { queryClient, apiRequest } from "@/lib/queryClient";
-import type { Translation, TranslationOutput, AiModel, Language, TranslationFeedback } from "@shared/schema";
+import type { Translation, TranslationMetadata, TranslationOutput, AiModel, Language, TranslationFeedback } from "@shared/schema";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
@@ -76,7 +76,8 @@ export default function Translate() {
   const { toast } = useToast();
   const { user } = useAuth();
   const [location, setLocation] = useLocation();
-  const [selectedTranslationId, setSelectedTranslationId] = useState<string | null>(null);
+  const params = useParams<{ id?: string }>();
+  const [selectedTranslationId, setSelectedTranslationId] = useState<string | null>(params.id || null);
   const [sourceText, setSourceText] = useState("");
   const [title, setTitle] = useState("Untitled Translation");
   const [selectedLanguages, setSelectedLanguages] = useState<string[]>([]);
@@ -121,7 +122,7 @@ export default function Translate() {
   const [searchQuery, setSearchQuery] = useState("");
   const [searchTerm, setSearchTerm] = useState(""); // Actual search term used for API
   const searchInputRef = useRef<HTMLInputElement>(null);
-  const [unsavedChangesAction, setUnsavedChangesAction] = useState<{ type: 'switch' | 'new'; data?: Translation } | null>(null);
+  const [unsavedChangesAction, setUnsavedChangesAction] = useState<{ type: 'switch' | 'new'; data?: TranslationMetadata | Translation } | null>(null);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [lastSavedContent, setLastSavedContent] = useState<string>("");
   // Store the currently selected translation object to avoid race conditions with list refresh
@@ -169,7 +170,7 @@ export default function Translate() {
       });
       const response = await apiRequest("GET", `/api/translations?${params}`);
       return await response.json() as {
-        data: Translation[];
+        data: TranslationMetadata[];
         pagination: {
           page: number;
           limit: number;
@@ -185,8 +186,18 @@ export default function Translate() {
     initialPageParam: 1,
   });
 
-  // Flatten paginated translations
+  // Flatten paginated translations (metadata only)
   const translations = translationsData?.pages.flatMap(page => page.data) ?? [];
+
+  // Fetch full translation data when a translation is selected
+  const { data: selectedTranslationFull, isLoading: isLoadingSelectedTranslation } = useQuery<Translation>({
+    queryKey: ["/api/translations", selectedTranslationId],
+    queryFn: async () => {
+      const response = await apiRequest("GET", `/api/translations/${selectedTranslationId}`);
+      return await response.json() as Translation;
+    },
+    enabled: !!selectedTranslationId,
+  });
 
   // Fetch models
   const { data: models = [] } = useQuery<AiModel[]>({
@@ -247,13 +258,6 @@ export default function Translate() {
 
   // Track if we've initialized to avoid loops
   const hasInitialized = useRef(false);
-  // Ref to track current selectedTranslationId for hashchange handler
-  const selectedTranslationIdRef = useRef<string | null>(null);
-  
-  // Keep ref in sync with state
-  useEffect(() => {
-    selectedTranslationIdRef.current = selectedTranslationId;
-  }, [selectedTranslationId]);
 
   // Handle search
   const handleSearch = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -281,69 +285,49 @@ export default function Translate() {
     }
   };
 
-  // Handle hash-based URL navigation on initial load only
+  // Sync selectedTranslationId with URL params
   useEffect(() => {
-    if (!translationsLoading && translations.length > 0 && !hasInitialized.current && !selectedTranslationId) {
+    if (params.id && params.id !== selectedTranslationId) {
+      setSelectedTranslationId(params.id);
+    }
+  }, [params.id, selectedTranslationId]);
+
+  // Handle initial load - auto-select first translation if no ID in URL
+  useEffect(() => {
+    if (!translationsLoading && translations.length > 0 && !hasInitialized.current && !params.id) {
       hasInitialized.current = true;
-      const hash = window.location.hash.slice(1); // Remove #
-      if (hash) {
-        const translation = translations.find(t => t.id === hash);
-        if (translation) {
-          handleSelectTranslation(translation);
-          return; // Exit early to avoid auto-selecting first
-        }
-      }
-      // Auto-select first translation if no hash
       const firstTranslation = translations[0];
       if (firstTranslation) {
-        handleSelectTranslation(firstTranslation);
+        // Navigate to the first translation
+        setLocation(`/translate/${firstTranslation.id}`, { replace: true });
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [translationsLoading]);
+  }, [translationsLoading, translations.length, params.id]);
 
-  // Flag to prevent hashchange handler from running during programmatic updates
-  const isUpdatingHashRef = useRef(false);
-
-  // Listen to browser hash changes (back/forward buttons) - ignore programmatic updates
+  // Populate state when full translation data is loaded
   useEffect(() => {
-    const handleHashChange = () => {
-      // Ignore if we're programmatically updating the hash
-      if (isUpdatingHashRef.current) {
-        return;
+    if (selectedTranslationFull && selectedTranslationId) {
+      // IMPORTANT: Set lastSavedContent BEFORE sourceText to prevent false unsaved changes detection
+      setLastSavedContent(selectedTranslationFull.sourceText);
+      setHasUnsavedChanges(false);
+      
+      setSelectedTranslationData(selectedTranslationFull);
+      setSourceText(selectedTranslationFull.sourceText);
+      setTitle(selectedTranslationFull.title);
+      setSelectedLanguages(selectedTranslationFull.selectedLanguages || []);
+      setIsPrivate(selectedTranslationFull.isPrivate ?? false);
+      if (selectedTranslationFull.lastUsedModelId) {
+        setSelectedModel(selectedTranslationFull.lastUsedModelId);
       }
-      if (!translationsLoading && translations.length > 0) {
-        const hash = window.location.hash.slice(1);
-        if (hash) {
-          const translation = translations.find(t => t.id === hash);
-          // Use ref to get current selectedTranslationId value
-          if (translation && translation.id !== selectedTranslationIdRef.current) {
-            handleSelectTranslation(translation);
-          }
-        }
-      }
-    };
-
-    window.addEventListener('hashchange', handleHashChange);
-    return () => window.removeEventListener('hashchange', handleHashChange);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [translations, translationsLoading]); // Remove selectedTranslationId from deps to avoid recreating listener
-
-  // Update URL hash when translation is manually selected (use replaceState to avoid hashchange event)
-  useEffect(() => {
-    if (selectedTranslationId && hasInitialized.current) {
-      const currentHash = window.location.hash.slice(1);
-      if (currentHash !== selectedTranslationId) {
-        isUpdatingHashRef.current = true;
-        // Use replaceState to avoid triggering hashchange event
-        window.history.replaceState(null, '', `${window.location.pathname}#${selectedTranslationId}`);
-        // Reset flag after a tick to allow future hashchange events
-        setTimeout(() => {
-          isUpdatingHashRef.current = false;
-        }, 100);
+      // Auto-select first language tab if languages exist
+      if (selectedTranslationFull.selectedLanguages && selectedTranslationFull.selectedLanguages.length > 0) {
+        setActiveLanguageTab(selectedTranslationFull.selectedLanguages[0]);
+      } else {
+        setActiveLanguageTab("");
       }
     }
-  }, [selectedTranslationId]);
+  }, [selectedTranslationFull, selectedTranslationId]);
 
   // Create new translation mutation
   const createMutation = useMutation({
@@ -394,12 +378,36 @@ export default function Translate() {
       return await apiRequest("DELETE", `/api/translations/${id}`, {});
     },
     onSuccess: (_, deletedId) => {
+      // Find the index of deleted translation to navigate to next/previous
+      const deletedIndex = translations.findIndex(t => t.id === deletedId);
+      
+      // Determine next translation to select
+      let nextTranslation: TranslationMetadata | null = null;
+      if (deletedIndex !== -1) {
+        // Try next translation first
+        if (deletedIndex < translations.length - 1) {
+          nextTranslation = translations[deletedIndex + 1];
+        }
+        // If no next, try previous
+        else if (deletedIndex > 0) {
+          nextTranslation = translations[deletedIndex - 1];
+        }
+      }
+      
       queryClient.invalidateQueries({ queryKey: ["/api/translations"] });
+      
       if (selectedTranslationId === deletedId) {
-        setSelectedTranslationId(null);
-        setSelectedTranslationData(null);
-        setSourceText("");
-        setTitle("Untitled Translation");
+        if (nextTranslation) {
+          // Navigate to next/previous translation
+          setLocation(`/translate/${nextTranslation.id}`);
+        } else {
+          // No translations left, go to base translate page
+          setSelectedTranslationId(null);
+          setSelectedTranslationData(null);
+          setSourceText("");
+          setTitle("Untitled Translation");
+          setLocation('/translate');
+        }
       }
       setDeleteConfirmId(null);
       toast({
@@ -607,7 +615,7 @@ export default function Translate() {
     if (!selectedTranslationId) return;
     
     try {
-      const shareUrl = `${window.location.origin}${window.location.pathname}#${selectedTranslationId}`;
+      const shareUrl = `${window.location.origin}/translate/${selectedTranslationId}`;
       await navigator.clipboard.writeText(shareUrl);
       
       setCopiedLink(true);
@@ -643,35 +651,16 @@ export default function Translate() {
     });
   };
 
-  const handleSelectTranslation = (translation: Translation) => {
+  const handleSelectTranslation = (translation: TranslationMetadata | Translation) => {
     // Check for unsaved changes
     if (hasUnsavedChanges) {
-      setUnsavedChangesAction({ type: 'switch', data: translation });
+      setUnsavedChangesAction({ type: 'switch', data: translation as Translation });
       return;
     }
     
-    setSelectedTranslationId(translation.id);
-    setSelectedTranslationData(translation); // Store full object for immediate canEdit checks
-    setSourceText(translation.sourceText);
-    setTitle(translation.title);
-    setSelectedLanguages(translation.selectedLanguages || []);
-    setIsPrivate(translation.isPrivate ?? false);
-    // Pre-select the last used model if available
-    if (translation.lastUsedModelId) {
-      setSelectedModel(translation.lastUsedModelId);
-    }
+    // Navigate to the translation URL - state will be populated by the effect watching selectedTranslationFull
     setEditedOutputs({});
-    setHasUnsavedChanges(false);
-    setLastSavedContent(translation.sourceText);
-    // Don't clear progress state - preserve it per translation ID
-    // Progress is tracked per translation ID, so switching cards doesn't lose progress
-    
-    // Auto-select first language tab if languages exist
-    if (translation.selectedLanguages && translation.selectedLanguages.length > 0) {
-      setActiveLanguageTab(translation.selectedLanguages[0]);
-    } else {
-      setActiveLanguageTab("");
-    }
+    setLocation(`/translate/${translation.id}`);
   };
 
   const handleNewTranslation = () => {
@@ -734,31 +723,15 @@ export default function Translate() {
   const handleConfirmDiscardAndContinue = () => {
     if (!unsavedChangesAction) return;
     
+    // Clear unsaved changes flag first
+    setHasUnsavedChanges(false);
+    
     if (unsavedChangesAction.type === 'switch' && unsavedChangesAction.data) {
-      // Continue with switching translation
-      const translation = unsavedChangesAction.data;
-      setSelectedTranslationId(translation.id);
-      setSelectedTranslationData(translation); // Store full object for immediate canEdit checks
-      setSourceText(translation.sourceText);
-      setTitle(translation.title);
-      setSelectedLanguages(translation.selectedLanguages || []);
-      setIsPrivate(translation.isPrivate ?? false);
-      if (translation.lastUsedModelId) {
-        setSelectedModel(translation.lastUsedModelId);
-      }
+      // Navigate to the translation - state will be populated by the effect watching selectedTranslationFull
       setEditedOutputs({});
-      setHasUnsavedChanges(false);
-      setLastSavedContent(translation.sourceText);
-      
-      // Auto-select first language tab if languages exist
-      if (translation.selectedLanguages && translation.selectedLanguages.length > 0) {
-        setActiveLanguageTab(translation.selectedLanguages[0]);
-      } else {
-        setActiveLanguageTab("");
-      }
+      setLocation(`/translate/${unsavedChangesAction.data.id}`);
     } else if (unsavedChangesAction.type === 'new') {
       // Continue with creating new translation
-      setHasUnsavedChanges(false);
       createMutation.mutate();
     }
     
@@ -862,138 +835,56 @@ export default function Translate() {
 
     setIsImportingPdf(true);
     const importType = pdfImportType;
-    const fileName = file.name.replace(/\.pdf$/i, '');
-
-    // Update title early
-    if (!title || title === "Untitled Translation") {
-      setTitle(fileName);
-      setEditedTitle(fileName);
-    }
 
     try {
       const formData = new FormData();
       formData.append('pdf', file);
 
-      if (importType === 'quick') {
-        // Quick import - non-streaming
-        const response = await fetch('/api/pdf/quick-import', {
-          method: 'POST',
-          body: formData,
-          credentials: 'include',
-        });
+      const endpoint = importType === 'quick' ? '/api/pdf/quick-import' : '/api/pdf/deep-import';
+      
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        body: formData,
+        credentials: 'include',
+      });
 
-        if (!response.ok) {
-          const errorData = await response.json();
-          throw new Error(errorData.message || 'Failed to import PDF');
-        }
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.message || 'Failed to import PDF');
+      }
 
-        const data = await response.json() as { html: string; text: string; pageCount: number };
-        setSourceText(data.html);
+      const data = await response.json() as { html: string; text: string; pageCount: number };
 
-        // Save the changes
-        if (selectedTranslationId) {
-          updateMutation.mutate({
-            id: selectedTranslationId,
-            data: { 
-              sourceText: data.html, 
-              title: !title || title === "Untitled Translation" ? fileName : title 
-            },
-          });
-          // Mark as saved to clear unsaved changes indicator
-          setLastSavedContent(data.html);
-          setHasUnsavedChanges(false);
-        }
+      // Update the source text with the imported content
+      setSourceText(data.html);
+      
+      // Optionally update the translation title with the filename
+      const fileName = file.name.replace(/\.pdf$/i, '');
+      if (!title || title === "Untitled Translation") {
+        setTitle(fileName);
+        setEditedTitle(fileName);
+      }
 
-        const tempDiv = document.createElement('div');
-        tempDiv.innerHTML = data.html;
-        const charCount = tempDiv.textContent?.length || 0;
-
-        toast({
-          title: `✓ PDF imported successfully (Quick)`,
-          description: `"${fileName}" (${data.pageCount} page${data.pageCount !== 1 ? 's' : ''}, ${charCount.toLocaleString()} characters)`,
-        });
-      } else {
-        // Deep import - streaming for real-time updates
-        const response = await fetch('/api/pdf/deep-import-stream', {
-          method: 'POST',
-          body: formData,
-          credentials: 'include',
-        });
-
-        if (!response.ok) {
-          const errorData = await response.json();
-          throw new Error(errorData.message || 'Failed to import PDF');
-        }
-
-        const reader = response.body?.getReader();
-        if (!reader) throw new Error('No response body');
-
-        const decoder = new TextDecoder();
-        let accumulatedHtml = '';
-        let pageCount = 0;
-
-        // Process the SSE stream
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-
-          const text = decoder.decode(value, { stream: true });
-          const lines = text.split('\n');
-
-          for (const line of lines) {
-            if (line.startsWith('data: ')) {
-              try {
-                const data = JSON.parse(line.slice(6));
-                
-                if (data.type === 'start') {
-                  pageCount = data.pageCount;
-                } else if (data.type === 'chunk') {
-                  accumulatedHtml += data.content;
-                  // Update the editor in real-time
-                  setSourceText(accumulatedHtml);
-                } else if (data.type === 'complete') {
-                  // Final cleanup of html
-                  let finalHtml = data.html || accumulatedHtml;
-                  if (finalHtml.startsWith('```html')) {
-                    finalHtml = finalHtml.replace(/^```html\s*/, '').replace(/\s*```$/, '');
-                  } else if (finalHtml.startsWith('```')) {
-                    finalHtml = finalHtml.replace(/^```\s*/, '').replace(/\s*```$/, '');
-                  }
-                  setSourceText(finalHtml);
-                  accumulatedHtml = finalHtml;
-                } else if (data.type === 'error') {
-                  throw new Error(data.message);
-                }
-              } catch (parseError) {
-                // Skip invalid JSON lines
-              }
-            }
-          }
-        }
-
-        // Save the final content
-        if (selectedTranslationId && accumulatedHtml) {
-          updateMutation.mutate({
-            id: selectedTranslationId,
-            data: { 
-              sourceText: accumulatedHtml, 
-              title: !title || title === "Untitled Translation" ? fileName : title 
-            },
-          });
-          // Mark as saved to clear unsaved changes indicator
-          setLastSavedContent(accumulatedHtml);
-          setHasUnsavedChanges(false);
-        }
-
-        const tempDiv = document.createElement('div');
-        tempDiv.innerHTML = accumulatedHtml;
-        const charCount = tempDiv.textContent?.length || 0;
-
-        toast({
-          title: `✓ PDF imported successfully (Advanced)`,
-          description: `"${fileName}" (${pageCount} page${pageCount !== 1 ? 's' : ''}, ${charCount.toLocaleString()} characters)`,
+      // Save the changes if a translation is selected
+      if (selectedTranslationId) {
+        updateMutation.mutate({
+          id: selectedTranslationId,
+          data: { 
+            sourceText: data.html, 
+            title: !title || title === "Untitled Translation" ? fileName : title 
+          },
         });
       }
+
+      // Calculate character count
+      const tempDiv = document.createElement('div');
+      tempDiv.innerHTML = data.html;
+      const charCount = tempDiv.textContent?.length || 0;
+
+      toast({
+        title: `✓ PDF imported successfully (${importType === 'quick' ? 'Quick' : 'Deep'})`,
+        description: `"${fileName}" (${data.pageCount} page${data.pageCount !== 1 ? 's' : ''}, ${charCount.toLocaleString()} characters)`,
+      });
     } catch (error: unknown) {
       const message = (error as Error)?.message || "Failed to import PDF";
       toast({
@@ -1253,10 +1144,7 @@ export default function Translate() {
           <ToastAction
             altText="View translation"
             onClick={() => {
-              window.location.hash = currentTranslationId;
-              if (translation) {
-                handleSelectTranslation(translation);
-              }
+              setLocation(`/translate/${currentTranslationId}`);
             }}
           >
             View
@@ -1305,7 +1193,7 @@ export default function Translate() {
     if (!selectedTranslationId) return;
     
     try {
-      const shareUrl = `${window.location.origin}${window.location.pathname}#${selectedTranslationId}`;
+      const shareUrl = `${window.location.origin}/translate/${selectedTranslationId}`;
       await navigator.clipboard.writeText(shareUrl);
       
       setSharedOutputId(outputId);
@@ -1389,7 +1277,7 @@ export default function Translate() {
   }
 
   // Permission helper - check if user can edit a translation
-  const canEdit = (translation: Translation | null) => {
+  const canEdit = (translation: TranslationMetadata | Translation | null) => {
     if (!user || !translation) return false;
     
     // User can edit their own translations (public or private)
@@ -1402,7 +1290,7 @@ export default function Translate() {
   };
 
   // Helper to get ownership tooltip text
-  const getOwnershipTooltip = (translation: Translation) => {
+  const getOwnershipTooltip = (translation: TranslationMetadata | Translation) => {
     if (!user) return "";
     if (translation.userId === user.id) {
       return "Owned by me";
@@ -1418,10 +1306,8 @@ export default function Translate() {
     return `Owned by ${translation.userId}`;
   };
 
-  // Get currently selected translation - use stored data first (for newly created items), fall back to list lookup
-  const selectedTranslation = selectedTranslationData?.id === selectedTranslationId 
-    ? selectedTranslationData 
-    : translations.find(t => t.id === selectedTranslationId) || null;
+  // Get currently selected translation - use fetched full data first, fall back to stored data for newly created items
+  const selectedTranslation = selectedTranslationFull || selectedTranslationData;
   const canEditSelected = canEdit(selectedTranslation);
   const isMobile = useIsMobile();
 
@@ -1595,7 +1481,7 @@ export default function Translate() {
                           </div>
                         )}
                         <p className="text-xs text-muted-foreground mt-1 truncate">
-                          {new Date(translation.updatedAt!).toLocaleDateString()}
+                          {formatDate(translation.updatedAt)}
                         </p>
                       </div>
                       {canEdit(translation) && (
@@ -2371,7 +2257,7 @@ export default function Translate() {
                             )}
                           </div>
                           <div>
-                            Last Updated: {output.updatedAt ? formatDistanceToNow(new Date(output.updatedAt), { addSuffix: true }) : 'N/A'}
+                            Last Updated: {formatDate(output.updatedAt)}
                           </div>
                         </div>
                         <Button
@@ -2574,7 +2460,7 @@ export default function Translate() {
                             )}
                           </div>
                           <div>
-                            Last Updated: {output.updatedAt ? formatDistanceToNow(new Date(output.updatedAt), { addSuffix: true }) : 'N/A'}
+                            Last Updated: {formatDate(output.updatedAt)}
                           </div>
                         </div>
                         <Button

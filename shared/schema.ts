@@ -84,6 +84,9 @@ export type Translation = typeof translations.$inferSelect & {
   };
 };
 
+// Metadata type for sidebar - excludes sourceText for performance
+export type TranslationMetadata = Omit<Translation, 'sourceText'>;
+
 // Status enums for translation and proofreading
 export const translationStatusEnum = pgEnum('translation_status', ['pending', 'translating', 'completed', 'failed']);
 export const proofreadStatusEnum = pgEnum('proofread_status', ['pending', 'proof_reading', 'applying_proofread', 'completed', 'failed', 'skipped']);
@@ -323,6 +326,9 @@ export type Proofreading = typeof proofreadings.$inferSelect & {
   };
 };
 
+// Metadata type for sidebar - excludes sourceText for performance
+export type ProofreadingMetadata = Omit<Proofreading, 'sourceText'>;
+
 // Proofreading Outputs table (stores JSON results from LLM)
 export const proofreadingOutputs = pgTable("proofreading_outputs", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -353,3 +359,80 @@ export const insertProofreadingOutputSchema = createInsertSchema(proofreadingOut
 
 export type InsertProofreadingOutput = z.infer<typeof insertProofreadingOutputSchema>;
 export type ProofreadingOutput = typeof proofreadingOutputs.$inferSelect;
+
+// Image Translation projects table
+export const imageTranslations = pgTable("image_translations", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: 'cascade' }),
+  title: varchar("title", { length: 255 }).notNull(),
+  sourceImageBase64: text("source_image_base64").notNull(), // Base64 encoded image
+  sourceMimeType: varchar("source_mime_type", { length: 50 }).notNull(),
+  isPrivate: boolean("is_private").default(false).notNull(),
+  selectedLanguages: text("selected_languages").array(),
+  lastUsedModelId: varchar("last_used_model_id").references(() => aiModels.id),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const imageTranslationsRelations = relations(imageTranslations, ({ one, many }) => ({
+  user: one(users, {
+    fields: [imageTranslations.userId],
+    references: [users.id],
+  }),
+  outputs: many(imageTranslationOutputs),
+  lastUsedModel: one(aiModels, {
+    fields: [imageTranslations.lastUsedModelId],
+    references: [aiModels.id],
+  }),
+}));
+
+export const insertImageTranslationSchema = createInsertSchema(imageTranslations).omit({
+  id: true,
+  userId: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertImageTranslation = z.infer<typeof insertImageTranslationSchema>;
+export type ImageTranslation = typeof imageTranslations.$inferSelect & {
+  owner?: {
+    id: string;
+    email: string | null;
+    firstName: string | null;
+    lastName: string | null;
+  };
+};
+
+// Image Translation outputs table (stores individual language translations)
+export const imageTranslationOutputs = pgTable("image_translation_outputs", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  imageTranslationId: varchar("image_translation_id").notNull().references(() => imageTranslations.id, { onDelete: 'cascade' }),
+  languageCode: varchar("language_code", { length: 10 }).notNull(),
+  languageName: varchar("language_name", { length: 100 }).notNull(),
+  translatedImageBase64: text("translated_image_base64"), // Base64 encoded image
+  translatedMimeType: varchar("translated_mime_type", { length: 50 }),
+  modelId: varchar("model_id").references(() => aiModels.id),
+  status: translationStatusEnum("status").default('pending').notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const imageTranslationOutputsRelations = relations(imageTranslationOutputs, ({ one }) => ({
+  imageTranslation: one(imageTranslations, {
+    fields: [imageTranslationOutputs.imageTranslationId],
+    references: [imageTranslations.id],
+  }),
+  model: one(aiModels, {
+    fields: [imageTranslationOutputs.modelId],
+    references: [aiModels.id],
+  }),
+}));
+
+export const insertImageTranslationOutputSchema = createInsertSchema(imageTranslationOutputs).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertImageTranslationOutput = z.infer<typeof insertImageTranslationOutputSchema>;
+export type ImageTranslationOutput = typeof imageTranslationOutputs.$inferSelect;

@@ -9,6 +9,7 @@ import { AppHeader } from "@/components/app-header";
 import Landing from "@/pages/landing";
 import Translate from "@/pages/translate";
 import Proofread from "@/pages/proofread";
+import ImageTranslate from "@/pages/image-translate";
 import Feedback from "@/pages/feedback";
 import Settings from "@/pages/settings";
 import Privacy from "@/pages/privacy";
@@ -80,6 +81,37 @@ function ProtectedProofread() {
   return <Proofread />;
 }
 
+// Wrapper component to handle unauthenticated access to /image-translate
+function ProtectedImageTranslate() {
+  const { isAuthenticated, isLoading } = useAuth();
+  const { toast } = useToast();
+  const [_location, setLocation] = useLocation();
+
+  // Save this page as last visited
+  useSaveLastVisitedPage("/image-translate");
+
+  useEffect(() => {
+    if (!isLoading && !isAuthenticated) {
+      toast({
+        title: "Authentication Required",
+        description: "Please sign in to access image translation.",
+        variant: "default",
+      });
+      setLocation("/");
+    }
+  }, [isAuthenticated, isLoading, toast, setLocation]);
+
+  if (isLoading) {
+    return null;
+  }
+
+  if (!isAuthenticated) {
+    return null;
+  }
+
+  return <ImageTranslate />;
+}
+
 // Wrapper component to handle unauthenticated access to /feedback
 function ProtectedFeedback() {
   const { isAuthenticated, isLoading } = useAuth();
@@ -120,7 +152,12 @@ function Router() {
     if (lastPage === "/settings" && !user?.isAdmin) {
       return "/translate";
     }
-    return lastPage || "/translate";
+    // Valid protected pages
+    const validPages = ["/translate", "/proofread", "/image-translate", "/feedback"];
+    if (lastPage && (validPages.includes(lastPage) || (lastPage === "/settings" && user?.isAdmin))) {
+      return lastPage;
+    }
+    return "/translate";
   }, [getLastVisitedPage, user?.isAdmin]);
 
   return (
@@ -136,9 +173,15 @@ function Router() {
       
       {/* Protected proofread route */}
       <Route path="/proofread" component={ProtectedProofread} />
+      <Route path="/proofread/:id" component={ProtectedProofread} />
       
       {/* Protected translate route */}
       <Route path="/translate" component={ProtectedTranslate} />
+      <Route path="/translate/:id" component={ProtectedTranslate} />
+      
+      {/* Protected image translate route */}
+      <Route path="/image-translate" component={ProtectedImageTranslate} />
+      <Route path="/image-translate/:id" component={ProtectedImageTranslate} />
       
       {/* Protected feedback route */}
       <Route path="/feedback" component={ProtectedFeedback} />

@@ -364,6 +364,8 @@ export const RichTextEditor = forwardRef<RichTextEditorRef, RichTextEditorProps>
 }, ref) => {
   // Track when we're applying view-only highlights (shouldn't trigger onChange)
   const isApplyingHighlightsRef = useRef(false);
+  // Track when we're programmatically setting content (shouldn't trigger onChange)
+  const isSettingContentRef = useRef(false);
   
   // Memoize extensions to prevent duplicate warnings and unnecessary recreations
   // Each extension instance is created once and reused across renders
@@ -400,8 +402,8 @@ export const RichTextEditor = forwardRef<RichTextEditorRef, RichTextEditorProps>
     content,
     editable,
     onUpdate: ({ editor }) => {
-      // Skip onChange when applying view-only highlights to prevent false "unsaved changes"
-      if (isApplyingHighlightsRef.current) {
+      // Skip onChange when applying view-only highlights or programmatically setting content
+      if (isApplyingHighlightsRef.current || isSettingContentRef.current) {
         return;
       }
       onChange(editor.getHTML());
@@ -435,16 +437,28 @@ export const RichTextEditor = forwardRef<RichTextEditorRef, RichTextEditorProps>
     if (editor.isFocused) return;
     
     const currentContent = editor.getHTML();
-    const isEmpty = currentContent === '<p></p>' || currentContent === '';
-    const newIsEmpty = content === '<p></p>' || content === '' || !content;
     
-    // Don't update if both are empty or if content is the same
-    if ((isEmpty && newIsEmpty) || currentContent === content) {
+    // Normalize for comparison - treat empty states as equivalent
+    const normalizeContent = (c: string | null | undefined) => {
+      if (!c || c === '<p></p>' || c === '') return '';
+      return c;
+    };
+    
+    const normalizedCurrent = normalizeContent(currentContent);
+    const normalizedNew = normalizeContent(content);
+    
+    // Don't update if content is effectively the same
+    if (normalizedCurrent === normalizedNew) {
       return;
     }
     
-    // Update content
+    // Set flag to prevent onChange from firing (this is a programmatic update, not a user edit)
+    isSettingContentRef.current = true;
     editor.commands.setContent(content || '');
+    // Clear flag after a tick to allow future user edits to trigger onChange
+    setTimeout(() => {
+      isSettingContentRef.current = false;
+    }, 0);
   }, [content, editor]);
 
   // Cleanup on unmount

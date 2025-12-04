@@ -22,3 +22,17 @@ export function formatDate(date: Date | string | null | undefined): string {
   
   return `${formattedDate} (${relativeTime})`;
 }
+
+/**
+ * Format a date as relative time only "x ago"
+ * Example: "2 days ago"
+ */
+export function formatRelativeTime(date: Date | string | null | undefined): string {
+  if (!date) return 'N/A';
+  
+  const dateObj = typeof date === 'string' ? new Date(date) : date;
+  
+  if (isNaN(dateObj.getTime())) return 'N/A';
+  
+  return formatDistanceToNow(dateObj, { addSuffix: true });
+}

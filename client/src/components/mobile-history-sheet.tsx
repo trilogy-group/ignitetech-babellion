@@ -42,6 +42,10 @@ interface MobileHistorySheetProps {
   canEdit: (translation: TranslationMetadata | Translation | null) => boolean;
   getOwnershipTooltip: (translation: TranslationMetadata) => string;
   trigger?: React.ReactNode;
+  // Pagination props
+  hasNextPage?: boolean;
+  fetchNextPage?: () => void;
+  isFetchingNextPage?: boolean;
 }
 
 /**
@@ -77,6 +81,9 @@ export function MobileHistorySheet({
   canEdit,
   getOwnershipTooltip,
   trigger,
+  hasNextPage,
+  fetchNextPage,
+  isFetchingNextPage,
 }: MobileHistorySheetProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [isRenamingId, setIsRenamingId] = useState<string | null>(null);
@@ -108,7 +115,7 @@ export function MobileHistorySheet({
             </Button>
           )}
         </SheetTrigger>
-        <SheetContent side="bottom" className="h-[85vh] flex flex-col max-h-[85vh] w-full max-w-full">
+        <SheetContent side="bottom" className="h-[85vh] flex flex-col max-h-[85vh] w-full max-w-full pb-safe">
           <SheetHeader className="flex-shrink-0">
             <SheetTitle>History</SheetTitle>
           </SheetHeader>
@@ -122,7 +129,7 @@ export function MobileHistorySheet({
               }}
               disabled={isCreating}
               variant="outline"
-              className="w-full"
+              className="w-full h-11 min-h-touch"
             >
               {isCreating ? (
                 <Loader2 className="h-4 w-4 animate-spin mr-2" />
@@ -215,31 +222,31 @@ export function MobileHistorySheet({
                         </div>
                         {canEdit(translation) && (
                           <div
-                            className="flex items-center gap-0.5 sm:gap-1 flex-shrink-0"
+                            className="flex items-center gap-1 flex-shrink-0"
                             onClick={(e) => e.stopPropagation()}
                           >
                             <Button
                               variant="ghost"
                               size="icon"
-                              className="h-7 w-7 sm:h-8 sm:w-8"
+                              className="h-10 w-10 min-h-touch min-w-touch"
                               onClick={(e) => {
                                 e.stopPropagation();
                                 setIsRenamingId(translation.id);
                                 setRenameValue(translation.title);
                               }}
                             >
-                              <Pencil className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                              <Pencil className="h-4 w-4" />
                             </Button>
                             <Button
                               variant="ghost"
                               size="icon"
-                              className="h-7 w-7 sm:h-8 sm:w-8 text-destructive"
+                              className="h-10 w-10 min-h-touch min-w-touch text-destructive"
                               onClick={(e) => {
                                 e.stopPropagation();
                                 setDeleteConfirmId(translation.id);
                               }}
                             >
-                              <Trash2 className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                              <Trash2 className="h-4 w-4" />
                             </Button>
                           </div>
                         )}
@@ -247,6 +254,22 @@ export function MobileHistorySheet({
                     </Card>
                   ))}
                 </TooltipProvider>
+                
+                {/* Load More Button */}
+                {hasNextPage && fetchNextPage && (
+                  <Button
+                    variant="ghost"
+                    className="w-full mt-2 h-11 min-h-touch"
+                    onClick={fetchNextPage}
+                    disabled={isFetchingNextPage}
+                  >
+                    {isFetchingNextPage ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      "Load more"
+                    )}
+                  </Button>
+                )}
                 </div>
               )}
               </div>
@@ -268,13 +291,13 @@ export function MobileHistorySheet({
               outputs.
             </AlertDialogDescription>
           </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogFooter className="gap-2 flex-col sm:flex-row">
+            <AlertDialogCancel className="h-11 min-h-touch">Cancel</AlertDialogCancel>
             <AlertDialogAction
               onClick={() =>
                 deleteConfirmId && onDelete(deleteConfirmId)
               }
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90 h-11 min-h-touch"
             >
               Delete
             </AlertDialogAction>

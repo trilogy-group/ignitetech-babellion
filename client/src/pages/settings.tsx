@@ -532,19 +532,19 @@ export default function Settings() {
       <ScrollArea className="flex-1 min-h-0">
         <div className="container max-w-5xl py-4 sm:py-8 px-4 sm:px-6 lg:px-8 pb-12">
           <Tabs defaultValue="users" className="space-y-4 sm:space-y-6">
-        <TabsList className="w-full overflow-x-auto">
-          <TabsTrigger value="users" data-testid="tab-users" className="flex-shrink-0">Users</TabsTrigger>
-          <TabsTrigger value="analytics" data-testid="tab-analytics" className="flex-shrink-0">Analytics</TabsTrigger>
-          <TabsTrigger value="ai" data-testid="tab-ai" className="flex-shrink-0">AI</TabsTrigger>
-          <TabsTrigger value="proofread" data-testid="tab-proofread" className="flex-shrink-0">Proof Read</TabsTrigger>
-          <TabsTrigger value="translation" data-testid="tab-translation" className="flex-shrink-0">Translation</TabsTrigger>
+        <TabsList className="w-full overflow-x-auto scrollbar-hide scroll-shadow-x h-auto flex-wrap md:flex-nowrap justify-start gap-1 p-1">
+          <TabsTrigger value="users" data-testid="tab-users" className="flex-shrink-0 h-10 min-h-touch px-3">Users</TabsTrigger>
+          <TabsTrigger value="analytics" data-testid="tab-analytics" className="flex-shrink-0 h-10 min-h-touch px-3">Analytics</TabsTrigger>
+          <TabsTrigger value="ai" data-testid="tab-ai" className="flex-shrink-0 h-10 min-h-touch px-3">AI</TabsTrigger>
+          <TabsTrigger value="proofread" data-testid="tab-proofread" className="flex-shrink-0 h-10 min-h-touch px-3">Proof Read</TabsTrigger>
+          <TabsTrigger value="translation" data-testid="tab-translation" className="flex-shrink-0 h-10 min-h-touch px-3">Translation</TabsTrigger>
         </TabsList>
 
         {/* Analytics Tab */}
         <TabsContent value="analytics" className="space-y-6">
           {/* Period Filter */}
           <div className="flex items-center gap-2">
-            <span className="text-sm text-muted-foreground">Time Period:</span>
+            <span className="text-sm text-muted-foreground">Period:</span>
             <div className="flex gap-1">
               {(['30d', '60d', '90d', '1y'] as const).map((period) => (
                 <Button
@@ -561,7 +561,7 @@ export default function Settings() {
           </div>
 
           {/* Summary Cards */}
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+          <div className="grid gap-4 grid-cols-2 lg:grid-cols-4">
             <Card>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-sm font-medium">Text Translations</CardTitle>
@@ -1207,7 +1207,7 @@ export default function Settings() {
                       Add Model
                     </Button>
                   </DialogTrigger>
-                  <DialogContent>
+                  <DialogContent className="max-h-[90vh] overflow-y-auto">
                     <DialogHeader>
                       <DialogTitle>Add AI Model</DialogTitle>
                     </DialogHeader>
@@ -1220,6 +1220,7 @@ export default function Settings() {
                           value={newModel.name}
                           onChange={(e) => setNewModel({ ...newModel, name: e.target.value })}
                           data-testid="input-model-name"
+                          className="h-11 min-h-touch"
                         />
                       </div>
                       <div className="space-y-2">
@@ -1228,12 +1229,12 @@ export default function Settings() {
                           value={newModel.provider}
                           onValueChange={(value) => setNewModel({ ...newModel, provider: value })}
                         >
-                          <SelectTrigger id="model-provider" data-testid="select-model-provider">
+                          <SelectTrigger id="model-provider" data-testid="select-model-provider" className="h-11 min-h-touch">
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent>
-                            <SelectItem value="openai">OpenAI</SelectItem>
-                            <SelectItem value="anthropic">Anthropic</SelectItem>
+                            <SelectItem value="openai" className="min-h-touch">OpenAI</SelectItem>
+                            <SelectItem value="anthropic" className="min-h-touch">Anthropic</SelectItem>
                           </SelectContent>
                         </Select>
                       </div>
@@ -1245,23 +1246,26 @@ export default function Settings() {
                           value={newModel.modelIdentifier}
                           onChange={(e) => setNewModel({ ...newModel, modelIdentifier: e.target.value })}
                           data-testid="input-model-identifier"
+                          className="h-11 min-h-touch"
                         />
                       </div>
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 min-h-touch">
                         <Checkbox
                           id="model-default"
                           checked={newModel.isDefault}
                           onCheckedChange={(checked) => setNewModel({ ...newModel, isDefault: !!checked })}
                           data-testid="checkbox-model-default"
+                          className="h-5 w-5"
                         />
                         <Label htmlFor="model-default">Set as default model</Label>
                       </div>
                     </div>
-                    <DialogFooter>
+                    <DialogFooter className="gap-2">
                       <Button
                         onClick={() => addModelMutation.mutate(newModel)}
                         disabled={!newModel.name || !newModel.modelIdentifier || addModelMutation.isPending}
                         data-testid="button-create-model"
+                        className="h-11 min-h-touch flex-1 md:flex-none"
                       >
                         {addModelMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                         Add Model
@@ -1537,7 +1541,7 @@ export default function Settings() {
                       Add Language
                     </Button>
                   </DialogTrigger>
-                  <DialogContent>
+                  <DialogContent className="max-h-[90vh] overflow-y-auto">
                     <DialogHeader>
                       <DialogTitle>Add Language</DialogTitle>
                     </DialogHeader>
@@ -1550,6 +1554,7 @@ export default function Settings() {
                           value={newLanguage.code}
                           onChange={(e) => setNewLanguage({ ...newLanguage, code: e.target.value })}
                           data-testid="input-lang-code"
+                          className="h-11 min-h-touch"
                         />
                       </div>
                       <div className="space-y-2">
@@ -1560,6 +1565,7 @@ export default function Settings() {
                           value={newLanguage.name}
                           onChange={(e) => setNewLanguage({ ...newLanguage, name: e.target.value })}
                           data-testid="input-lang-name"
+                          className="h-11 min-h-touch"
                         />
                       </div>
                       <div className="space-y-2">
@@ -1570,14 +1576,16 @@ export default function Settings() {
                           value={newLanguage.nativeName}
                           onChange={(e) => setNewLanguage({ ...newLanguage, nativeName: e.target.value })}
                           data-testid="input-lang-native"
+                          className="h-11 min-h-touch"
                         />
                       </div>
                     </div>
-                    <DialogFooter>
+                    <DialogFooter className="gap-2">
                       <Button
                         onClick={() => addLanguageMutation.mutate(newLanguage)}
                         disabled={!newLanguage.code || !newLanguage.name || !newLanguage.nativeName || addLanguageMutation.isPending}
                         data-testid="button-create-language"
+                        className="h-11 min-h-touch flex-1 md:flex-none"
                       >
                         {addLanguageMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                         Add Language
@@ -1818,13 +1826,13 @@ export default function Settings() {
                         Add Rule
                       </Button>
                     </DialogTrigger>
-                    <DialogContent>
-                      <DialogHeader>
+                    <DialogContent className="max-h-[90vh] flex flex-col overflow-hidden">
+                      <DialogHeader className="flex-shrink-0">
                         <DialogTitle>Add Proofreading Rule</DialogTitle>
                       </DialogHeader>
-                      <div className="space-y-4 py-4">
+                      <div className="flex-1 overflow-y-auto space-y-4 py-4 px-1">
                         <div className="space-y-2">
-                          <div className="flex items-center justify-between gap-4">
+                          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                             <div className="flex-1 space-y-2">
                               <Label htmlFor="rule-title">Rule Title</Label>
                               <Input
@@ -1832,9 +1840,10 @@ export default function Settings() {
                                 placeholder="e.g., Check for passive voice"
                                 value={newRule.title}
                                 onChange={(e) => setNewRule({ ...newRule, title: e.target.value })}
+                                className="h-11 min-h-touch"
                               />
                             </div>
-                            <div className="flex items-center gap-2 pt-8">
+                            <div className="flex items-center gap-2 md:pt-8">
                               <Switch
                                 checked={newRule.isActive}
                                 onCheckedChange={(checked) => setNewRule({ ...newRule, isActive: !!checked })}
@@ -1851,7 +1860,7 @@ export default function Settings() {
                                 variant="outline"
                                 role="combobox"
                                 aria-expanded={isCategoryDropdownOpen}
-                                className="w-full justify-between"
+                                className="w-full justify-between h-11 min-h-touch"
                                 id="rule-category"
                               >
                                 {newRule.categoryId
@@ -1904,6 +1913,7 @@ export default function Settings() {
                                           setNewCategoryName("");
                                           setIsCategoryDropdownOpen(false);
                                         }}
+                                        className="min-h-touch"
                                       >
                                         <Check
                                           className={cn(
@@ -1932,11 +1942,11 @@ export default function Settings() {
                             placeholder="Describe the rule in detail..."
                             value={newRule.ruleText}
                             onChange={(e) => setNewRule({ ...newRule, ruleText: e.target.value })}
-                            className="min-h-64"
+                            className="min-h-40 md:min-h-64"
                           />
                         </div>
                       </div>
-                      <DialogFooter>
+                      <DialogFooter className="flex-shrink-0 gap-2">
                         <Button
                           onClick={() => {
                             // Ensure categoryName is set if categoryId is not set
@@ -1947,6 +1957,7 @@ export default function Settings() {
                             addRuleMutation.mutate(ruleToSave);
                           }}
                           disabled={!newRule.title || (!newRule.categoryId && !newRule.categoryName && !newCategoryName) || !newRule.ruleText || addRuleMutation.isPending}
+                          className="h-11 min-h-touch flex-1 md:flex-none"
                         >
                           {addRuleMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                           Add Rule
@@ -2029,24 +2040,25 @@ export default function Settings() {
               setEditCategoryName("");
             }
           }}>
-            <DialogContent>
-              <DialogHeader>
+            <DialogContent className="max-h-[90vh] flex flex-col overflow-hidden">
+              <DialogHeader className="flex-shrink-0">
                 <DialogTitle>Edit Proofreading Rule</DialogTitle>
               </DialogHeader>
               {editingRule && (
                 <>
-                  <div className="space-y-4 py-4">
+                  <div className="flex-1 overflow-y-auto space-y-4 py-4 px-1">
                     <div className="space-y-2">
-                      <div className="flex items-center justify-between gap-4">
+                      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                         <div className="flex-1 space-y-2">
                           <Label htmlFor="edit-rule-title">Rule Title</Label>
                           <Input
                             id="edit-rule-title"
                             value={editingRule.title}
                             onChange={(e) => setEditingRule({ ...editingRule, title: e.target.value })}
+                            className="h-11 min-h-touch"
                           />
                         </div>
-                        <div className="flex items-center gap-2 pt-8">
+                        <div className="flex items-center gap-2 md:pt-8">
                           <Switch
                             checked={editingRule.isActive}
                             onCheckedChange={(checked) => setEditingRule({ ...editingRule, isActive: checked })}
@@ -2063,7 +2075,7 @@ export default function Settings() {
                             variant="outline"
                             role="combobox"
                             aria-expanded={isEditCategoryDropdownOpen}
-                            className="w-full justify-between"
+                            className="w-full justify-between h-11 min-h-touch"
                             id="edit-rule-category"
                           >
                             {editingRule.categoryId
@@ -2116,6 +2128,7 @@ export default function Settings() {
                                       setEditCategoryName("");
                                       setIsEditCategoryDropdownOpen(false);
                                     }}
+                                    className="min-h-touch"
                                   >
                                     <Check
                                       className={cn(
@@ -2143,11 +2156,11 @@ export default function Settings() {
                         id="edit-rule-text"
                         value={editingRule.ruleText}
                         onChange={(e) => setEditingRule({ ...editingRule, ruleText: e.target.value })}
-                        className="min-h-64"
+                        className="min-h-40 md:min-h-64"
                       />
                     </div>
                   </div>
-                  <DialogFooter>
+                  <DialogFooter className="flex-shrink-0 gap-2">
                     <Button
                       onClick={() => {
                         const ruleData = editingRule as ProofreadingRule & { categoryName?: string };
@@ -2163,7 +2176,8 @@ export default function Settings() {
                         });
                         setEditCategoryName("");
                       }}
-                          disabled={!editingRule.title || (!editingRule.categoryId && !editCategoryName) || !editingRule.ruleText || updateRuleMutation.isPending}
+                      disabled={!editingRule.title || (!editingRule.categoryId && !editCategoryName) || !editingRule.ruleText || updateRuleMutation.isPending}
+                      className="h-11 min-h-touch flex-1 md:flex-none"
                     >
                       {updateRuleMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                       Save Changes

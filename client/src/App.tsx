@@ -118,6 +118,9 @@ function ProtectedFeedback() {
   const { toast } = useToast();
   const [_location, setLocation] = useLocation();
 
+  // Save this page as last visited
+  useSaveLastVisitedPage("/feedback");
+
   useEffect(() => {
     if (!isLoading && !isAuthenticated) {
       toast({
@@ -143,22 +146,29 @@ function ProtectedFeedback() {
 // Reference: javascript_log_in_with_replit blueprint
 function Router() {
   const { isAuthenticated, isLoading, user } = useAuth();
-  const { getLastVisitedPage } = useLastVisitedPage();
+  const { getLastVisitedPage, getLastVisitedBasePage } = useLastVisitedPage();
 
   // Get the last visited page or default to /translate
   const redirectPath = useMemo(() => {
     const lastPage = getLastVisitedPage();
+    const basePage = getLastVisitedBasePage();
+    
     // Only redirect to settings if user is admin
-    if (lastPage === "/settings" && !user?.isAdmin) {
+    if (basePage === "/settings" && !user?.isAdmin) {
       return "/translate";
     }
-    // Valid protected pages
-    const validPages = ["/translate", "/proofread", "/image-translate", "/feedback"];
-    if (lastPage && (validPages.includes(lastPage) || (lastPage === "/settings" && user?.isAdmin))) {
+    
+    // Valid base pages (can have IDs appended for translate, proofread, image-translate)
+    const validBasePages = ["/translate", "/proofread", "/image-translate", "/feedback", "/settings"];
+    if (lastPage && basePage && validBasePages.includes(basePage)) {
+      // For settings, only allow admins
+      if (basePage === "/settings" && !user?.isAdmin) {
+        return "/translate";
+      }
       return lastPage;
     }
     return "/translate";
-  }, [getLastVisitedPage, user?.isAdmin]);
+  }, [getLastVisitedPage, getLastVisitedBasePage, user?.isAdmin]);
 
   return (
     <Switch>
@@ -226,3 +236,4 @@ function App() {
 }
 
 export default App;
+

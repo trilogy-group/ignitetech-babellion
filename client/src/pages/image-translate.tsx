@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation, useInfiniteQuery } from "@tanstack/react-query";
 import { Plus, Trash2, Loader2, Lock, Globe, Pencil, Save, X, RotateCw, ChevronLeft, ChevronRight, Search, Upload, ImageIcon, Download, ChevronsUpDown, Check, Languages, EllipsisVertical, Square } from "lucide-react";
-import { formatDate } from "@/lib/utils";
+import { formatDate, formatRelativeTime } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
@@ -62,6 +62,9 @@ import {
   CommandList,
 } from "@/components/ui/command";
 import { History } from "lucide-react";
+import { MobilePanelToggle, type PanelType } from "@/components/mobile-panel-toggle";
+import { StickyMobileToolbar } from "@/components/sticky-mobile-toolbar";
+import { CollapsibleControls } from "@/components/collapsible-controls";
 
 // Component to lazily load translated images
 function TranslatedImage({ 
@@ -72,7 +75,10 @@ function TranslatedImage({
   onDownload,
   canEdit,
   onRetranslate,
-  isRetranslating
+  isRetranslating,
+  modelName,
+  updatedAt,
+  isMobile
 }: { 
   outputId: string;
   title: string;
@@ -82,6 +88,9 @@ function TranslatedImage({
   canEdit: boolean;
   onRetranslate: () => void;
   isRetranslating: boolean;
+  modelName: string;
+  updatedAt: Date | string | null;
+  isMobile: boolean;
 }) {
   const { data: imageData, isLoading } = useQuery<{ translatedImageBase64: string | null; translatedMimeType: string | null }>({
     queryKey: ["/api/image-translation-outputs", outputId, "image"],
@@ -113,34 +122,10 @@ function TranslatedImage({
   const imageSrc = `data:${imageData.translatedMimeType};base64,${imageData.translatedImageBase64}`;
 
   return (
-    <div className="flex flex-col items-center h-full">
-      <div className="flex-1 flex items-center justify-center w-full">
-        <img
-          src={imageSrc}
-          alt={`${title} - ${languageName}`}
-          className="max-w-full max-h-full object-contain rounded-lg shadow-lg cursor-pointer hover:opacity-90 transition-opacity"
-          onClick={() => onPreview(imageSrc, `${title} - ${languageName}`)}
-          title="Click to view full size"
-        />
-      </div>
-      <div className="flex gap-2 mt-4 pb-2">
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button 
-              variant="outline" 
-              size="sm"
-              onClick={() => onDownload(imageData.translatedImageBase64!, imageData.translatedMimeType!)}
-            >
-              <Download className="h-4 w-4 mr-2" />
-              Download
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>
-            <p>Download translated image</p>
-          </TooltipContent>
-        </Tooltip>
-        
-        {canEdit && (
+    <div className="flex flex-col h-full">
+      {/* Retranslate button at top */}
+      {canEdit && (
+        <div className="flex justify-end pb-2 flex-shrink-0">
           <Tooltip>
             <TooltipTrigger asChild>
               <Button 
@@ -161,7 +146,43 @@ function TranslatedImage({
               <p>Retranslate this image</p>
             </TooltipContent>
           </Tooltip>
-        )}
+        </div>
+      )}
+      
+      {/* Image in the middle */}
+      <div className="flex-1 flex items-center justify-center w-full overflow-hidden">
+        <img
+          src={imageSrc}
+          alt={`${title} - ${languageName}`}
+          className="max-w-full max-h-full object-contain rounded-lg shadow-lg cursor-pointer hover:opacity-90 transition-opacity"
+          onClick={() => onPreview(imageSrc, `${title} - ${languageName}`)}
+          title="Click to view full size"
+        />
+      </div>
+      
+      {/* Footer: Model/Updated on left, Download on right */}
+      <div className="flex items-center justify-between pt-2 flex-shrink-0">
+        <div className="text-xs text-muted-foreground space-y-0.5">
+          <div>Model: {modelName}</div>
+          <div>
+            {isMobile ? `Updated: ${formatRelativeTime(updatedAt)}` : `Last Updated: ${formatDate(updatedAt)}`}
+          </div>
+        </div>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button 
+              variant="outline" 
+              size="sm"
+              onClick={() => onDownload(imageData.translatedImageBase64!, imageData.translatedMimeType!)}
+            >
+              <Download className="h-4 w-4 mr-2" />
+              Download
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>
+            <p>Download translated image</p>
+          </TooltipContent>
+        </Tooltip>
       </div>
     </div>
   );
@@ -179,6 +200,7 @@ export default function ImageTranslate() {
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [editedTitle, setEditedTitle] = useState("");
   const [isLanguagePopoverOpen, setIsLanguagePopoverOpen] = useState(false);
+  const [isMobileLanguagePopoverOpen, setIsMobileLanguagePopoverOpen] = useState(false);
   const [activeLanguageTab, setActiveLanguageTab] = useState<string>("");
   const [isPrivate, setIsPrivate] = useState(false);
   const [translatingLanguages, setTranslatingLanguages] = useState<Record<string, Set<string>>>({});
@@ -198,6 +220,7 @@ export default function ImageTranslate() {
   const isMobile = useIsMobile();
   const [mobileHistoryOpen, setMobileHistoryOpen] = useState(false);
   const [previewImage, setPreviewImage] = useState<{ src: string; alt: string } | null>(null);
+  const [mobileActivePanel, setMobileActivePanel] = useState<PanelType>('source');
 
   // Auto-focus search input when expanded
   useEffect(() => {
@@ -1115,19 +1138,21 @@ export default function ImageTranslate() {
 
         {/* Main Content */}
         <div className="flex-1 flex flex-col overflow-hidden">
-          {/* Header - Single Row */}
-          <div className="border-b p-4 flex items-center gap-4">
-            {/* Left side: Mobile history trigger + Title + Public/Private toggle */}
-            <div className="flex items-center gap-2 min-w-0">
+          {/* Header */}
+          <div className="border-b p-3 md:p-4">
+            {/* Top row: Title + actions */}
+            <div className="flex items-center gap-2 md:gap-4">
+              {/* Left side: Mobile history trigger + Title */}
+              <div className="flex items-center gap-2 min-w-0 flex-1">
               {/* Mobile history trigger */}
               {isMobile && (
                 <Sheet open={mobileHistoryOpen} onOpenChange={setMobileHistoryOpen}>
                   <SheetTrigger asChild>
-                    <Button variant="ghost" size="icon">
+                      <Button variant="ghost" size="icon" className="h-10 w-10 min-h-touch min-w-touch">
                       <History className="h-4 w-4" />
                     </Button>
                   </SheetTrigger>
-                  <SheetContent side="bottom" className="h-[85vh] flex flex-col">
+                    <SheetContent side="bottom" className="h-[85vh] flex flex-col pb-safe">
                     <SheetHeader>
                       <SheetTitle>History</SheetTitle>
                     </SheetHeader>
@@ -1141,28 +1166,28 @@ export default function ImageTranslate() {
                   <Input
                     value={editedTitle}
                     onChange={(e) => setEditedTitle(e.target.value)}
-                    className="w-48"
+                      className="w-32 md:w-48"
                     autoFocus
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') handleSaveTitle();
                       if (e.key === 'Escape') setIsEditingTitle(false);
                     }}
                   />
-                  <Button size="icon" variant="ghost" onClick={handleSaveTitle} disabled={updateMutation.isPending}>
+                    <Button size="icon" variant="ghost" onClick={handleSaveTitle} disabled={updateMutation.isPending} className="h-10 w-10 min-h-touch min-w-touch">
                     {updateMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
                   </Button>
-                  <Button size="icon" variant="ghost" onClick={() => setIsEditingTitle(false)}>
+                    <Button size="icon" variant="ghost" onClick={() => setIsEditingTitle(false)} className="h-10 w-10 min-h-touch min-w-touch">
                     <X className="h-4 w-4" />
                   </Button>
                 </div>
               ) : (
                 <div className="flex items-center gap-2 min-w-0">
-                  <h1 className="text-lg font-semibold truncate">{title}</h1>
+                    <h1 className="text-base md:text-lg font-semibold truncate">{title}</h1>
                   {canEditSelected && (
                     <Button
                       variant="ghost"
                       size="icon"
-                      className="h-6 w-6"
+                        className="h-8 w-8"
                       onClick={() => {
                         setEditedTitle(title);
                         setIsEditingTitle(true);
@@ -1173,56 +1198,52 @@ export default function ImageTranslate() {
                   )}
                 </div>
               )}
-              
-              {/* Public/Private Toggle */}
-              {canEditSelected && selectedImageTranslation && (
-                <div className="flex items-center gap-2 ml-2">
-                  <button
-                    type="button"
-                    role="switch"
-                    aria-checked={isPrivate}
-                    onClick={async () => {
-                      const newValue = !isPrivate;
-                      setIsPrivate(newValue);
-                      await updateMutation.mutateAsync({
-                        id: selectedImageTranslationId!,
-                        data: { isPrivate: newValue },
-                      });
-                    }}
-                    className={`
-                      relative inline-flex h-7 w-12 shrink-0 cursor-pointer items-center rounded-full 
-                      border border-gray-300 transition-colors duration-200
-                      focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2
-                      ${isPrivate ? 'bg-primary' : 'bg-input'}
-                    `}
-                  >
-                    <span
-                      className={`
-                        pointer-events-none flex h-5 w-5 items-center justify-center rounded-full 
-                        bg-background shadow-lg ring-0 transition-transform duration-200
-                        border border-gray-300
-                        ${isPrivate ? 'translate-x-6' : 'translate-x-0.5'}
-                      `}
-                    >
-                      {isPrivate ? (
-                        <Lock className="h-3 w-3 text-muted-foreground" />
-                      ) : (
-                        <Globe className="h-3 w-3 text-muted-foreground" />
-                      )}
-                    </span>
-                  </button>
-                  <Label className="text-sm">{isPrivate ? 'Private' : 'Public'}</Label>
-                </div>
-              )}
             </div>
             
-            {/* Spacer */}
-            <div className="flex-1" />
-            
-            {/* Right side: Model + Languages + Translate */}
-            <div className="flex items-center gap-2">
-              {canEditSelected && selectedImageTranslation && (
+              {/* Right side actions - Desktop: full controls, Mobile: upload only */}
+            <div className="flex items-center gap-4">
+                {/* Desktop controls */}
+                {!isMobile && canEditSelected && selectedImageTranslation && (
                 <>
+                  {/* Public/Private Toggle */}
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={isPrivate}
+                      onClick={async () => {
+                        const newValue = !isPrivate;
+                        setIsPrivate(newValue);
+                        await updateMutation.mutateAsync({
+                          id: selectedImageTranslationId!,
+                          data: { isPrivate: newValue },
+                        });
+                      }}
+                      className={`
+                        relative inline-flex h-7 w-12 shrink-0 cursor-pointer items-center rounded-full 
+                        border border-gray-300 transition-colors duration-200
+                        focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2
+                        ${isPrivate ? 'bg-primary' : 'bg-input'}
+                      `}
+                    >
+                      <span
+                        className={`
+                          pointer-events-none flex h-5 w-5 items-center justify-center rounded-full 
+                          bg-background shadow-lg ring-0 transition-transform duration-200
+                          border border-gray-300
+                          ${isPrivate ? 'translate-x-6' : 'translate-x-0.5'}
+                        `}
+                      >
+                        {isPrivate ? (
+                          <Lock className="h-3 w-3 text-muted-foreground" />
+                        ) : (
+                          <Globe className="h-3 w-3 text-muted-foreground" />
+                        )}
+                      </span>
+                    </button>
+                    <Label className="text-sm">{isPrivate ? 'Private' : 'Public'}</Label>
+                  </div>
+
                   {/* Model Display (hardcoded) */}
                   <div className="flex items-center gap-2">
                     <Label className="text-sm font-medium whitespace-nowrap">Model:</Label>
@@ -1291,74 +1312,203 @@ export default function ImageTranslate() {
                 </>
               )}
               
+                {/* Mobile upload button */}
               {isMobile && (
                 <Button
                   variant="outline"
                   onClick={() => fileInputRef.current?.click()}
                   disabled={isUploading}
+                    className="h-10 w-10 min-h-touch min-w-touch p-0"
                 >
                   {isUploading ? (
                     <Loader2 className="h-4 w-4 animate-spin" />
                   ) : (
-                    <Upload className="h-4 w-4" />
+                    <Plus className="h-4 w-4" />
                   )}
                 </Button>
               )}
+              </div>
             </div>
           </div>
 
-          {/* Content Area */}
-          <div className="flex-1 flex overflow-hidden">
-            {/* Source Image Panel */}
-            <div className="flex-1 p-4 overflow-auto border-r">
-              {sourceImageLoading ? (
-                <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
-                  <Loader2 className="h-8 w-8 animate-spin mb-4" />
-                  <p>Loading image...</p>
-                </div>
-              ) : sourceImageData?.sourceImageBase64 ? (
-                <div className="flex items-center justify-center h-full">
-                  <img
-                    src={`data:${sourceImageData.sourceMimeType};base64,${sourceImageData.sourceImageBase64}`}
-                    alt={selectedImageTranslation?.title || 'Source image'}
-                    className="max-w-full max-h-full object-contain rounded-lg shadow-lg cursor-pointer hover:opacity-90 transition-opacity"
-                    onClick={() => setPreviewImage({
-                      src: `data:${sourceImageData.sourceMimeType};base64,${sourceImageData.sourceImageBase64}`,
-                      alt: `${selectedImageTranslation?.title || 'Image'} - Original`
-                    })}
-                    title="Click to view full size"
-                  />
-                </div>
-              ) : selectedImageTranslation ? (
-                <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
-                  <ImageIcon className="h-16 w-16 mb-4" />
-                  <p>No image loaded</p>
-                </div>
-              ) : (
-                <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
-                  <Upload className="h-16 w-16 mb-4" />
-                  <p className="text-lg mb-2">Upload an image to get started</p>
-                  <Button
-                    onClick={() => fileInputRef.current?.click()}
-                    disabled={isUploading}
-                    className="mt-4"
+          {/* Mobile Panel Toggle */}
+          {isMobile && selectedImageTranslation && (
+            <div className="p-3 border-b md:hidden">
+              <MobilePanelToggle
+                activePanel={mobileActivePanel}
+                onPanelChange={setMobileActivePanel}
+                sourceLabel="Source Image"
+                outputLabel="Translations"
+                sourceIcon={<ImageIcon className="h-4 w-4" />}
+                outputIcon={<Languages className="h-4 w-4" />}
+              />
+            </div>
+          )}
+
+          {/* Mobile collapsible controls */}
+          {isMobile && canEditSelected && selectedImageTranslation && (
+            <CollapsibleControls
+              title="Translation Options"
+              badge={selectedLanguages.length > 0 ? `${selectedLanguages.length} lang` : undefined}
+              modelName={IMAGE_TRANSLATION_MODEL.name}
+              className="md:hidden"
+            >
+              {/* Model info */}
+              <div className="flex items-center justify-between">
+                <Label className="text-sm font-medium">Model</Label>
+                <span className="text-sm text-muted-foreground">{IMAGE_TRANSLATION_MODEL.name}</span>
+              </div>
+
+              {/* Language selector */}
+              <div className="space-y-2">
+                <Label className="text-sm font-medium">Target Languages</Label>
+                <Popover open={isMobileLanguagePopoverOpen} onOpenChange={setIsMobileLanguagePopoverOpen}>
+                  <PopoverTrigger asChild>
+                    <Button 
+                      variant="outline" 
+                      role="combobox"
+                      aria-expanded={isMobileLanguagePopoverOpen}
+                      className="w-full justify-between h-11 min-h-touch"
+                      disabled={!sourceImageData?.sourceImageBase64}
+                    >
+                      {selectedLanguages.length === 0
+                        ? "Select languages..."
+                        : `${selectedLanguages.length} language${selectedLanguages.length > 1 ? 's' : ''} selected`}
+                      <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-[calc(100vw-2rem)] p-0" align="start">
+                    <Command>
+                      <CommandInput placeholder="Search languages..." />
+                      <CommandList>
+                        <CommandEmpty>No language found.</CommandEmpty>
+                        <CommandGroup>
+                          {languages.filter(l => l.isActive).map((lang) => (
+                            <CommandItem
+                              key={lang.code}
+                              value={`${lang.name} ${lang.nativeName}`}
+                              onSelect={() => handleLanguageToggle(lang.code)}
+                              className="min-h-touch"
+                            >
+                              <Check
+                                className={`mr-2 h-4 w-4 ${
+                                  selectedLanguages.includes(lang.code) ? "opacity-100" : "opacity-0"
+                                }`}
+                              />
+                              {lang.name} ({lang.nativeName})
+                            </CommandItem>
+                          ))}
+                        </CommandGroup>
+                      </CommandList>
+                    </Command>
+                  </PopoverContent>
+                </Popover>
+              </div>
+
+              {/* Public/Private toggle */}
+              <div className="flex items-center justify-between">
+                <Label className="text-sm font-medium">Visibility</Label>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={isPrivate}
+                    onClick={async () => {
+                      const newValue = !isPrivate;
+                      setIsPrivate(newValue);
+                      await updateMutation.mutateAsync({
+                        id: selectedImageTranslationId!,
+                        data: { isPrivate: newValue },
+                      });
+                    }}
+                    className={`
+                      relative inline-flex h-7 w-12 shrink-0 cursor-pointer items-center rounded-full 
+                      border border-gray-300 transition-colors duration-200
+                      focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2
+                      ${isPrivate ? 'bg-primary' : 'bg-input'}
+                    `}
                   >
-                    {isUploading ? (
-                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                    ) : (
-                      <Upload className="h-4 w-4 mr-2" />
-                    )}
-                    Choose Image
-                  </Button>
+                    <span
+                      className={`
+                        pointer-events-none flex h-5 w-5 items-center justify-center rounded-full 
+                        bg-background shadow-lg ring-0 transition-transform duration-200
+                        border border-gray-300
+                        ${isPrivate ? 'translate-x-6' : 'translate-x-0.5'}
+                      `}
+                    >
+                      {isPrivate ? (
+                        <Lock className="h-3 w-3 text-muted-foreground" />
+                      ) : (
+                        <Globe className="h-3 w-3 text-muted-foreground" />
+                      )}
+                    </span>
+                  </button>
+                  <span className="text-sm">{isPrivate ? 'Private' : 'Public'}</span>
+                </div>
+              </div>
+            </CollapsibleControls>
+          )}
+
+          {/* Content Area */}
+          <div className={`flex-1 flex overflow-hidden ${isMobile ? 'pb-20' : ''}`}>
+            {/* Source Image Panel - hide on mobile when output is active */}
+            <div className={`flex-1 p-3 md:p-4 overflow-hidden flex flex-col ${!isMobile ? 'border-r' : ''} ${isMobile && mobileActivePanel !== 'source' ? 'hidden' : ''}`}>
+              {/* Header to match translated panel's tabs height */}
+              {selectedImageTranslation && activeLanguages.length > 0 && (
+                <div className="shrink-0 h-10 flex items-center mb-2">
+                  <span className="text-sm font-medium text-muted-foreground">Original</span>
                 </div>
               )}
+              <div className="flex-1 overflow-auto flex flex-col">
+                {sourceImageLoading ? (
+                  <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
+                    <Loader2 className="h-8 w-8 animate-spin mb-4" />
+                    <p>Loading image...</p>
+                  </div>
+                ) : sourceImageData?.sourceImageBase64 ? (
+                  <div className="flex items-center justify-center flex-1">
+                    <img
+                      src={`data:${sourceImageData.sourceMimeType};base64,${sourceImageData.sourceImageBase64}`}
+                      alt={selectedImageTranslation?.title || 'Source image'}
+                      className="max-w-full max-h-full object-contain rounded-lg shadow-lg cursor-pointer hover:opacity-90 transition-opacity"
+                      onClick={() => setPreviewImage({
+                        src: `data:${sourceImageData.sourceMimeType};base64,${sourceImageData.sourceImageBase64}`,
+                        alt: `${selectedImageTranslation?.title || 'Image'} - Original`
+                      })}
+                      title="Click to view full size"
+                    />
+                  </div>
+                ) : selectedImageTranslation ? (
+                  <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
+                    <ImageIcon className="h-12 w-12 md:h-16 md:w-16 mb-4" />
+                    <p>No image loaded</p>
+                  </div>
+                ) : (
+                  <div className="flex flex-col items-center justify-center h-full text-muted-foreground px-4 text-center">
+                    <Upload className="h-12 w-12 md:h-16 md:w-16 mb-4" />
+                    <p className="text-base md:text-lg mb-2">Upload an image to get started</p>
+                    <Button
+                      onClick={() => fileInputRef.current?.click()}
+                      disabled={isUploading}
+                      className="mt-4 h-11 min-h-touch"
+                    >
+                      {isUploading ? (
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      ) : (
+                        <Upload className="h-4 w-4 mr-2" />
+                      )}
+                      Choose Image
+                    </Button>
+                  </div>
+                )}
+              </div>
             </div>
 
-            {/* Translated Images Panel */}
-            <div className="flex-1 p-4 overflow-hidden flex flex-col">
+            {/* Translated Images Panel - hide on mobile when source is active */}
+            <div className={`flex-1 p-3 md:p-4 overflow-hidden flex flex-col ${!isMobile ? 'border-l' : ''} ${isMobile && mobileActivePanel !== 'output' ? 'hidden' : ''}`}>
               {selectedImageTranslation && activeLanguages.length > 0 ? (
                 <Tabs value={activeLanguageTab} onValueChange={setActiveLanguageTab} className="flex-1 flex flex-col overflow-hidden">
-                  <TabsList className="shrink-0 flex-wrap h-auto justify-start">
+                  <TabsList className="shrink-0 h-10 justify-start overflow-x-auto max-w-full scrollbar-hide-mobile md:scrollbar-overlay mb-2">
                     {activeLanguages.map((lang) => {
                       const output = outputsByLanguage[lang.code];
                       const isTranslating = output?.status === 'translating' || currentTranslatingLanguages.has(lang.code);
@@ -1386,7 +1536,7 @@ export default function ImageTranslate() {
                     const isPollingStopped = output && stoppedPollingOutputs.has(output.id);
                     
                     return (
-                      <TabsContent key={lang.code} value={lang.code} className="flex-1 overflow-auto mt-4">
+                      <TabsContent key={lang.code} value={lang.code} className="flex-1 overflow-auto">
                         {isTranslating && isPollingStopped ? (
                           <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
                             <Square className="h-12 w-12 text-orange-500 fill-orange-500 mb-4" />
@@ -1464,6 +1614,9 @@ export default function ImageTranslate() {
                             canEdit={canEditSelected}
                             onRetranslate={() => handleRetranslate(lang.code)}
                             isRetranslating={currentTranslatingLanguages.has(lang.code)}
+                            modelName={IMAGE_TRANSLATION_MODEL.name}
+                            updatedAt={output.updatedAt}
+                            isMobile={isMobile}
                           />
                         ) : output?.status === 'failed' ? (
                           <div className="flex flex-col items-center justify-center h-full text-destructive">
@@ -1541,6 +1694,29 @@ export default function ImageTranslate() {
             )}
           </DialogContent>
         </Dialog>
+
+        {/* Mobile Sticky Action Bar */}
+        {isMobile && canEditSelected && selectedImageTranslation && (
+          <StickyMobileToolbar>
+            <Button
+              onClick={handleTranslateAll}
+              disabled={!sourceImageData?.sourceImageBase64 || selectedLanguages.length === 0 || isAnyTranslating}
+              className="flex-1 h-11 min-h-touch"
+            >
+              {isAnyTranslating ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Translating...
+                </>
+              ) : (
+                <>
+                  <Languages className="h-4 w-4 mr-2" />
+                  Translate ({selectedLanguages.length})
+                </>
+              )}
+            </Button>
+          </StickyMobileToolbar>
+        )}
       </div>
     </TooltipProvider>
   );

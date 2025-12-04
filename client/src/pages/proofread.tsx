@@ -1,11 +1,13 @@
 import { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation, useInfiniteQuery } from "@tanstack/react-query";
-import { useLocation } from "wouter";
+import { useLocation, useParams } from "wouter";
 import { Plus, Trash2, Loader2, Check, Lock, Globe, Pencil, FileText, Save, X, History, Code, ChevronDown, ArrowRight, Square, RotateCw, Search, ChevronLeft, ChevronRight, Copy, Share, Link2, Upload, Zap, Sparkles } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
+import { formatDate, formatRelativeTime } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
+import { HistoryCard } from "@/components/history-card";
 import { RichTextEditor, type RichTextEditorRef } from "@/components/rich-text-editor";
 import { GoogleDocsPicker } from "@/components/google-docs-picker";
 import { Badge } from "@/components/ui/badge";
@@ -68,6 +70,9 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { MobileHistorySheet } from "@/components/mobile-history-sheet";
+import { MobilePanelToggle, type PanelType } from "@/components/mobile-panel-toggle";
+import { StickyMobileToolbar } from "@/components/sticky-mobile-toolbar";
+import { CollapsibleControls } from "@/components/collapsible-controls";
 
 interface ProofreadingResult {
   rule: string;
@@ -93,11 +98,13 @@ export default function Proofread() {
   const { toast } = useToast();
   const { user } = useAuth();
   const [location, setLocation] = useLocation();
-  const [selectedProofreadingId, setSelectedProofreadingId] = useState<string | null>(null);
+  const params = useParams<{ id?: string }>();
+  const [selectedProofreadingId, setSelectedProofreadingId] = useState<string | null>(params.id || null);
   const [sourceText, setSourceText] = useState("");
   const [title, setTitle] = useState("Untitled Proofreading");
   const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
   const [isCategoryPopoverOpen, setIsCategoryPopoverOpen] = useState(false);
+  const [isMobileCategoryPopoverOpen, setIsMobileCategoryPopoverOpen] = useState(false);
   const [selectedModel, setSelectedModel] = useState<string>("");
   const [isRenamingId, setIsRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
@@ -239,6 +246,16 @@ export default function Proofread() {
     queryKey: ["/api/proofreading-categories"],
   });
 
+  // Fetch full proofreading data when a proofreading is selected
+  const { data: selectedProofreadingFull } = useQuery<Proofreading>({
+    queryKey: ["/api/proofreadings", selectedProofreadingId],
+    queryFn: async () => {
+      const response = await apiRequest("GET", `/api/proofreadings/${selectedProofreadingId}`);
+      return await response.json() as Proofreading;
+    },
+    enabled: !!selectedProofreadingId,
+  });
+
   // Fetch proofreading output for selected proofreading with polling
   const { data: output, isLoading: outputLoading } = useQuery<ProofreadingOutput | null>({
     queryKey: ["/api/proofreadings", selectedProofreadingId, "output"],
@@ -291,14 +308,6 @@ export default function Proofread() {
       setSelectedModel(defaultModel.id);
     }
   }, [defaultModel, selectedModel]);
-
-  // Track if we've initialized to avoid loops
-  const hasInitialized = useRef(false);
-  const selectedProofreadingIdRef = useRef<string | null>(null);
-  
-  useEffect(() => {
-    selectedProofreadingIdRef.current = selectedProofreadingId;
-  }, [selectedProofreadingId]);
 
   // Handle search
   const handleSearch = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -378,24 +387,43 @@ export default function Proofread() {
     }
   };
 
-  // Handle hash-based URL navigation on initial load only
+  // Sync selectedProofreadingId with URL params
   useEffect(() => {
-    if (!proofreadingsLoading && proofreadings.length > 0 && !hasInitialized.current && !selectedProofreadingId) {
-      hasInitialized.current = true;
-      const hash = window.location.hash.slice(1);
-      if (hash) {
-        const proofreading = proofreadings.find(p => p.id === hash);
-        if (proofreading) {
-          handleSelectProofreading(proofreading);
-          return;
-        }
-      }
+    if (params.id && params.id !== selectedProofreadingId) {
+      setSelectedProofreadingId(params.id);
+    }
+  }, [params.id, selectedProofreadingId]);
+
+  // Handle URL-based navigation - auto-select first item if none selected
+  useEffect(() => {
+    if (!proofreadingsLoading && proofreadings.length > 0 && !params.id) {
       const firstProofreading = proofreadings[0];
       if (firstProofreading) {
-        handleSelectProofreading(firstProofreading);
+        // Navigate to the first proofreading
+        setLocation(`/proofread/${firstProofreading.id}`, { replace: true });
       }
     }
-  }, [proofreadingsLoading, proofreadings, selectedProofreadingId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [proofreadingsLoading, proofreadings.length, params.id]);
+
+  // Populate state when full proofreading data is loaded
+  useEffect(() => {
+    if (selectedProofreadingFull && selectedProofreadingId) {
+      // IMPORTANT: Set lastSavedContent BEFORE sourceText to prevent false unsaved changes detection
+      setLastSavedContent(selectedProofreadingFull.sourceText);
+      setHasUnsavedChanges(false);
+      
+      setSelectedProofreadingData(selectedProofreadingFull);
+      setSourceText(selectedProofreadingFull.sourceText);
+      setTitle(selectedProofreadingFull.title);
+      setSelectedCategories(selectedProofreadingFull.selectedCategories || []);
+      setIsPrivate(selectedProofreadingFull.isPrivate ?? false);
+      if (selectedProofreadingFull.lastUsedModelId) {
+        setSelectedModel(selectedProofreadingFull.lastUsedModelId);
+      }
+      setSelectedCardIndex(null);
+    }
+  }, [selectedProofreadingFull, selectedProofreadingId]);
 
   // Warn user before leaving page with unsaved changes
   useEffect(() => {
@@ -409,41 +437,6 @@ export default function Proofread() {
     window.addEventListener('beforeunload', handleBeforeUnload);
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
   }, [hasUnsavedChanges]);
-
-  const isUpdatingHashRef = useRef(false);
-
-  useEffect(() => {
-    const handleHashChange = () => {
-      if (isUpdatingHashRef.current) {
-        return;
-      }
-      if (!proofreadingsLoading && proofreadings.length > 0) {
-        const hash = window.location.hash.slice(1);
-        if (hash) {
-          const proofreading = proofreadings.find(p => p.id === hash);
-          if (proofreading && proofreading.id !== selectedProofreadingIdRef.current) {
-            handleSelectProofreading(proofreading);
-          }
-        }
-      }
-    };
-
-    window.addEventListener('hashchange', handleHashChange);
-    return () => window.removeEventListener('hashchange', handleHashChange);
-  }, [proofreadings, proofreadingsLoading]);
-
-  useEffect(() => {
-    if (selectedProofreadingId && hasInitialized.current) {
-      const currentHash = window.location.hash.slice(1);
-      if (currentHash !== selectedProofreadingId) {
-        isUpdatingHashRef.current = true;
-        window.history.replaceState(null, '', `${window.location.pathname}#${selectedProofreadingId}`);
-        setTimeout(() => {
-          isUpdatingHashRef.current = false;
-        }, 100);
-      }
-    }
-  }, [selectedProofreadingId]);
 
   // Create new proofreading mutation
   const createMutation = useMutation({
@@ -490,10 +483,22 @@ export default function Proofread() {
     onSuccess: (_, deletedId) => {
       queryClient.invalidateQueries({ queryKey: ["/api/proofreadings"] });
       if (selectedProofreadingId === deletedId) {
-        setSelectedProofreadingId(null);
-        setSelectedProofreadingData(null);
-        setSourceText("");
-        setTitle("Untitled Proofreading");
+        // Find next item to navigate to
+        const currentIndex = proofreadings.findIndex(p => p.id === deletedId);
+        const remainingProofreadings = proofreadings.filter(p => p.id !== deletedId);
+        const nextProofreading = remainingProofreadings[currentIndex] || remainingProofreadings[currentIndex - 1];
+        
+        if (nextProofreading) {
+          // Navigate to next/previous proofreading
+          setLocation(`/proofread/${nextProofreading.id}`);
+        } else {
+          // No proofreadings left, go to base proofread page
+          setSelectedProofreadingId(null);
+          setSelectedProofreadingData(null);
+          setSourceText("");
+          setTitle("Untitled Proofreading");
+          setLocation('/proofread');
+        }
       }
       setDeleteConfirmId(null);
       toast({
@@ -666,20 +671,8 @@ export default function Proofread() {
     // Clear highlights before switching
     editorRef.current?.clearHighlights();
     
-    setSelectedProofreadingId(proofreading.id);
-    setSelectedProofreadingData(proofreading); // Store full object for immediate canEdit checks
-    setSourceText(proofreading.sourceText);
-    setTitle(proofreading.title);
-    setSelectedCategories(proofreading.selectedCategories || []);
-    setIsPrivate(proofreading.isPrivate ?? false);
-    if (proofreading.lastUsedModelId) {
-      setSelectedModel(proofreading.lastUsedModelId);
-    }
-    setSelectedCardIndex(null);
-    setHasUnsavedChanges(false);
-    setLastSavedContent(proofreading.sourceText);
-    
-    // Note: Status is now tracked via server-side polling, no need for local state
+    // Navigate to the proofreading URL - state will be populated by the effect watching selectedProofreadingFull
+    setLocation(`/proofread/${proofreading.id}`);
   };
 
   const handleNewProofreading = () => {
@@ -694,26 +687,15 @@ export default function Proofread() {
   const handleConfirmDiscardAndContinue = () => {
     if (!unsavedChangesAction) return;
     
+    // Clear unsaved changes flag first
+    setHasUnsavedChanges(false);
+    
     if (unsavedChangesAction.type === 'switch' && unsavedChangesAction.data) {
-      // Continue with switching proofreading
-      const proofreading = unsavedChangesAction.data;
+      // Navigate to the proofreading - state will be populated by the effect watching selectedProofreadingFull
       editorRef.current?.clearHighlights();
-      setSelectedProofreadingId(proofreading.id);
-      setSelectedProofreadingData(proofreading); // Store full object for immediate canEdit checks
-      setSourceText(proofreading.sourceText);
-      setTitle(proofreading.title);
-      setSelectedCategories(proofreading.selectedCategories || []);
-      setIsPrivate(proofreading.isPrivate ?? false);
-      if (proofreading.lastUsedModelId) {
-        setSelectedModel(proofreading.lastUsedModelId);
-      }
-      setSelectedCardIndex(null);
-      setHasUnsavedChanges(false);
-      setLastSavedContent(proofreading.sourceText);
-      // Note: Status is now tracked via server-side polling, no need for local state
+      setLocation(`/proofread/${unsavedChangesAction.data.id}`);
     } else if (unsavedChangesAction.type === 'new') {
       // Continue with creating new proofreading
-      setHasUnsavedChanges(false);
       createMutation.mutate();
     }
     
@@ -1386,12 +1368,11 @@ export default function Proofread() {
     return `Owned by ${proofreading.userId}`;
   };
 
-  // Use stored proofreading data first (for newly created items), fall back to list lookup
-  const selectedProofreading = selectedProofreadingData?.id === selectedProofreadingId 
-    ? selectedProofreadingData 
-    : proofreadings.find(p => p.id === selectedProofreadingId) || null;
+  // Get currently selected proofreading - use fetched full data first, fall back to stored data for newly created items
+  const selectedProofreading = selectedProofreadingFull || selectedProofreadingData;
   const canEditSelected = canEdit(selectedProofreading);
   const isMobile = useIsMobile();
+  const [mobileActivePanel, setMobileActivePanel] = useState<PanelType>('source');
   const activeCategories = categories.filter(c => c.isActive);
   const results = output?.results as unknown as ProofreadingResult[] | undefined;
 
@@ -1486,98 +1467,33 @@ export default function Proofread() {
                 {proofreadings.map((proofreading) => {
                   const isInProgress = proofreadingInProgress.has(proofreading.id);
                   return (
-                  <Card
+                    <HistoryCard
                     key={proofreading.id}
-                    className={`group cursor-pointer p-2 hover-elevate overflow-hidden ${
-                      selectedProofreadingId === proofreading.id ? "bg-sidebar-accent" : ""
-                    }`}
+                      item={proofreading}
+                      isSelected={selectedProofreadingId === proofreading.id}
+                      isRenaming={isRenamingId === proofreading.id}
+                      renameValue={renameValue}
+                      canEdit={canEdit(proofreading)}
+                      isLoading={isInProgress}
+                      loadingTooltip="Proofreading in progress..."
+                      ownershipTooltip={getOwnershipTooltip(proofreading)}
                     onClick={() => handleSelectProofreading(proofreading)}
-                  >
-                    <div className="flex items-start gap-2 min-w-0">
-                      {isInProgress ? (
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <div className="flex-shrink-0 pt-0.5">
-                              <Loader2 className="h-4 w-4 text-primary animate-spin" />
-                            </div>
-                          </TooltipTrigger>
-                          <TooltipContent side="right">
-                            <p>Proofreading in progress...</p>
-                          </TooltipContent>
-                        </Tooltip>
-                      ) : (
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <div className="flex-shrink-0 pt-0.5" onClick={(e) => e.stopPropagation()}>
-                              {proofreading.isPrivate ? (
-                                <Lock className="h-4 w-4 text-muted-foreground/60" />
-                              ) : (
-                                <Globe className="h-4 w-4 text-muted-foreground/60" />
-                              )}
-                            </div>
-                          </TooltipTrigger>
-                          <TooltipContent side="right">
-                            <p>{getOwnershipTooltip(proofreading)}</p>
-                          </TooltipContent>
-                        </Tooltip>
-                      )}
-                      <div className="flex-1 min-w-0">
-                        {isRenamingId === proofreading.id ? (
-                          <Input
-                            value={renameValue}
-                            onChange={(e) => setRenameValue(e.target.value)}
-                            onBlur={() => handleRenameInList(proofreading.id, renameValue)}
-                            onKeyDown={(e) => {
-                              if (e.key === "Enter") {
+                      onStartRename={() => {
+                        setIsRenamingId(proofreading.id);
+                        setRenameValue(proofreading.title);
+                      }}
+                      onRenameChange={setRenameValue}
+                      onRenameConfirm={() => {
                                 setIsEscapePressed(false);
                                 handleRenameInList(proofreading.id, renameValue);
-                              } else if (e.key === "Escape") {
+                      }}
+                      onRenameCancel={() => {
                                 setIsEscapePressed(true);
                                 setIsRenamingId(null);
-                              }
-                            }}
-                            autoFocus
-                            className="h-auto p-0 border-none focus-visible:ring-0"
-                            onClick={(e) => e.stopPropagation()}
-                          />
-                        ) : (
-                          <div className="flex items-center gap-2 min-w-0">
-                            <h3 className="text-sm font-medium truncate flex-1 min-w-0">{proofreading.title}</h3>
-                          </div>
-                        )}
-                        <p className="text-xs text-muted-foreground mt-1 truncate">
-                          {new Date(proofreading.updatedAt!).toLocaleDateString()}
-                        </p>
-                      </div>
-                      {canEdit(proofreading) && (
-                        <div className="flex items-center gap-1 invisible group-hover:visible flex-shrink-0">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-6 w-6"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setIsRenamingId(proofreading.id);
-                              setRenameValue(proofreading.title);
-                            }}
-                          >
-                            <Pencil className="h-3 w-3" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-6 w-6 text-destructive"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setDeleteConfirmId(proofreading.id);
-                            }}
-                          >
-                            <Trash2 className="h-3 w-3" />
-                          </Button>
-                        </div>
-                      )}
-                    </div>
-                  </Card>
+                      }}
+                      onDelete={() => setDeleteConfirmId(proofreading.id)}
+                      testIdPrefix="proofreading"
+                    />
                 );
                 })}
               </TooltipProvider>
@@ -1609,9 +1525,10 @@ export default function Proofread() {
         )}
       </div>
 
-      {/* Mobile History Sheet Button */}
+      {/* Mobile Header - History + Title + Edit + New */}
       {isMobile && (
-        <div className="flex items-center justify-between gap-2 border-b p-3 bg-background md:hidden">
+        <div className="flex items-center gap-2 border-b p-3 bg-background md:hidden">
+          {/* History button */}
           <MobileHistorySheet
             translations={proofreadings as unknown as Proofreading[]}
             isLoading={proofreadingsLoading}
@@ -1626,50 +1543,102 @@ export default function Proofread() {
             }}
             canEdit={canEdit as unknown as (p: Proofreading | null) => boolean}
             getOwnershipTooltip={getOwnershipTooltip as unknown as (p: Proofreading) => string}
+            hasNextPage={hasNextPage}
+            fetchNextPage={fetchNextPage}
+            isFetchingNextPage={isFetchingNextPage}
             trigger={
-              <Button variant="outline" size="sm" className="gap-2">
+              <Button variant="ghost" size="icon" className="h-10 w-10 min-h-touch min-w-touch flex-shrink-0">
                 <History className="h-4 w-4" />
-                History
-                {selectedProofreading && (
-                  <span className="text-xs text-muted-foreground truncate max-w-[120px]">
-                    {selectedProofreading.title}
-                  </span>
-                )}
               </Button>
             }
           />
+          
+          {/* Title + Edit */}
+          <div className="flex items-center gap-2 min-w-0 flex-1">
+            {isEditingTitle ? (
+              <div className="flex items-center gap-1 flex-1">
+                <Input
+                  value={editedTitle}
+                  onChange={(e) => setEditedTitle(e.target.value)}
+                  className="h-9 flex-1"
+                  autoFocus
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') handleSaveTitle();
+                    if (e.key === 'Escape') handleCancelEditingTitle();
+                  }}
+                />
+                <Button size="icon" variant="ghost" onClick={handleSaveTitle} disabled={updateMutation.isPending} className="h-10 w-10 min-h-touch min-w-touch flex-shrink-0">
+                  {updateMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                </Button>
+                <Button size="icon" variant="ghost" onClick={handleCancelEditingTitle} className="h-10 w-10 min-h-touch min-w-touch flex-shrink-0">
+                  <X className="h-4 w-4" />
+                </Button>
+              </div>
+            ) : (
+              <>
+                <h1 className="text-base font-semibold truncate flex-1">{title || "Untitled"}</h1>
+                {canEditSelected && selectedProofreadingId && (
           <Button
-            size="sm"
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 flex-shrink-0"
+                    onClick={handleStartEditingTitle}
+                  >
+                    <Pencil className="h-3 w-3" />
+                  </Button>
+                )}
+              </>
+            )}
+          </div>
+          
+          {/* New button (icon only) */}
+          <Button
+            size="icon"
             onClick={handleNewProofreading}
             disabled={createMutation.isPending}
             variant="outline"
-            className="gap-2"
+            className="h-10 w-10 min-h-touch min-w-touch flex-shrink-0"
           >
             {createMutation.isPending ? (
               <Loader2 className="h-4 w-4 animate-spin" />
             ) : (
               <Plus className="h-4 w-4" />
             )}
-            New
           </Button>
         </div>
       )}
 
-      {/* Main Content Area - Middle + Right panels */}
-      <div className="flex flex-1 flex-col md:flex-row min-w-0 md:overflow-hidden">
-        {/* Middle Panel - Input */}
-        <div className="flex flex-1 flex-col min-w-0 md:overflow-hidden">
-          <TooltipProvider delayDuration={100}>
-            <div className="flex flex-wrap items-center gap-2 border-b p-3 md:p-4">
-              {/* Categories Multi-Select */}
-              <div className="flex items-center gap-2 flex-shrink-0 w-full sm:w-auto">
-                <Label className="text-sm font-medium whitespace-nowrap">Rules:</Label>
-                <Popover open={isCategoryPopoverOpen} onOpenChange={setIsCategoryPopoverOpen}>
+      {/* Mobile Panel Toggle */}
+      {isMobile && selectedProofreadingId && (
+        <div className="p-3 border-b md:hidden">
+          <MobilePanelToggle
+            activePanel={mobileActivePanel}
+            onPanelChange={setMobileActivePanel}
+            sourceLabel="Editor"
+            outputLabel="Results"
+            sourceIcon={<FileText className="h-4 w-4" />}
+            outputIcon={<Check className="h-4 w-4" />}
+          />
+        </div>
+      )}
+
+      {/* Mobile Collapsible Controls */}
+      {isMobile && selectedProofreadingId && (
+        <CollapsibleControls
+          title="Proofreading Options"
+          badge={selectedCategories.length > 0 ? `${selectedCategories.length} rules` : undefined}
+          modelName={models.find(m => m.id === selectedModel)?.name}
+          className="md:hidden"
+        >
+          {/* Categories Selection */}
+          <div className="space-y-2">
+            <Label className="text-sm font-medium">Rules</Label>
+            <Popover open={isMobileCategoryPopoverOpen} onOpenChange={setIsMobileCategoryPopoverOpen}>
                   <PopoverTrigger asChild>
                     <Button
                       variant="outline"
                       role="combobox"
-                      className="w-full max-w-xs flex-1 justify-between"
+                  className="w-full justify-between h-11 min-h-touch"
                       disabled={!canEditSelected}
                     >
                       <span className="truncate">
@@ -1680,7 +1649,7 @@ export default function Proofread() {
                       <ChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                     </Button>
                   </PopoverTrigger>
-                  <PopoverContent className="w-[300px] p-0" align="start">
+              <PopoverContent className="w-[calc(100vw-2rem)] p-0" align="start">
                     <Command>
                       <CommandInput placeholder="Search categories..." />
                       <CommandEmpty>No categories found.</CommandEmpty>
@@ -1689,7 +1658,7 @@ export default function Proofread() {
                           <CommandItem
                             key={category.id}
                             onSelect={() => handleCategoryToggle(category.id)}
-                            className="cursor-pointer"
+                        className="cursor-pointer min-h-touch"
                           >
                             <div className="flex items-center gap-2 w-full">
                               <Checkbox
@@ -1708,12 +1677,109 @@ export default function Proofread() {
               </div>
 
               {/* Model Selection */}
-              <div className="flex items-center gap-2 flex-1 min-w-0 w-full sm:w-auto">
-                <Label className="text-sm font-medium whitespace-nowrap">Model:</Label>
+          <div className="space-y-2">
+            <Label className="text-sm font-medium">Model</Label>
                 <Select value={selectedModel} onValueChange={setSelectedModel} disabled={!canEditSelected}>
-                  <SelectTrigger className="w-full max-w-xs flex-1">
+              <SelectTrigger className="w-full h-11 min-h-touch">
                     <SelectValue placeholder="Select model..." />
                   </SelectTrigger>
+              <SelectContent>
+                {models.filter(m => m.isActive).map((model) => (
+                  <SelectItem key={model.id} value={model.id} className="min-h-touch">
+                    {model.name} {model.isDefault && "(Default)"}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </CollapsibleControls>
+      )}
+
+      {/* Main Content Wrapper - contains header + two columns */}
+      <div className="flex flex-1 flex-col min-w-0 overflow-hidden">
+        {/* Desktop Header Row - Title + Controls (like image-translate) */}
+        <div className="hidden md:flex items-center gap-4 border-b p-3 md:p-4">
+        {/* Left side: Title + Privacy Toggle */}
+        <div className="flex items-center gap-2 min-w-0 flex-1">
+          {isEditingTitle ? (
+            <div className="flex items-center gap-2">
+              <Input
+                value={editedTitle}
+                onChange={(e) => setEditedTitle(e.target.value)}
+                className="w-48"
+                autoFocus
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') handleSaveTitle();
+                  if (e.key === 'Escape') handleCancelEditingTitle();
+                }}
+              />
+              <Button size="icon" variant="ghost" onClick={handleSaveTitle} disabled={updateMutation.isPending} className="h-8 w-8">
+                {updateMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+              </Button>
+              <Button size="icon" variant="ghost" onClick={handleCancelEditingTitle} className="h-8 w-8">
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2 min-w-0">
+              <h1 className="text-lg font-semibold truncate">{title || "Untitled"}</h1>
+              {canEditSelected && selectedProofreadingId && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 flex-shrink-0"
+                  onClick={handleStartEditingTitle}
+                >
+                  <Pencil className="h-3 w-3" />
+                </Button>
+              )}
+            </div>
+          )}
+        </div>
+        
+        {/* Right side: Privacy Toggle, Model, Rules, Proofread Button */}
+        <div className="flex items-center gap-4 flex-shrink-0">
+          {/* Public/Private Toggle */}
+          {canEditSelected && selectedProofreadingId && (
+            <div className="flex items-center gap-2 flex-shrink-0">
+              <button
+                type="button"
+                role="switch"
+                aria-checked={isPrivate}
+                onClick={() => handleTogglePrivacy(!isPrivate)}
+                className={`
+                  relative inline-flex h-7 w-12 shrink-0 cursor-pointer items-center rounded-full 
+                  border border-gray-300 transition-colors duration-200
+                  focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2
+                  ${isPrivate ? 'bg-primary' : 'bg-input'}
+                `}
+              >
+                <span
+                  className={`
+                    pointer-events-none flex h-5 w-5 items-center justify-center rounded-full 
+                    bg-background shadow-lg ring-0 transition-transform duration-200
+                    border border-gray-300
+                    ${isPrivate ? 'translate-x-6' : 'translate-x-0.5'}
+                  `}
+                >
+                  {isPrivate ? (
+                    <Lock className="h-3 w-3 text-muted-foreground" />
+                  ) : (
+                    <Globe className="h-3 w-3 text-muted-foreground" />
+                  )}
+                </span>
+              </button>
+              <Label className="text-sm">{isPrivate ? 'Private' : 'Public'}</Label>
+            </div>
+          )}
+
+          {/* Model Selection */}
+          <div className="flex items-center gap-2">
+            <Label className="text-sm font-medium whitespace-nowrap">Model:</Label>
+            <Select value={selectedModel} onValueChange={setSelectedModel} disabled={!canEditSelected}>
+              <SelectTrigger className="w-40">
+                <SelectValue placeholder="Select..." />
+              </SelectTrigger>
                   <SelectContent>
                     {models.filter(m => m.isActive).map((model) => (
                       <SelectItem key={model.id} value={model.id}>
@@ -1724,23 +1790,73 @@ export default function Proofread() {
                 </Select>
               </div>
 
+          {/* Categories Multi-Select */}
+          <div className="flex items-center gap-2">
+            <Label className="text-sm font-medium whitespace-nowrap">Rules:</Label>
+            <Popover open={isCategoryPopoverOpen} onOpenChange={setIsCategoryPopoverOpen}>
+              <PopoverTrigger asChild>
+                <Button
+                  variant="outline"
+                  role="combobox"
+                  className="w-40 justify-between"
+                  disabled={!canEditSelected}
+                >
+                  <span className="truncate">
+                    {selectedCategories.length === 0
+                      ? "Select..."
+                      : `${selectedCategories.length} selected`}
+                  </span>
+                  <ChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-[300px] p-0" align="end">
+                <Command>
+                  <CommandInput placeholder="Search categories..." />
+                  <CommandEmpty>No categories found.</CommandEmpty>
+                  <CommandGroup className="max-h-64 overflow-auto">
+                    {activeCategories.map((category) => (
+                      <CommandItem
+                        key={category.id}
+                        onSelect={() => handleCategoryToggle(category.id)}
+                        className="cursor-pointer"
+                      >
+                        <div className="flex items-center gap-2 w-full">
+                          <Checkbox
+                            checked={selectedCategories.includes(category.id)}
+                            onCheckedChange={() => handleCategoryToggle(category.id)}
+                            onClick={(e) => e.stopPropagation()}
+                          />
+                          <span>{category.name}</span>
+                        </div>
+                      </CommandItem>
+                    ))}
+                  </CommandGroup>
+                </Command>
+              </PopoverContent>
+            </Popover>
+          </div>
+
               {/* Proofread Button */}
               <Button
                 onClick={handleProofread}
                 disabled={!selectedProofreadingId || !canEditSelected || (output?.status === 'processing' && !stoppedPollingOutputs.has(output.id)) || selectedCategories.length === 0 || !selectedModel || executeProofreadingMutation.isPending}
-                className="flex-shrink-0"
-                variant="outline"
               >
                 {executeProofreadingMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                 Proofread
               </Button>
             </div>
-          </TooltipProvider>
+      </div>
 
+      {/* Main Content Area - Two columns */}
+      <div className={`flex flex-1 flex-col md:flex-row min-w-0 overflow-hidden ${isMobile ? 'pb-20' : ''}`}>
+        {/* Left Column - Source Text */}
+        <div className={`flex flex-1 flex-col min-w-0 overflow-hidden ${isMobile && mobileActivePanel !== 'source' ? 'hidden' : ''}`}>
           <div className="flex-1 overflow-y-auto md:overflow-hidden p-4 md:p-6">
             <div className="flex h-full flex-col gap-3 md:gap-4">
+              {/* Mobile title section - only shown on mobile */}
+              {isMobile && (
               <div className="flex-shrink-0">
-                <div className="flex items-center gap-2 sm:gap-4">
+                  <div className="flex items-center gap-2">
                   <div className="flex-1 min-w-0">
                     {isEditingTitle ? (
                       <Input
@@ -1748,11 +1864,8 @@ export default function Proofread() {
                         onChange={(e) => setEditedTitle(e.target.value)}
                         onBlur={handleSaveTitle}
                         onKeyDown={(e) => {
-                          if (e.key === "Enter") {
-                            handleSaveTitle();
-                          } else if (e.key === "Escape") {
-                            handleCancelEditingTitle();
-                          }
+                            if (e.key === "Enter") handleSaveTitle();
+                            else if (e.key === "Escape") handleCancelEditingTitle();
                         }}
                         autoFocus
                         placeholder="Enter proofreading title..."
@@ -1769,31 +1882,22 @@ export default function Proofread() {
                   </div>
                   {selectedProofreadingId && (
                     <div className="flex items-center gap-2 flex-shrink-0">
-                      <div className="hidden sm:flex items-center gap-2">
-                        <Globe className="h-4 w-4 text-muted-foreground" />
-                        <span className="text-xs text-muted-foreground">Public</span>
-                      </div>
-                      <div className="sm:hidden">
                         {isPrivate ? (
                           <Lock className="h-4 w-4 text-muted-foreground" />
                         ) : (
                           <Globe className="h-4 w-4 text-muted-foreground" />
                         )}
-                      </div>
                       <Switch
                         checked={isPrivate}
                         onCheckedChange={handleTogglePrivacy}
                         disabled={!canEditSelected}
                         className="data-[state=checked]:bg-red-600 data-[state=unchecked]:bg-green-600"
                       />
-                      <div className="hidden sm:flex items-center gap-2">
-                        <span className="text-xs text-muted-foreground">Private</span>
-                        <Lock className="h-4 w-4 text-muted-foreground" />
-                      </div>
                     </div>
                   )}
                 </div>
               </div>
+              )}
 
               <div className="flex flex-1 flex-col min-h-0">
                 <div className="mb-2 flex items-center justify-between flex-shrink-0">
@@ -1992,15 +2096,15 @@ export default function Proofread() {
         </div>
 
         {/* Right Panel - Results */}
-        <div className="flex flex-1 flex-col min-w-0 border-t md:border-t-0 md:border-l md:overflow-hidden">
+        <div className={`flex flex-1 flex-col min-w-0 border-t md:border-t-0 md:border-l overflow-hidden ${isMobile && mobileActivePanel !== 'output' ? 'hidden' : ''}`}>
           <div className="border-b px-4 py-5 flex-shrink-0 flex items-center justify-between">
             <h2 className="text-lg font-semibold">Proofreading Results</h2>
             {results && results.length > 0 && (
               <Button
                 onClick={handleAcceptAll}
                 size="sm"
-                variant="default"
                 disabled={acceptAllInProgress}
+                className="bg-blue-700 hover:bg-blue-800 text-white"
               >
                 {acceptAllInProgress ? (
                   <>
@@ -2204,14 +2308,27 @@ export default function Proofread() {
             )}
           </div>
 
-          {/* Footer with Send to Translate button */}
+          {/* Footer with Model info and Send to Translate button */}
           {selectedProofreadingId && (
-            <div className="border-t px-4 py-3 flex-shrink-0 flex justify-end">
+            <div className="border-t px-4 py-3 flex-shrink-0 flex items-center justify-between">
+              {/* Model and Last Updated info */}
+              {output && results && results.length > 0 && (
+                <div className="text-xs text-muted-foreground space-y-0.5">
+                  <div>
+                    Model: {models.find(m => m.id === output.modelId)?.name || "Unknown"}
+                  </div>
+                  <div>
+                    {isMobile ? `Updated: ${formatRelativeTime(output.updatedAt)}` : `Last Updated: ${formatDate(output.updatedAt)}`}
+                  </div>
+                </div>
+              )}
+              {/* Spacer when no output */}
+              {(!output || !results || results.length === 0) && <div />}
               <Button
                 onClick={handleSendToTranslate}
                 disabled={sendToTranslateMutation.isPending}
                 size="sm"
-                variant="default"
+                variant="outline"
               >
                 {sendToTranslateMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                 <ArrowRight className="mr-2 h-4 w-4" />
@@ -2219,6 +2336,7 @@ export default function Proofread() {
               </Button>
             </div>
           )}
+        </div>
         </div>
       </div>
 
@@ -2296,6 +2414,20 @@ export default function Proofread() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Mobile Sticky Toolbar */}
+      {isMobile && selectedProofreadingId && (
+        <StickyMobileToolbar>
+          <Button
+            onClick={handleProofread}
+            disabled={!selectedProofreadingId || !canEditSelected || (output?.status === 'processing' && !stoppedPollingOutputs.has(output.id)) || selectedCategories.length === 0 || !selectedModel || executeProofreadingMutation.isPending}
+            className="flex-1 h-12"
+          >
+            {executeProofreadingMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+            Proofread
+          </Button>
+        </StickyMobileToolbar>
+      )}
     </div>
   );
 }

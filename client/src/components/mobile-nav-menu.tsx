@@ -1,5 +1,5 @@
 import React from "react";
-import { Settings as SettingsIcon, LogOut, MessageSquare, FileText } from "lucide-react";
+import { Settings as SettingsIcon, LogOut, MessageSquare, FileText, ImageIcon } from "lucide-react";
 import { useLocation } from "wouter";
 import {
   Sheet,
@@ -26,6 +26,7 @@ export function MobileNavMenu({ trigger }: MobileNavMenuProps) {
 
   const isProofread = location === "/proofread";
   const isTranslate = location === "/translate";
+  const isImageTranslate = location === "/image-translate";
   const isFeedback = location === "/feedback";
   const isSettings = location === "/settings";
 
@@ -76,6 +77,14 @@ export function MobileNavMenu({ trigger }: MobileNavMenuProps) {
           >
             <FileText className="mr-2 h-4 w-4" />
             Translate
+          </Button>
+          <Button
+            variant={isImageTranslate ? "secondary" : "ghost"}
+            className="w-full justify-start"
+            onClick={() => handleNavClick("/image-translate")}
+          >
+            <ImageIcon className="mr-2 h-4 w-4" />
+            Image Translation
           </Button>
           <Button
             variant={isFeedback ? "secondary" : "ghost"}

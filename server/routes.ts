@@ -8,6 +8,7 @@ import { encrypt } from "./encryption";
 import { translationService } from "./translationService";
 import { proofreadingService } from "./proofreadingService";
 import { pdfService } from "./pdfService";
+import { imageTranslationService } from "./imageTranslationService";
 import { getGoogleAuth, listGoogleDocs, getGoogleDocContent, createGoogleDoc } from "./googleDocsService";
 import {
   insertTranslationSchema,
@@ -18,6 +19,7 @@ import {
   insertProofreadingSchema,
   insertProofreadingRuleCategorySchema,
   insertProofreadingRuleSchema,
+  insertImageTranslationSchema,
 } from "@shared/schema";
 import { logInfo, logError } from "./vite";
 import { retryOnDatabaseError } from "./retry";
@@ -1373,6 +1375,502 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Error saving PDF cleanup model setting:", error);
       res.status(500).json({ message: "Failed to save setting" });
+    }
+  });
+
+  // ===== IMAGE TRANSLATION ROUTES =====
+
+  // Configure multer for image uploads (memory storage, max 10MB)
+  const imageUpload = multer({
+    storage: multer.memoryStorage(),
+    limits: {
+      fileSize: 10 * 1024 * 1024, // 10MB max file size
+    },
+    fileFilter: (_req, file, cb) => {
+      const allowedMimeTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+      if (allowedMimeTypes.includes(file.mimetype)) {
+        cb(null, true);
+      } else {
+        cb(new Error('Only JPEG, PNG, GIF, and WebP images are allowed'));
+      }
+    },
+  });
+
+  // Get paginated image translations
+  app.get("/api/image-translations", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.id;
+      const page = parseInt(req.query.page as string) || 1;
+      const limit = parseInt(req.query.limit as string) || 20;
+      const search = req.query.search as string | undefined;
+
+      const result = await storage.getImageTranslationsPaginated(userId, page, limit, search);
+      res.json(result);
+    } catch (error) {
+      console.error("Error fetching image translations:", error);
+      res.status(500).json({ message: "Failed to fetch image translations" });
+    }
+  });
+
+  // Get single image translation with outputs
+  app.get("/api/image-translations/:id", isAuthenticated, async (req: any, res) => {
+    try {
+      const imageTranslation = await storage.getImageTranslation(req.params.id);
+      if (!imageTranslation) {
+        return res.status(404).json({ message: "Image translation not found" });
+      }
+      // Check if user can access this image translation (owner OR public)
+      const isOwner = imageTranslation.userId === req.user.id;
+      const isPublic = !imageTranslation.isPrivate;
+      if (!isOwner && !isPublic) {
+        return res.status(403).json({ message: "Forbidden" });
+      }
+      res.json(imageTranslation);
+    } catch (error) {
+      console.error("Error fetching image translation:", error);
+      res.status(500).json({ message: "Failed to fetch image translation" });
+    }
+  });
+
+  // Create new image translation (upload image)
+  app.post("/api/image-translations", isAuthenticated, imageUpload.single('image'), async (req: any, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ message: "No image file provided" });
+      }
+
+      const userId = req.user.id;
+      const title = req.body.title || 'Untitled Image';
+      const isPrivate = req.body.isPrivate === 'true' || req.body.isPrivate === true;
+
+      // Convert buffer to base64
+      const sourceImageBase64 = req.file.buffer.toString('base64');
+      const sourceMimeType = req.file.mimetype;
+
+      const imageTranslation = await storage.createImageTranslation({
+        userId,
+        title,
+        sourceImageBase64,
+        sourceMimeType,
+        isPrivate,
+      });
+
+      res.json(imageTranslation);
+    } catch (error) {
+      console.error("Error creating image translation:", error);
+      res.status(400).json({ message: "Failed to create image translation" });
+    }
+  });
+
+  // Update image translation
+  app.patch("/api/image-translations/:id", isAuthenticated, async (req: any, res) => {
+    try {
+      const imageTranslation = await storage.getImageTranslation(req.params.id);
+      if (!imageTranslation) {
+        return res.status(404).json({ message: "Image translation not found" });
+      }
+      // Check if user owns the image translation or is admin (admins can only edit public)
+      const user = await storage.getUser(req.user.id);
+      const isOwner = imageTranslation.userId === req.user.id;
+      const isAdminEditingPublic = user?.isAdmin && !imageTranslation.isPrivate;
+      const canEdit = isOwner || isAdminEditingPublic;
+      if (!canEdit) {
+        return res.status(403).json({ message: "Forbidden" });
+      }
+      const updated = await storage.updateImageTranslation(req.params.id, req.body);
+      res.json(updated);
+    } catch (error) {
+      console.error("Error updating image translation:", error);
+      res.status(400).json({ message: "Failed to update image translation" });
+    }
+  });
+
+  // Delete image translation
+  app.delete("/api/image-translations/:id", isAuthenticated, async (req: any, res) => {
+    try {
+      const imageTranslation = await storage.getImageTranslation(req.params.id);
+      if (!imageTranslation) {
+        return res.status(404).json({ message: "Image translation not found" });
+      }
+      // Check if user owns the image translation or is admin (admins can only delete public)
+      const user = await storage.getUser(req.user.id);
+      const isOwner = imageTranslation.userId === req.user.id;
+      const isAdminDeletingPublic = user?.isAdmin && !imageTranslation.isPrivate;
+      const canDelete = isOwner || isAdminDeletingPublic;
+      if (!canDelete) {
+        return res.status(403).json({ message: "Forbidden" });
+      }
+      await storage.deleteImageTranslation(req.params.id);
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Error deleting image translation:", error);
+      res.status(500).json({ message: "Failed to delete image translation" });
+    }
+  });
+
+  // Get image translation metadata only (without source image)
+  app.get("/api/image-translations/:id/metadata", isAuthenticated, async (req: any, res) => {
+    try {
+      const metadata = await storage.getImageTranslationMetadata(req.params.id);
+      if (!metadata) {
+        return res.status(404).json({ message: "Image translation not found" });
+      }
+      const isOwner = metadata.userId === req.user.id;
+      const isPublic = !metadata.isPrivate;
+      if (!isOwner && !isPublic) {
+        return res.status(403).json({ message: "Forbidden" });
+      }
+      res.json(metadata);
+    } catch (error) {
+      console.error("Error fetching image translation metadata:", error);
+      res.status(500).json({ message: "Failed to fetch image translation metadata" });
+    }
+  });
+
+  // Get source image only
+  app.get("/api/image-translations/:id/source-image", isAuthenticated, async (req: any, res) => {
+    try {
+      const metadata = await storage.getImageTranslationMetadata(req.params.id);
+      if (!metadata) {
+        return res.status(404).json({ message: "Image translation not found" });
+      }
+      const isOwner = metadata.userId === req.user.id;
+      const isPublic = !metadata.isPrivate;
+      if (!isOwner && !isPublic) {
+        return res.status(403).json({ message: "Forbidden" });
+      }
+      const sourceImage = await storage.getImageTranslationSourceImage(req.params.id);
+      if (!sourceImage) {
+        return res.status(404).json({ message: "Source image not found" });
+      }
+      res.json(sourceImage);
+    } catch (error) {
+      console.error("Error fetching source image:", error);
+      res.status(500).json({ message: "Failed to fetch source image" });
+    }
+  });
+
+  // Get image translation outputs metadata only (without translated images)
+  app.get("/api/image-translations/:id/outputs-metadata", isAuthenticated, async (req: any, res) => {
+    try {
+      const metadata = await storage.getImageTranslationMetadata(req.params.id);
+      if (!metadata) {
+        return res.status(404).json({ message: "Image translation not found" });
+      }
+      const isOwner = metadata.userId === req.user.id;
+      const isPublic = !metadata.isPrivate;
+      if (!isOwner && !isPublic) {
+        return res.status(403).json({ message: "Forbidden" });
+      }
+      const outputs = await storage.getImageTranslationOutputsMetadata(req.params.id);
+      res.json(outputs);
+    } catch (error) {
+      console.error("Error fetching image translation outputs metadata:", error);
+      res.status(500).json({ message: "Failed to fetch image translation outputs metadata" });
+    }
+  });
+
+  // Get translated image only for a specific output
+  app.get("/api/image-translation-outputs/:outputId/image", isAuthenticated, async (req: any, res) => {
+    try {
+      const output = await storage.getImageTranslationOutput(req.params.outputId);
+      if (!output) {
+        return res.status(404).json({ message: "Output not found" });
+      }
+      const metadata = await storage.getImageTranslationMetadata(output.imageTranslationId);
+      if (!metadata) {
+        return res.status(404).json({ message: "Image translation not found" });
+      }
+      const isOwner = metadata.userId === req.user.id;
+      const isPublic = !metadata.isPrivate;
+      if (!isOwner && !isPublic) {
+        return res.status(403).json({ message: "Forbidden" });
+      }
+      const imageData = await storage.getImageTranslationOutputImage(req.params.outputId);
+      res.json(imageData);
+    } catch (error) {
+      console.error("Error fetching translated image:", error);
+      res.status(500).json({ message: "Failed to fetch translated image" });
+    }
+  });
+
+  // Get image translation outputs
+  app.get("/api/image-translations/:id/outputs", isAuthenticated, async (req: any, res) => {
+    try {
+      const imageTranslation = await storage.getImageTranslation(req.params.id);
+      if (!imageTranslation) {
+        return res.status(404).json({ message: "Image translation not found" });
+      }
+      // Check if user can access this image translation (owner OR public)
+      const isOwner = imageTranslation.userId === req.user.id;
+      const isPublic = !imageTranslation.isPrivate;
+      if (!isOwner && !isPublic) {
+        return res.status(403).json({ message: "Forbidden" });
+      }
+      const outputs = await storage.getImageTranslationOutputs(req.params.id);
+      res.json(outputs);
+    } catch (error) {
+      console.error("Error fetching image translation outputs:", error);
+      res.status(500).json({ message: "Failed to fetch outputs" });
+    }
+  });
+
+  // Translate image to a single language (async)
+  // Uses hardcoded model: Nano Banana Pro (gemini-3-pro-image-preview)
+  const IMAGE_TRANSLATION_MODEL = {
+    name: "Nano Banana Pro",
+    identifier: "gemini-3-pro-image-preview",
+  };
+
+  app.post("/api/translate-image-single", isAuthenticated, async (req: any, res) => {
+    try {
+      const { imageTranslationId, languageCode } = req.body;
+
+      // Verify user owns the image translation or is admin
+      const imageTranslation = await storage.getImageTranslation(imageTranslationId);
+      if (!imageTranslation) {
+        return res.status(404).json({ message: "Image translation not found" });
+      }
+      const user = await storage.getUser(req.user.id);
+      const isOwner = imageTranslation.userId === req.user.id;
+      const isAdminTranslatingPublic = user?.isAdmin && !imageTranslation.isPrivate;
+      const canTranslate = isOwner || isAdminTranslatingPublic;
+      if (!canTranslate) {
+        return res.status(403).json({ message: "Forbidden" });
+      }
+
+      // Get language details
+      const language = await storage.getLanguageByCode(languageCode);
+      if (!language) {
+        return res.status(404).json({ message: `Language not found: ${languageCode}` });
+      }
+
+      // Get system prompt
+      const promptSetting = await storage.getSetting('image_translation_system_prompt');
+      const systemPrompt = promptSetting?.value;
+
+      // Delete existing output for this language if any
+      const existingOutputs = await storage.getImageTranslationOutputs(imageTranslationId);
+      const existingOutput = existingOutputs.find(o => o.languageCode === languageCode);
+      if (existingOutput) {
+        await storage.deleteImageTranslationOutput(existingOutput.id);
+      }
+
+      // Log translation start
+      logInfo(`Translating image ${imageTranslationId} into ${language.name} using ${IMAGE_TRANSLATION_MODEL.name}`, "AI");
+
+      // Create output record with 'translating' status
+      const output = await storage.createImageTranslationOutput({
+        imageTranslationId,
+        languageCode: language.code,
+        languageName: language.name,
+        translatedImageBase64: null,
+        translatedMimeType: null,
+        status: 'translating',
+      });
+
+      // Start async job - don't await, return immediately
+      (async () => {
+        const translateStartTime = Date.now();
+        
+        try {
+          // Translate the image using hardcoded model
+          const result = await imageTranslationService.translateImage({
+            imageBase64: imageTranslation.sourceImageBase64,
+            mimeType: imageTranslation.sourceMimeType,
+            targetLanguage: language.name,
+            systemPrompt,
+            modelIdentifier: IMAGE_TRANSLATION_MODEL.identifier,
+          });
+
+          const translateTime = Math.round((Date.now() - translateStartTime) / 1000);
+          logInfo(`Translated image ${imageTranslationId} into ${language.name}, time: ${translateTime}s`, "AI");
+
+          // Update with translated image and mark as completed (with retry)
+          await retryOnDatabaseError(() => 
+            storage.updateImageTranslationOutput(output.id, {
+              translatedImageBase64: result.translatedImageBase64,
+              translatedMimeType: result.translatedMimeType,
+              status: 'completed',
+            })
+          );
+        } catch (error) {
+          const translateTime = Math.round((Date.now() - translateStartTime) / 1000);
+          logError(`Image translation failed ${imageTranslationId} into ${language.name}, time: ${translateTime}s`, "AI", error);
+          // Update status to failed with retry
+          await retryOnDatabaseError(() => 
+            storage.updateImageTranslationOutputStatus(output.id, 'failed')
+          );
+        }
+      })(); // Fire and forget - async job runs in background
+
+      // Return immediately with the output record (status: translating)
+      res.json(output);
+    } catch (error) {
+      console.error("Error starting image translation:", error);
+      res.status(500).json({ message: error instanceof Error ? error.message : "Failed to start image translation" });
+    }
+  });
+
+  // Get image translation system prompt setting
+  app.get("/api/settings/image-translation-prompt", isAuthenticated, async (req, res) => {
+    try {
+      const setting = await storage.getSetting('image_translation_system_prompt');
+      res.json({ 
+        value: setting?.value || '',
+        isDefault: !setting?.value
+      });
+    } catch (error) {
+      console.error("Error fetching image translation prompt setting:", error);
+      res.status(500).json({ message: "Failed to fetch setting" });
+    }
+  });
+
+  // Update image translation system prompt setting (admin only)
+  app.post("/api/admin/settings/image-translation-prompt", isAuthenticated, isAdmin, async (req, res) => {
+    try {
+      const { value } = req.body;
+      if (typeof value !== 'string') {
+        return res.status(400).json({ message: "Prompt value is required" });
+      }
+      
+      const setting = await storage.upsertSetting({
+        key: 'image_translation_system_prompt',
+        value,
+      });
+      
+      res.json(setting);
+    } catch (error) {
+      console.error("Error saving image translation prompt setting:", error);
+      res.status(500).json({ message: "Failed to save setting" });
+    }
+  });
+
+  // ===== ADMIN ANALYTICS ROUTES =====
+
+  // Helper function to parse period and get start date
+  const getStartDateFromPeriod = (period: string): Date => {
+    const now = new Date();
+    switch (period) {
+      case '30d':
+        return new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+      case '60d':
+        return new Date(now.getTime() - 60 * 24 * 60 * 60 * 1000);
+      case '90d':
+        return new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
+      case '1y':
+        return new Date(now.getFullYear() - 1, now.getMonth(), now.getDate());
+      default:
+        return new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+    }
+  };
+
+  // Helper function to determine granularity based on period
+  const getGranularityFromPeriod = (period: string): 'day' | 'week' | 'month' => {
+    switch (period) {
+      case '30d':
+        return 'day';
+      case '60d':
+      case '90d':
+        return 'week';
+      case '1y':
+        return 'month';
+      default:
+        return 'day';
+    }
+  };
+
+  // Analytics overview (summary cards)
+  app.get("/api/admin/analytics/overview", isAuthenticated, isAdmin, async (req, res) => {
+    try {
+      const period = (req.query.period as string) || '30d';
+      const startDate = getStartDateFromPeriod(period);
+      const overview = await storage.getAnalyticsOverview(startDate);
+      res.json(overview);
+    } catch (error) {
+      console.error("Error fetching analytics overview:", error);
+      res.status(500).json({ message: "Failed to fetch analytics overview" });
+    }
+  });
+
+  // Usage over time (for area/line chart)
+  app.get("/api/admin/analytics/usage-over-time", isAuthenticated, isAdmin, async (req, res) => {
+    try {
+      const period = (req.query.period as string) || '30d';
+      const startDate = getStartDateFromPeriod(period);
+      const granularity = getGranularityFromPeriod(period);
+      const data = await storage.getUsageOverTime(startDate, granularity);
+      res.json({ data, granularity });
+    } catch (error) {
+      console.error("Error fetching usage over time:", error);
+      res.status(500).json({ message: "Failed to fetch usage over time" });
+    }
+  });
+
+  // Top translated languages
+  app.get("/api/admin/analytics/languages", isAuthenticated, isAdmin, async (req, res) => {
+    try {
+      const period = (req.query.period as string) || '30d';
+      const limit = parseInt(req.query.limit as string) || 10;
+      const startDate = getStartDateFromPeriod(period);
+      const data = await storage.getTopLanguages(startDate, limit);
+      res.json(data);
+    } catch (error) {
+      console.error("Error fetching top languages:", error);
+      res.status(500).json({ message: "Failed to fetch top languages" });
+    }
+  });
+
+  // Proofreading category usage
+  app.get("/api/admin/analytics/proofreading-categories", isAuthenticated, isAdmin, async (req, res) => {
+    try {
+      const period = (req.query.period as string) || '30d';
+      const startDate = getStartDateFromPeriod(period);
+      const data = await storage.getProofreadingCategoryUsage(startDate);
+      res.json(data);
+    } catch (error) {
+      console.error("Error fetching proofreading category usage:", error);
+      res.status(500).json({ message: "Failed to fetch proofreading category usage" });
+    }
+  });
+
+  // Feedback sentiment
+  app.get("/api/admin/analytics/feedback-sentiment", isAuthenticated, isAdmin, async (req, res) => {
+    try {
+      const period = (req.query.period as string) || '30d';
+      const startDate = getStartDateFromPeriod(period);
+      const data = await storage.getFeedbackSentiment(startDate);
+      res.json(data);
+    } catch (error) {
+      console.error("Error fetching feedback sentiment:", error);
+      res.status(500).json({ message: "Failed to fetch feedback sentiment" });
+    }
+  });
+
+  // AI model usage
+  app.get("/api/admin/analytics/model-usage", isAuthenticated, isAdmin, async (req, res) => {
+    try {
+      const period = (req.query.period as string) || '30d';
+      const startDate = getStartDateFromPeriod(period);
+      const data = await storage.getModelUsage(startDate);
+      res.json(data);
+    } catch (error) {
+      console.error("Error fetching model usage:", error);
+      res.status(500).json({ message: "Failed to fetch model usage" });
+    }
+  });
+
+  // Top active users
+  app.get("/api/admin/analytics/top-users", isAuthenticated, isAdmin, async (req, res) => {
+    try {
+      const period = (req.query.period as string) || '30d';
+      const limit = parseInt(req.query.limit as string) || 10;
+      const startDate = getStartDateFromPeriod(period);
+      const data = await storage.getTopUsers(startDate, limit);
+      res.json(data);
+    } catch (error) {
+      console.error("Error fetching top users:", error);
+      res.status(500).json({ message: "Failed to fetch top users" });
     }
   });
 

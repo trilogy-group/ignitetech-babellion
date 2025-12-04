@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { Loader2, Plus, Trash2, Save, Shield, ShieldCheck, ArrowLeft, Pencil, Check, ChevronsUpDown } from "lucide-react";
+import { Loader2, Plus, Trash2, Save, Shield, ShieldCheck, ArrowLeft, Pencil, Check, ChevronsUpDown, BarChart3, Languages, FileText, Users, ThumbsUp, ThumbsDown, Bot, TrendingUp, Image } from "lucide-react";
+import { Area, AreaChart, Bar, BarChart, Pie, PieChart, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
+import { ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -53,7 +55,9 @@ export default function Settings() {
   useSaveLastVisitedPage("/settings");
   const [openaiKey, setOpenaiKey] = useState("");
   const [anthropicKey, setAnthropicKey] = useState("");
+  const [geminiKey, setGeminiKey] = useState("");
   const [systemPrompt, setSystemPrompt] = useState("");
+  const [imageTranslationPrompt, setImageTranslationPrompt] = useState("");
   const [proofreadingPrompt, setProofreadingPrompt] = useState("");
   const [isAddModelOpen, setIsAddModelOpen] = useState(false);
   const [isAddLanguageOpen, setIsAddLanguageOpen] = useState(false);
@@ -69,9 +73,10 @@ export default function Settings() {
   const [newLanguage, setNewLanguage] = useState({ code: "", name: "", nativeName: "" });
   const [newRule, setNewRule] = useState({ title: "", categoryId: "", categoryName: "", ruleText: "", isActive: true });
   const [pdfCleanupModel, setPdfCleanupModel] = useState("");
+  const [analyticsPeriod, setAnalyticsPeriod] = useState<'30d' | '60d' | '90d' | '1y'>('30d');
 
   // Fetch API keys status
-  const { data: apiKeysStatus } = useQuery({
+  const { data: apiKeysStatus } = useQuery<{ openai: boolean; anthropic: boolean; gemini: boolean }>({
     queryKey: ["/api/admin/api-keys/status"],
   });
 
@@ -96,6 +101,10 @@ export default function Settings() {
       const proofreadingPromptSetting = data.find(s => s.key === "proofreading_system_prompt");
       if (proofreadingPromptSetting && !proofreadingPrompt) {
         setProofreadingPrompt(proofreadingPromptSetting.value);
+      }
+      const imageTranslationPromptSetting = data.find(s => s.key === "image_translation_system_prompt");
+      if (imageTranslationPromptSetting && !imageTranslationPrompt) {
+        setImageTranslationPrompt(imageTranslationPromptSetting.value);
       }
       return data;
     },
@@ -127,6 +136,102 @@ export default function Settings() {
     },
   });
 
+  // Analytics queries
+  const { data: analyticsOverview, isLoading: overviewLoading } = useQuery<{
+    totalTranslations: number;
+    totalProofreadings: number;
+    totalImageTranslations: number;
+    activeUsers: number;
+    totalFeedback: number;
+  }>({
+    queryKey: ["/api/admin/analytics/overview", analyticsPeriod],
+    queryFn: async () => {
+      const res = await fetch(`/api/admin/analytics/overview?period=${analyticsPeriod}`);
+      if (!res.ok) throw new Error('Failed to fetch overview');
+      return res.json();
+    },
+  });
+
+  const { data: usageOverTime, isLoading: usageLoading } = useQuery<{
+    data: { date: string; translations: number; proofreadings: number; imageTranslations: number }[];
+    granularity: 'day' | 'week' | 'month';
+  }>({
+    queryKey: ["/api/admin/analytics/usage-over-time", analyticsPeriod],
+    queryFn: async () => {
+      const res = await fetch(`/api/admin/analytics/usage-over-time?period=${analyticsPeriod}`);
+      if (!res.ok) throw new Error('Failed to fetch usage over time');
+      return res.json();
+    },
+  });
+
+  const { data: topLanguages, isLoading: languagesLoading2 } = useQuery<{
+    languageName: string;
+    count: number;
+  }[]>({
+    queryKey: ["/api/admin/analytics/languages", analyticsPeriod],
+    queryFn: async () => {
+      const res = await fetch(`/api/admin/analytics/languages?period=${analyticsPeriod}&limit=10`);
+      if (!res.ok) throw new Error('Failed to fetch top languages');
+      return res.json();
+    },
+  });
+
+  const { data: categoryUsage, isLoading: categoryLoading } = useQuery<{
+    categoryId: string;
+    categoryName: string;
+    count: number;
+  }[]>({
+    queryKey: ["/api/admin/analytics/proofreading-categories", analyticsPeriod],
+    queryFn: async () => {
+      const res = await fetch(`/api/admin/analytics/proofreading-categories?period=${analyticsPeriod}`);
+      if (!res.ok) throw new Error('Failed to fetch category usage');
+      return res.json();
+    },
+  });
+
+  const { data: feedbackSentiment, isLoading: sentimentLoading } = useQuery<{
+    positive: number;
+    negative: number;
+  }>({
+    queryKey: ["/api/admin/analytics/feedback-sentiment", analyticsPeriod],
+    queryFn: async () => {
+      const res = await fetch(`/api/admin/analytics/feedback-sentiment?period=${analyticsPeriod}`);
+      if (!res.ok) throw new Error('Failed to fetch feedback sentiment');
+      return res.json();
+    },
+  });
+
+  const { data: modelUsage, isLoading: modelUsageLoading } = useQuery<{
+    modelId: string;
+    modelName: string;
+    count: number;
+  }[]>({
+    queryKey: ["/api/admin/analytics/model-usage", analyticsPeriod],
+    queryFn: async () => {
+      const res = await fetch(`/api/admin/analytics/model-usage?period=${analyticsPeriod}`);
+      if (!res.ok) throw new Error('Failed to fetch model usage');
+      return res.json();
+    },
+  });
+
+  const { data: topUsers, isLoading: topUsersLoading } = useQuery<{
+    userId: string;
+    email: string | null;
+    firstName: string | null;
+    lastName: string | null;
+    profileImageUrl: string | null;
+    translationCount: number;
+    proofreadingCount: number;
+    totalCount: number;
+  }[]>({
+    queryKey: ["/api/admin/analytics/top-users", analyticsPeriod],
+    queryFn: async () => {
+      const res = await fetch(`/api/admin/analytics/top-users?period=${analyticsPeriod}&limit=10`);
+      if (!res.ok) throw new Error('Failed to fetch top users');
+      return res.json();
+    },
+  });
+
   // Save API key mutation
   const saveApiKeyMutation = useMutation({
     mutationFn: async ({ provider, key }: { provider: string; key: string }) => {
@@ -136,6 +241,7 @@ export default function Settings() {
       queryClient.invalidateQueries({ queryKey: ["/api/admin/api-keys/status"] });
       if (variables.provider === "openai") setOpenaiKey("");
       if (variables.provider === "anthropic") setAnthropicKey("");
+      if (variables.provider === "gemini") setGeminiKey("");
       toast({
         title: "API Key saved",
         description: `${variables.provider} API key has been saved securely.`,
@@ -173,6 +279,20 @@ export default function Settings() {
       toast({
         title: "Proofreading prompt saved",
         description: "Proofreading system prompt has been updated.",
+      });
+    },
+  });
+
+  // Save image translation system prompt mutation
+  const saveImageTranslationPromptMutation = useMutation({
+    mutationFn: async (value: string) => {
+      return await apiRequest("POST", "/api/admin/settings/image-translation-prompt", { value });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/settings"] });
+      toast({
+        title: "Image translation prompt saved",
+        description: "Image translation system prompt has been updated.",
       });
     },
   });
@@ -390,7 +510,7 @@ export default function Settings() {
   });
 
   return (
-    <div className="flex h-screen flex-col overflow-hidden">
+    <div className="flex h-full flex-col overflow-hidden">
       <div className="border-b px-4 py-4 sm:py-6 sm:px-6 lg:px-8 flex-shrink-0">
         <div className="flex items-center gap-3 sm:gap-4">
           <Button
@@ -409,15 +529,550 @@ export default function Settings() {
         </div>
       </div>
 
-      <ScrollArea className="flex-1 min-h-0 overflow-y-auto">
-        <div className="container max-w-5xl py-4 sm:py-8 px-4 sm:px-6 lg:px-8 pb-8">
+      <ScrollArea className="flex-1 min-h-0">
+        <div className="container max-w-5xl py-4 sm:py-8 px-4 sm:px-6 lg:px-8 pb-12">
           <Tabs defaultValue="users" className="space-y-4 sm:space-y-6">
-        <TabsList className="w-full overflow-x-auto">
-          <TabsTrigger value="users" data-testid="tab-users" className="flex-shrink-0">Users</TabsTrigger>
-          <TabsTrigger value="ai" data-testid="tab-ai" className="flex-shrink-0">AI</TabsTrigger>
-          <TabsTrigger value="proofread" data-testid="tab-proofread" className="flex-shrink-0">Proof Read</TabsTrigger>
-          <TabsTrigger value="translation" data-testid="tab-translation" className="flex-shrink-0">Translation</TabsTrigger>
+        <TabsList className="w-full overflow-x-auto scrollbar-hide scroll-shadow-x h-auto flex-wrap md:flex-nowrap justify-start gap-1 p-1">
+          <TabsTrigger value="users" data-testid="tab-users" className="flex-shrink-0 h-10 min-h-touch px-3">Users</TabsTrigger>
+          <TabsTrigger value="analytics" data-testid="tab-analytics" className="flex-shrink-0 h-10 min-h-touch px-3">Analytics</TabsTrigger>
+          <TabsTrigger value="ai" data-testid="tab-ai" className="flex-shrink-0 h-10 min-h-touch px-3">AI</TabsTrigger>
+          <TabsTrigger value="proofread" data-testid="tab-proofread" className="flex-shrink-0 h-10 min-h-touch px-3">Proof Read</TabsTrigger>
+          <TabsTrigger value="translation" data-testid="tab-translation" className="flex-shrink-0 h-10 min-h-touch px-3">Translation</TabsTrigger>
         </TabsList>
+
+        {/* Analytics Tab */}
+        <TabsContent value="analytics" className="space-y-6">
+          {/* Period Filter */}
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-muted-foreground">Period:</span>
+            <div className="flex gap-1">
+              {(['30d', '60d', '90d', '1y'] as const).map((period) => (
+                <Button
+                  key={period}
+                  variant={analyticsPeriod === period ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => setAnalyticsPeriod(period)}
+                  className="px-3"
+                >
+                  {period === '30d' ? '30 Days' : period === '60d' ? '60 Days' : period === '90d' ? '90 Days' : '1 Year'}
+                </Button>
+              ))}
+            </div>
+          </div>
+
+          {/* Summary Cards */}
+          <div className="grid gap-4 grid-cols-2 lg:grid-cols-4">
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Text Translations</CardTitle>
+                <Languages className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">
+                  {overviewLoading ? <Loader2 className="h-6 w-6 animate-spin" /> : analyticsOverview?.totalTranslations || 0}
+                </div>
+                <p className="text-xs text-muted-foreground">documents created</p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Image Translations</CardTitle>
+                <Image className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">
+                  {overviewLoading ? <Loader2 className="h-6 w-6 animate-spin" /> : analyticsOverview?.totalImageTranslations || 0}
+                </div>
+                <p className="text-xs text-muted-foreground">images translated</p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Proofreadings</CardTitle>
+                <FileText className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">
+                  {overviewLoading ? <Loader2 className="h-6 w-6 animate-spin" /> : analyticsOverview?.totalProofreadings || 0}
+                </div>
+                <p className="text-xs text-muted-foreground">documents proofread</p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Active Users</CardTitle>
+                <Users className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">
+                  {overviewLoading ? <Loader2 className="h-6 w-6 animate-spin" /> : analyticsOverview?.activeUsers || 0}
+                </div>
+                <p className="text-xs text-muted-foreground">in this period</p>
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Usage Over Time Chart */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <TrendingUp className="h-5 w-5" />
+                Usage Over Time
+              </CardTitle>
+              <CardDescription>
+                Translation and proofreading activity by {usageOverTime?.granularity || 'day'}
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {usageLoading ? (
+                <div className="flex justify-center py-12">
+                  <Loader2 className="h-8 w-8 animate-spin" />
+                </div>
+              ) : usageOverTime?.data && usageOverTime.data.length > 0 ? (
+                <div className="h-80">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <AreaChart data={usageOverTime.data}>
+                      <defs>
+                        <linearGradient id="colorTranslations" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor="hsl(var(--chart-1))" stopOpacity={0.3}/>
+                          <stop offset="95%" stopColor="hsl(var(--chart-1))" stopOpacity={0}/>
+                        </linearGradient>
+                        <linearGradient id="colorProofreadings" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor="hsl(var(--chart-2))" stopOpacity={0.3}/>
+                          <stop offset="95%" stopColor="hsl(var(--chart-2))" stopOpacity={0}/>
+                        </linearGradient>
+                        <linearGradient id="colorImageTranslations" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor="hsl(var(--chart-3))" stopOpacity={0.3}/>
+                          <stop offset="95%" stopColor="hsl(var(--chart-3))" stopOpacity={0}/>
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                      <XAxis 
+                        dataKey="date" 
+                        tickFormatter={(value) => {
+                          const date = new Date(value);
+                          return usageOverTime?.granularity === 'month' 
+                            ? date.toLocaleDateString('en-US', { month: 'short' })
+                            : date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+                        }}
+                        className="text-xs"
+                      />
+                      <YAxis className="text-xs" />
+                      <Tooltip 
+                        content={({ active, payload, label }) => {
+                          if (active && payload && payload.length) {
+                            return (
+                              <div className="rounded-lg border bg-background p-2 shadow-sm">
+                                <div className="font-medium">{new Date(label).toLocaleDateString()}</div>
+                                {payload.map((entry, index) => (
+                                  <div key={index} className="flex items-center gap-2 text-sm">
+                                    <div 
+                                      className="h-2 w-2 rounded-full" 
+                                      style={{ backgroundColor: entry.color }} 
+                                    />
+                                    <span className="text-muted-foreground">{entry.name}:</span>
+                                    <span className="font-medium">{entry.value}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            );
+                          }
+                          return null;
+                        }}
+                      />
+                      <Legend />
+                      <Area
+                        type="monotone"
+                        dataKey="translations"
+                        name="Text Translations"
+                        stroke="hsl(var(--chart-1))"
+                        fillOpacity={1}
+                        fill="url(#colorTranslations)"
+                      />
+                      <Area
+                        type="monotone"
+                        dataKey="imageTranslations"
+                        name="Image Translations"
+                        stroke="hsl(var(--chart-3))"
+                        fillOpacity={1}
+                        fill="url(#colorImageTranslations)"
+                      />
+                      <Area
+                        type="monotone"
+                        dataKey="proofreadings"
+                        name="Proofreadings"
+                        stroke="hsl(var(--chart-2))"
+                        fillOpacity={1}
+                        fill="url(#colorProofreadings)"
+                      />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                </div>
+              ) : (
+                <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
+                  <BarChart3 className="h-12 w-12 mb-2 opacity-50" />
+                  <p>No data available for this period</p>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Two-column charts */}
+          <div className="grid gap-6 md:grid-cols-2">
+            {/* Top Languages */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Languages className="h-5 w-5" />
+                  Most Translated Languages
+                </CardTitle>
+                <CardDescription>Top 10 target languages</CardDescription>
+              </CardHeader>
+              <CardContent>
+                {languagesLoading2 ? (
+                  <div className="flex justify-center py-8">
+                    <Loader2 className="h-6 w-6 animate-spin" />
+                  </div>
+                ) : topLanguages && topLanguages.length > 0 ? (
+                  <div className="h-64">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={topLanguages} layout="vertical">
+                        <CartesianGrid strokeDasharray="3 3" className="stroke-muted" horizontal={false} />
+                        <XAxis type="number" className="text-xs" />
+                        <YAxis 
+                          type="category" 
+                          dataKey="languageName" 
+                          width={80} 
+                          className="text-xs"
+                          tickFormatter={(value) => value.length > 10 ? value.slice(0, 10) + '...' : value}
+                        />
+                        <Tooltip 
+                          content={({ active, payload }) => {
+                            if (active && payload && payload.length) {
+                              return (
+                                <div className="rounded-lg border bg-background p-2 shadow-sm">
+                                  <div className="font-medium">{payload[0].payload.languageName}</div>
+                                  <div className="text-sm text-muted-foreground">
+                                    {payload[0].value} translations
+                                  </div>
+                                </div>
+                              );
+                            }
+                            return null;
+                          }}
+                        />
+                        <Bar dataKey="count" fill="hsl(var(--chart-1))" radius={[0, 4, 4, 0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                ) : (
+                  <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
+                    <Languages className="h-10 w-10 mb-2 opacity-50" />
+                    <p className="text-sm">No language data available</p>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Proofreading Categories */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <FileText className="h-5 w-5" />
+                  Proofreading Categories
+                </CardTitle>
+                <CardDescription>Most used rule categories</CardDescription>
+              </CardHeader>
+              <CardContent>
+                {categoryLoading ? (
+                  <div className="flex justify-center py-8">
+                    <Loader2 className="h-6 w-6 animate-spin" />
+                  </div>
+                ) : categoryUsage && categoryUsage.length > 0 ? (
+                  <div className="h-64">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <PieChart>
+                        <Pie
+                          data={categoryUsage}
+                          cx="50%"
+                          cy="50%"
+                          innerRadius={60}
+                          outerRadius={80}
+                          paddingAngle={5}
+                          dataKey="count"
+                          nameKey="categoryName"
+                          label={({ categoryName, percent }) => `${categoryName} (${(percent * 100).toFixed(0)}%)`}
+                          labelLine={false}
+                        >
+                          {categoryUsage.map((_, index) => (
+                            <Cell 
+                              key={`cell-${index}`} 
+                              fill={`hsl(var(--chart-${(index % 5) + 1}))`}
+                            />
+                          ))}
+                        </Pie>
+                        <Tooltip 
+                          content={({ active, payload }) => {
+                            if (active && payload && payload.length) {
+                              return (
+                                <div className="rounded-lg border bg-background p-2 shadow-sm">
+                                  <div className="font-medium">{payload[0].payload.categoryName}</div>
+                                  <div className="text-sm text-muted-foreground">
+                                    {payload[0].value} uses
+                                  </div>
+                                </div>
+                              );
+                            }
+                            return null;
+                          }}
+                        />
+                      </PieChart>
+                    </ResponsiveContainer>
+                  </div>
+                ) : (
+                  <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
+                    <FileText className="h-10 w-10 mb-2 opacity-50" />
+                    <p className="text-sm">No category data available</p>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Second row of two-column charts */}
+          <div className="grid gap-6 md:grid-cols-2">
+            {/* Feedback Sentiment */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <ThumbsUp className="h-5 w-5" />
+                  Feedback Sentiment
+                </CardTitle>
+                <CardDescription>User feedback on translations</CardDescription>
+              </CardHeader>
+              <CardContent>
+                {sentimentLoading ? (
+                  <div className="flex justify-center py-8">
+                    <Loader2 className="h-6 w-6 animate-spin" />
+                  </div>
+                ) : feedbackSentiment && (feedbackSentiment.positive > 0 || feedbackSentiment.negative > 0) ? (
+                  <div className="h-64">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <PieChart>
+                        <Pie
+                          data={[
+                            { name: 'Positive', value: feedbackSentiment.positive, fill: 'hsl(142, 71%, 45%)' },
+                            { name: 'Negative', value: feedbackSentiment.negative, fill: 'hsl(0, 84%, 60%)' },
+                          ]}
+                          cx="50%"
+                          cy="50%"
+                          innerRadius={60}
+                          outerRadius={80}
+                          paddingAngle={5}
+                          dataKey="value"
+                        >
+                        </Pie>
+                        <Tooltip 
+                          content={({ active, payload }) => {
+                            if (active && payload && payload.length) {
+                              const total = feedbackSentiment.positive + feedbackSentiment.negative;
+                              const percent = total > 0 ? ((payload[0].value as number) / total * 100).toFixed(0) : 0;
+                              return (
+                                <div className="rounded-lg border bg-background p-2 shadow-sm">
+                                  <div className="font-medium">{payload[0].name}</div>
+                                  <div className="text-sm text-muted-foreground">
+                                    {payload[0].value} ({percent}%)
+                                  </div>
+                                </div>
+                              );
+                            }
+                            return null;
+                          }}
+                        />
+                        <Legend />
+                      </PieChart>
+                    </ResponsiveContainer>
+                  </div>
+                ) : (
+                  <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
+                    <ThumbsUp className="h-10 w-10 mb-2 opacity-50" />
+                    <p className="text-sm">No feedback data available</p>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* AI Model Usage */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Bot className="h-5 w-5" />
+                  AI Model Usage
+                </CardTitle>
+                <CardDescription>Most used AI models</CardDescription>
+              </CardHeader>
+              <CardContent>
+                {modelUsageLoading ? (
+                  <div className="flex justify-center py-8">
+                    <Loader2 className="h-6 w-6 animate-spin" />
+                  </div>
+                ) : modelUsage && modelUsage.length > 0 ? (
+                  <div className="h-64">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={modelUsage} layout="vertical">
+                        <CartesianGrid strokeDasharray="3 3" className="stroke-muted" horizontal={false} />
+                        <XAxis type="number" className="text-xs" />
+                        <YAxis 
+                          type="category" 
+                          dataKey="modelName" 
+                          width={100} 
+                          className="text-xs"
+                          tickFormatter={(value) => value.length > 12 ? value.slice(0, 12) + '...' : value}
+                        />
+                        <Tooltip 
+                          content={({ active, payload }) => {
+                            if (active && payload && payload.length) {
+                              return (
+                                <div className="rounded-lg border bg-background p-2 shadow-sm">
+                                  <div className="font-medium">{payload[0].payload.modelName}</div>
+                                  <div className="text-sm text-muted-foreground">
+                                    {payload[0].value} uses
+                                  </div>
+                                </div>
+                              );
+                            }
+                            return null;
+                          }}
+                        />
+                        <Bar dataKey="count" fill="hsl(var(--chart-4))" radius={[0, 4, 4, 0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                ) : (
+                  <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
+                    <Bot className="h-10 w-10 mb-2 opacity-50" />
+                    <p className="text-sm">No model data available</p>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Top Active Users Table */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Users className="h-5 w-5" />
+                Top Active Users
+              </CardTitle>
+              <CardDescription>Users with most activity in this period</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {topUsersLoading ? (
+                <div className="flex justify-center py-8">
+                  <Loader2 className="h-6 w-6 animate-spin" />
+                </div>
+              ) : topUsers && topUsers.length > 0 ? (
+                isMobile ? (
+                  <div className="space-y-3">
+                    {topUsers.map((user, index) => {
+                      const displayName = user.firstName && user.lastName 
+                        ? `${user.firstName} ${user.lastName}`
+                        : user.firstName || user.email || "Unknown User";
+                      return (
+                        <Card key={user.userId} className="p-3">
+                          <div className="flex items-center gap-3">
+                            <div className="flex-shrink-0 w-6 text-center font-bold text-muted-foreground">
+                              #{index + 1}
+                            </div>
+                            {user.profileImageUrl ? (
+                              <img 
+                                src={user.profileImageUrl} 
+                                alt={displayName}
+                                className="h-8 w-8 rounded-full"
+                              />
+                            ) : (
+                              <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center">
+                                <span className="text-sm font-medium">
+                                  {displayName.charAt(0).toUpperCase()}
+                                </span>
+                              </div>
+                            )}
+                            <div className="flex-1 min-w-0">
+                              <p className="font-medium truncate">{displayName}</p>
+                              <div className="flex gap-4 text-xs text-muted-foreground">
+                                <span>{user.translationCount} translations</span>
+                                <span>{user.proofreadingCount} proofreadings</span>
+                              </div>
+                            </div>
+                            <Badge variant="secondary">{user.totalCount}</Badge>
+                          </div>
+                        </Card>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="w-12">#</TableHead>
+                        <TableHead>User</TableHead>
+                        <TableHead className="text-center">Translations</TableHead>
+                        <TableHead className="text-center">Proofreadings</TableHead>
+                        <TableHead className="text-center">Total</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {topUsers.map((user, index) => {
+                        const displayName = user.firstName && user.lastName 
+                          ? `${user.firstName} ${user.lastName}`
+                          : user.firstName || user.email || "Unknown User";
+                        return (
+                          <TableRow key={user.userId}>
+                            <TableCell className="font-bold text-muted-foreground">
+                              {index + 1}
+                            </TableCell>
+                            <TableCell>
+                              <div className="flex items-center gap-2">
+                                {user.profileImageUrl ? (
+                                  <img 
+                                    src={user.profileImageUrl} 
+                                    alt={displayName}
+                                    className="h-8 w-8 rounded-full"
+                                  />
+                                ) : (
+                                  <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center">
+                                    <span className="text-sm font-medium">
+                                      {displayName.charAt(0).toUpperCase()}
+                                    </span>
+                                  </div>
+                                )}
+                                <div>
+                                  <p className="font-medium">{displayName}</p>
+                                  <p className="text-xs text-muted-foreground">{user.email}</p>
+                                </div>
+                              </div>
+                            </TableCell>
+                            <TableCell className="text-center">{user.translationCount}</TableCell>
+                            <TableCell className="text-center">{user.proofreadingCount}</TableCell>
+                            <TableCell className="text-center">
+                              <Badge variant="secondary">{user.totalCount}</Badge>
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                )
+              ) : (
+                <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
+                  <Users className="h-10 w-10 mb-2 opacity-50" />
+                  <p className="text-sm">No user activity data available</p>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
 
         {/* AI Tab */}
         <TabsContent value="ai" className="space-y-6">
@@ -497,6 +1152,44 @@ export default function Settings() {
             </CardContent>
           </Card>
 
+          <Card>
+            <CardHeader>
+              <CardTitle>Google Gemini API Key</CardTitle>
+              <CardDescription>
+                Configure your Google Gemini API key for image translation
+                {apiKeysStatus?.gemini && (
+                  <Badge variant="secondary" className="ml-2">Configured</Badge>
+                )}
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="gemini-key">API Key</Label>
+                <Input
+                  id="gemini-key"
+                  type="password"
+                  placeholder={apiKeysStatus?.gemini ? "••••••••••••••••" : "AIza..."}
+                  value={geminiKey}
+                  onChange={(e) => setGeminiKey(e.target.value)}
+                  data-testid="input-gemini-key"
+                />
+                {apiKeysStatus?.gemini && !geminiKey && (
+                  <p className="text-xs text-muted-foreground">
+                    Key is configured. Enter a new key to update it.
+                  </p>
+                )}
+              </div>
+              <Button
+                onClick={() => saveApiKeyMutation.mutate({ provider: "gemini", key: geminiKey })}
+                disabled={!geminiKey || saveApiKeyMutation.isPending}
+                data-testid="button-save-gemini-key"
+              >
+                {saveApiKeyMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                {apiKeysStatus?.gemini && !geminiKey ? "Update" : "Save"} Gemini Key
+              </Button>
+            </CardContent>
+          </Card>
+
           {/* AI Models */}
           <Card>
             <CardHeader>
@@ -514,7 +1207,7 @@ export default function Settings() {
                       Add Model
                     </Button>
                   </DialogTrigger>
-                  <DialogContent>
+                  <DialogContent className="max-h-[90vh] overflow-y-auto">
                     <DialogHeader>
                       <DialogTitle>Add AI Model</DialogTitle>
                     </DialogHeader>
@@ -527,6 +1220,7 @@ export default function Settings() {
                           value={newModel.name}
                           onChange={(e) => setNewModel({ ...newModel, name: e.target.value })}
                           data-testid="input-model-name"
+                          className="h-11 min-h-touch"
                         />
                       </div>
                       <div className="space-y-2">
@@ -535,12 +1229,12 @@ export default function Settings() {
                           value={newModel.provider}
                           onValueChange={(value) => setNewModel({ ...newModel, provider: value })}
                         >
-                          <SelectTrigger id="model-provider" data-testid="select-model-provider">
+                          <SelectTrigger id="model-provider" data-testid="select-model-provider" className="h-11 min-h-touch">
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent>
-                            <SelectItem value="openai">OpenAI</SelectItem>
-                            <SelectItem value="anthropic">Anthropic</SelectItem>
+                            <SelectItem value="openai" className="min-h-touch">OpenAI</SelectItem>
+                            <SelectItem value="anthropic" className="min-h-touch">Anthropic</SelectItem>
                           </SelectContent>
                         </Select>
                       </div>
@@ -552,23 +1246,26 @@ export default function Settings() {
                           value={newModel.modelIdentifier}
                           onChange={(e) => setNewModel({ ...newModel, modelIdentifier: e.target.value })}
                           data-testid="input-model-identifier"
+                          className="h-11 min-h-touch"
                         />
                       </div>
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 min-h-touch">
                         <Checkbox
                           id="model-default"
                           checked={newModel.isDefault}
                           onCheckedChange={(checked) => setNewModel({ ...newModel, isDefault: !!checked })}
                           data-testid="checkbox-model-default"
+                          className="h-5 w-5"
                         />
                         <Label htmlFor="model-default">Set as default model</Label>
                       </div>
                     </div>
-                    <DialogFooter>
+                    <DialogFooter className="gap-2">
                       <Button
                         onClick={() => addModelMutation.mutate(newModel)}
                         disabled={!newModel.name || !newModel.modelIdentifier || addModelMutation.isPending}
                         data-testid="button-create-model"
+                        className="h-11 min-h-touch flex-1 md:flex-none"
                       >
                         {addModelMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                         Add Model
@@ -792,6 +1489,41 @@ export default function Settings() {
             </CardContent>
           </Card>
 
+          {/* Image Translation System Prompt */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Image Translation System Prompt</CardTitle>
+              <CardDescription>
+                Customize the system prompt used for image translation. Use {'{language}'} as a placeholder for the target language.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="image-translation-prompt">System Prompt</Label>
+                <Textarea
+                  id="image-translation-prompt"
+                  value={imageTranslationPrompt}
+                  onChange={(e) => setImageTranslationPrompt(e.target.value)}
+                  className="min-h-48 font-mono text-sm"
+                  placeholder="Translate all text visible in this image to {language}. Preserve the original image layout, styling, fonts, and visual design..."
+                  data-testid="textarea-image-translation-prompt"
+                />
+                <p className="text-xs text-muted-foreground">
+                  {imageTranslationPrompt.length} characters. Leave empty to use the default prompt.
+                </p>
+              </div>
+              <Button
+                onClick={() => saveImageTranslationPromptMutation.mutate(imageTranslationPrompt)}
+                disabled={saveImageTranslationPromptMutation.isPending}
+                data-testid="button-save-image-translation-prompt"
+              >
+                {saveImageTranslationPromptMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                <Save className="mr-2 h-4 w-4" />
+                Save Image Translation Prompt
+              </Button>
+            </CardContent>
+          </Card>
+
           {/* Languages */}
           <Card>
             <CardHeader>
@@ -809,7 +1541,7 @@ export default function Settings() {
                       Add Language
                     </Button>
                   </DialogTrigger>
-                  <DialogContent>
+                  <DialogContent className="max-h-[90vh] overflow-y-auto">
                     <DialogHeader>
                       <DialogTitle>Add Language</DialogTitle>
                     </DialogHeader>
@@ -822,6 +1554,7 @@ export default function Settings() {
                           value={newLanguage.code}
                           onChange={(e) => setNewLanguage({ ...newLanguage, code: e.target.value })}
                           data-testid="input-lang-code"
+                          className="h-11 min-h-touch"
                         />
                       </div>
                       <div className="space-y-2">
@@ -832,6 +1565,7 @@ export default function Settings() {
                           value={newLanguage.name}
                           onChange={(e) => setNewLanguage({ ...newLanguage, name: e.target.value })}
                           data-testid="input-lang-name"
+                          className="h-11 min-h-touch"
                         />
                       </div>
                       <div className="space-y-2">
@@ -842,14 +1576,16 @@ export default function Settings() {
                           value={newLanguage.nativeName}
                           onChange={(e) => setNewLanguage({ ...newLanguage, nativeName: e.target.value })}
                           data-testid="input-lang-native"
+                          className="h-11 min-h-touch"
                         />
                       </div>
                     </div>
-                    <DialogFooter>
+                    <DialogFooter className="gap-2">
                       <Button
                         onClick={() => addLanguageMutation.mutate(newLanguage)}
                         disabled={!newLanguage.code || !newLanguage.name || !newLanguage.nativeName || addLanguageMutation.isPending}
                         data-testid="button-create-language"
+                        className="h-11 min-h-touch flex-1 md:flex-none"
                       >
                         {addLanguageMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                         Add Language
@@ -1090,13 +1826,13 @@ export default function Settings() {
                         Add Rule
                       </Button>
                     </DialogTrigger>
-                    <DialogContent>
-                      <DialogHeader>
+                    <DialogContent className="max-h-[90vh] flex flex-col overflow-hidden">
+                      <DialogHeader className="flex-shrink-0">
                         <DialogTitle>Add Proofreading Rule</DialogTitle>
                       </DialogHeader>
-                      <div className="space-y-4 py-4">
+                      <div className="flex-1 overflow-y-auto space-y-4 py-4 px-1">
                         <div className="space-y-2">
-                          <div className="flex items-center justify-between gap-4">
+                          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                             <div className="flex-1 space-y-2">
                               <Label htmlFor="rule-title">Rule Title</Label>
                               <Input
@@ -1104,9 +1840,10 @@ export default function Settings() {
                                 placeholder="e.g., Check for passive voice"
                                 value={newRule.title}
                                 onChange={(e) => setNewRule({ ...newRule, title: e.target.value })}
+                                className="h-11 min-h-touch"
                               />
                             </div>
-                            <div className="flex items-center gap-2 pt-8">
+                            <div className="flex items-center gap-2 md:pt-8">
                               <Switch
                                 checked={newRule.isActive}
                                 onCheckedChange={(checked) => setNewRule({ ...newRule, isActive: !!checked })}
@@ -1123,7 +1860,7 @@ export default function Settings() {
                                 variant="outline"
                                 role="combobox"
                                 aria-expanded={isCategoryDropdownOpen}
-                                className="w-full justify-between"
+                                className="w-full justify-between h-11 min-h-touch"
                                 id="rule-category"
                               >
                                 {newRule.categoryId
@@ -1176,6 +1913,7 @@ export default function Settings() {
                                           setNewCategoryName("");
                                           setIsCategoryDropdownOpen(false);
                                         }}
+                                        className="min-h-touch"
                                       >
                                         <Check
                                           className={cn(
@@ -1204,11 +1942,11 @@ export default function Settings() {
                             placeholder="Describe the rule in detail..."
                             value={newRule.ruleText}
                             onChange={(e) => setNewRule({ ...newRule, ruleText: e.target.value })}
-                            className="min-h-64"
+                            className="min-h-40 md:min-h-64"
                           />
                         </div>
                       </div>
-                      <DialogFooter>
+                      <DialogFooter className="flex-shrink-0 gap-2">
                         <Button
                           onClick={() => {
                             // Ensure categoryName is set if categoryId is not set
@@ -1219,6 +1957,7 @@ export default function Settings() {
                             addRuleMutation.mutate(ruleToSave);
                           }}
                           disabled={!newRule.title || (!newRule.categoryId && !newRule.categoryName && !newCategoryName) || !newRule.ruleText || addRuleMutation.isPending}
+                          className="h-11 min-h-touch flex-1 md:flex-none"
                         >
                           {addRuleMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                           Add Rule
@@ -1301,24 +2040,25 @@ export default function Settings() {
               setEditCategoryName("");
             }
           }}>
-            <DialogContent>
-              <DialogHeader>
+            <DialogContent className="max-h-[90vh] flex flex-col overflow-hidden">
+              <DialogHeader className="flex-shrink-0">
                 <DialogTitle>Edit Proofreading Rule</DialogTitle>
               </DialogHeader>
               {editingRule && (
                 <>
-                  <div className="space-y-4 py-4">
+                  <div className="flex-1 overflow-y-auto space-y-4 py-4 px-1">
                     <div className="space-y-2">
-                      <div className="flex items-center justify-between gap-4">
+                      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                         <div className="flex-1 space-y-2">
                           <Label htmlFor="edit-rule-title">Rule Title</Label>
                           <Input
                             id="edit-rule-title"
                             value={editingRule.title}
                             onChange={(e) => setEditingRule({ ...editingRule, title: e.target.value })}
+                            className="h-11 min-h-touch"
                           />
                         </div>
-                        <div className="flex items-center gap-2 pt-8">
+                        <div className="flex items-center gap-2 md:pt-8">
                           <Switch
                             checked={editingRule.isActive}
                             onCheckedChange={(checked) => setEditingRule({ ...editingRule, isActive: checked })}
@@ -1335,7 +2075,7 @@ export default function Settings() {
                             variant="outline"
                             role="combobox"
                             aria-expanded={isEditCategoryDropdownOpen}
-                            className="w-full justify-between"
+                            className="w-full justify-between h-11 min-h-touch"
                             id="edit-rule-category"
                           >
                             {editingRule.categoryId
@@ -1388,6 +2128,7 @@ export default function Settings() {
                                       setEditCategoryName("");
                                       setIsEditCategoryDropdownOpen(false);
                                     }}
+                                    className="min-h-touch"
                                   >
                                     <Check
                                       className={cn(
@@ -1415,11 +2156,11 @@ export default function Settings() {
                         id="edit-rule-text"
                         value={editingRule.ruleText}
                         onChange={(e) => setEditingRule({ ...editingRule, ruleText: e.target.value })}
-                        className="min-h-64"
+                        className="min-h-40 md:min-h-64"
                       />
                     </div>
                   </div>
-                  <DialogFooter>
+                  <DialogFooter className="flex-shrink-0 gap-2">
                     <Button
                       onClick={() => {
                         const ruleData = editingRule as ProofreadingRule & { categoryName?: string };
@@ -1435,7 +2176,8 @@ export default function Settings() {
                         });
                         setEditCategoryName("");
                       }}
-                          disabled={!editingRule.title || (!editingRule.categoryId && !editCategoryName) || !editingRule.ruleText || updateRuleMutation.isPending}
+                      disabled={!editingRule.title || (!editingRule.categoryId && !editCategoryName) || !editingRule.ruleText || updateRuleMutation.isPending}
+                      className="h-11 min-h-touch flex-1 md:flex-none"
                     >
                       {updateRuleMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                       Save Changes

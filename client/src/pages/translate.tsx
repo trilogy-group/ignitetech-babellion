@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation, useInfiniteQuery } from "@tanstack/react-query";
-import { useLocation } from "wouter";
-import { Plus, Trash2, Loader2, Copy, Check, Lock, Globe, Pencil, FileText, Save, X, RotateCw, ChevronLeft, ChevronRight, Square, Search, Share, Link2, Upload, Zap, Sparkles } from "lucide-react";
-import { formatDistanceToNow } from "date-fns";
+import { useLocation, useParams } from "wouter";
+import { Plus, Trash2, Loader2, Copy, Check, Lock, Globe, Pencil, FileText, Save, X, RotateCw, ChevronLeft, ChevronRight, Square, Search, Share, Link2, Upload, Zap, Sparkles, ChevronsUpDown, Eye, Wrench } from "lucide-react";
+import { formatDate, formatRelativeTime } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -30,6 +30,19 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
+import {
   AlertDialog,
   AlertDialogAction,
   AlertDialogCancel,
@@ -55,13 +68,17 @@ import { useToast } from "@/hooks/use-toast";
 import { ToastAction } from "@/components/ui/toast";
 import { useAuth } from "@/hooks/useAuth";
 import { queryClient, apiRequest } from "@/lib/queryClient";
-import type { Translation, TranslationOutput, AiModel, Language, TranslationFeedback } from "@shared/schema";
+import type { Translation, TranslationMetadata, TranslationOutput, AiModel, Language, TranslationFeedback } from "@shared/schema";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { MobileHistorySheet } from "@/components/mobile-history-sheet";
-import { History } from "lucide-react";
+import { History, Languages } from "lucide-react";
+import { MobilePanelToggle, type PanelType } from "@/components/mobile-panel-toggle";
+import { StickyMobileToolbar } from "@/components/sticky-mobile-toolbar";
+import { CollapsibleControls } from "@/components/collapsible-controls";
+import { HistoryCard } from "@/components/history-card";
 
 /**
  * Render the Translate page UI for creating, editing, translating, and managing translation projects.
@@ -76,17 +93,18 @@ export default function Translate() {
   const { toast } = useToast();
   const { user } = useAuth();
   const [location, setLocation] = useLocation();
-  const [selectedTranslationId, setSelectedTranslationId] = useState<string | null>(null);
+  const params = useParams<{ id?: string }>();
+  const [selectedTranslationId, setSelectedTranslationId] = useState<string | null>(params.id || null);
   const [sourceText, setSourceText] = useState("");
   const [title, setTitle] = useState("Untitled Translation");
   const [selectedLanguages, setSelectedLanguages] = useState<string[]>([]);
-  const [tempSelectedLanguages, setTempSelectedLanguages] = useState<string[]>([]);
   const [selectedModel, setSelectedModel] = useState<string>("");
   const [isRenamingId, setIsRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [editedTitle, setEditedTitle] = useState("");
-  const [isLanguageDialogOpen, setIsLanguageDialogOpen] = useState(false);
+  const [isLanguagePopoverOpen, setIsLanguagePopoverOpen] = useState(false);
+  const [isMobileLanguagePopoverOpen, setIsMobileLanguagePopoverOpen] = useState(false);
   const [isEscapePressed, setIsEscapePressed] = useState(false);
   const [copiedOutputId, setCopiedOutputId] = useState<string | null>(null);
   const [sharedOutputId, setSharedOutputId] = useState<string | null>(null);
@@ -121,7 +139,7 @@ export default function Translate() {
   const [searchQuery, setSearchQuery] = useState("");
   const [searchTerm, setSearchTerm] = useState(""); // Actual search term used for API
   const searchInputRef = useRef<HTMLInputElement>(null);
-  const [unsavedChangesAction, setUnsavedChangesAction] = useState<{ type: 'switch' | 'new'; data?: Translation } | null>(null);
+  const [unsavedChangesAction, setUnsavedChangesAction] = useState<{ type: 'switch' | 'new'; data?: TranslationMetadata | Translation } | null>(null);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [lastSavedContent, setLastSavedContent] = useState<string>("");
   // Store the currently selected translation object to avoid race conditions with list refresh
@@ -169,7 +187,7 @@ export default function Translate() {
       });
       const response = await apiRequest("GET", `/api/translations?${params}`);
       return await response.json() as {
-        data: Translation[];
+        data: TranslationMetadata[];
         pagination: {
           page: number;
           limit: number;
@@ -185,8 +203,18 @@ export default function Translate() {
     initialPageParam: 1,
   });
 
-  // Flatten paginated translations
+  // Flatten paginated translations (metadata only)
   const translations = translationsData?.pages.flatMap(page => page.data) ?? [];
+
+  // Fetch full translation data when a translation is selected
+  const { data: selectedTranslationFull, isLoading: isLoadingSelectedTranslation } = useQuery<Translation>({
+    queryKey: ["/api/translations", selectedTranslationId],
+    queryFn: async () => {
+      const response = await apiRequest("GET", `/api/translations/${selectedTranslationId}`);
+      return await response.json() as Translation;
+    },
+    enabled: !!selectedTranslationId,
+  });
 
   // Fetch models
   const { data: models = [] } = useQuery<AiModel[]>({
@@ -247,13 +275,6 @@ export default function Translate() {
 
   // Track if we've initialized to avoid loops
   const hasInitialized = useRef(false);
-  // Ref to track current selectedTranslationId for hashchange handler
-  const selectedTranslationIdRef = useRef<string | null>(null);
-  
-  // Keep ref in sync with state
-  useEffect(() => {
-    selectedTranslationIdRef.current = selectedTranslationId;
-  }, [selectedTranslationId]);
 
   // Handle search
   const handleSearch = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -281,69 +302,49 @@ export default function Translate() {
     }
   };
 
-  // Handle hash-based URL navigation on initial load only
+  // Sync selectedTranslationId with URL params
   useEffect(() => {
-    if (!translationsLoading && translations.length > 0 && !hasInitialized.current && !selectedTranslationId) {
+    if (params.id && params.id !== selectedTranslationId) {
+      setSelectedTranslationId(params.id);
+    }
+  }, [params.id, selectedTranslationId]);
+
+  // Handle initial load - auto-select first translation if no ID in URL
+  useEffect(() => {
+    if (!translationsLoading && translations.length > 0 && !hasInitialized.current && !params.id) {
       hasInitialized.current = true;
-      const hash = window.location.hash.slice(1); // Remove #
-      if (hash) {
-        const translation = translations.find(t => t.id === hash);
-        if (translation) {
-          handleSelectTranslation(translation);
-          return; // Exit early to avoid auto-selecting first
-        }
-      }
-      // Auto-select first translation if no hash
       const firstTranslation = translations[0];
       if (firstTranslation) {
-        handleSelectTranslation(firstTranslation);
+        // Navigate to the first translation
+        setLocation(`/translate/${firstTranslation.id}`, { replace: true });
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [translationsLoading]);
+  }, [translationsLoading, translations.length, params.id]);
 
-  // Flag to prevent hashchange handler from running during programmatic updates
-  const isUpdatingHashRef = useRef(false);
-
-  // Listen to browser hash changes (back/forward buttons) - ignore programmatic updates
+  // Populate state when full translation data is loaded
   useEffect(() => {
-    const handleHashChange = () => {
-      // Ignore if we're programmatically updating the hash
-      if (isUpdatingHashRef.current) {
-        return;
+    if (selectedTranslationFull && selectedTranslationId) {
+      // IMPORTANT: Set lastSavedContent BEFORE sourceText to prevent false unsaved changes detection
+      setLastSavedContent(selectedTranslationFull.sourceText);
+      setHasUnsavedChanges(false);
+      
+      setSelectedTranslationData(selectedTranslationFull);
+      setSourceText(selectedTranslationFull.sourceText);
+      setTitle(selectedTranslationFull.title);
+      setSelectedLanguages(selectedTranslationFull.selectedLanguages || []);
+      setIsPrivate(selectedTranslationFull.isPrivate ?? false);
+      if (selectedTranslationFull.lastUsedModelId) {
+        setSelectedModel(selectedTranslationFull.lastUsedModelId);
       }
-      if (!translationsLoading && translations.length > 0) {
-        const hash = window.location.hash.slice(1);
-        if (hash) {
-          const translation = translations.find(t => t.id === hash);
-          // Use ref to get current selectedTranslationId value
-          if (translation && translation.id !== selectedTranslationIdRef.current) {
-            handleSelectTranslation(translation);
-          }
-        }
-      }
-    };
-
-    window.addEventListener('hashchange', handleHashChange);
-    return () => window.removeEventListener('hashchange', handleHashChange);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [translations, translationsLoading]); // Remove selectedTranslationId from deps to avoid recreating listener
-
-  // Update URL hash when translation is manually selected (use replaceState to avoid hashchange event)
-  useEffect(() => {
-    if (selectedTranslationId && hasInitialized.current) {
-      const currentHash = window.location.hash.slice(1);
-      if (currentHash !== selectedTranslationId) {
-        isUpdatingHashRef.current = true;
-        // Use replaceState to avoid triggering hashchange event
-        window.history.replaceState(null, '', `${window.location.pathname}#${selectedTranslationId}`);
-        // Reset flag after a tick to allow future hashchange events
-        setTimeout(() => {
-          isUpdatingHashRef.current = false;
-        }, 100);
+      // Auto-select first language tab if languages exist
+      if (selectedTranslationFull.selectedLanguages && selectedTranslationFull.selectedLanguages.length > 0) {
+        setActiveLanguageTab(selectedTranslationFull.selectedLanguages[0]);
+      } else {
+        setActiveLanguageTab("");
       }
     }
-  }, [selectedTranslationId]);
+  }, [selectedTranslationFull, selectedTranslationId]);
 
   // Create new translation mutation
   const createMutation = useMutation({
@@ -394,12 +395,36 @@ export default function Translate() {
       return await apiRequest("DELETE", `/api/translations/${id}`, {});
     },
     onSuccess: (_, deletedId) => {
+      // Find the index of deleted translation to navigate to next/previous
+      const deletedIndex = translations.findIndex(t => t.id === deletedId);
+      
+      // Determine next translation to select
+      let nextTranslation: TranslationMetadata | null = null;
+      if (deletedIndex !== -1) {
+        // Try next translation first
+        if (deletedIndex < translations.length - 1) {
+          nextTranslation = translations[deletedIndex + 1];
+        }
+        // If no next, try previous
+        else if (deletedIndex > 0) {
+          nextTranslation = translations[deletedIndex - 1];
+        }
+      }
+      
       queryClient.invalidateQueries({ queryKey: ["/api/translations"] });
+      
       if (selectedTranslationId === deletedId) {
-        setSelectedTranslationId(null);
-        setSelectedTranslationData(null);
-        setSourceText("");
-        setTitle("Untitled Translation");
+        if (nextTranslation) {
+          // Navigate to next/previous translation
+          setLocation(`/translate/${nextTranslation.id}`);
+        } else {
+          // No translations left, go to base translate page
+          setSelectedTranslationId(null);
+          setSelectedTranslationData(null);
+          setSourceText("");
+          setTitle("Untitled Translation");
+          setLocation('/translate');
+        }
       }
       setDeleteConfirmId(null);
       toast({
@@ -607,7 +632,7 @@ export default function Translate() {
     if (!selectedTranslationId) return;
     
     try {
-      const shareUrl = `${window.location.origin}${window.location.pathname}#${selectedTranslationId}`;
+      const shareUrl = `${window.location.origin}/translate/${selectedTranslationId}`;
       await navigator.clipboard.writeText(shareUrl);
       
       setCopiedLink(true);
@@ -643,35 +668,16 @@ export default function Translate() {
     });
   };
 
-  const handleSelectTranslation = (translation: Translation) => {
+  const handleSelectTranslation = (translation: TranslationMetadata | Translation) => {
     // Check for unsaved changes
     if (hasUnsavedChanges) {
-      setUnsavedChangesAction({ type: 'switch', data: translation });
+      setUnsavedChangesAction({ type: 'switch', data: translation as Translation });
       return;
     }
     
-    setSelectedTranslationId(translation.id);
-    setSelectedTranslationData(translation); // Store full object for immediate canEdit checks
-    setSourceText(translation.sourceText);
-    setTitle(translation.title);
-    setSelectedLanguages(translation.selectedLanguages || []);
-    setIsPrivate(translation.isPrivate ?? false);
-    // Pre-select the last used model if available
-    if (translation.lastUsedModelId) {
-      setSelectedModel(translation.lastUsedModelId);
-    }
+    // Navigate to the translation URL - state will be populated by the effect watching selectedTranslationFull
     setEditedOutputs({});
-    setHasUnsavedChanges(false);
-    setLastSavedContent(translation.sourceText);
-    // Don't clear progress state - preserve it per translation ID
-    // Progress is tracked per translation ID, so switching cards doesn't lose progress
-    
-    // Auto-select first language tab if languages exist
-    if (translation.selectedLanguages && translation.selectedLanguages.length > 0) {
-      setActiveLanguageTab(translation.selectedLanguages[0]);
-    } else {
-      setActiveLanguageTab("");
-    }
+    setLocation(`/translate/${translation.id}`);
   };
 
   const handleNewTranslation = () => {
@@ -734,31 +740,15 @@ export default function Translate() {
   const handleConfirmDiscardAndContinue = () => {
     if (!unsavedChangesAction) return;
     
+    // Clear unsaved changes flag first
+    setHasUnsavedChanges(false);
+    
     if (unsavedChangesAction.type === 'switch' && unsavedChangesAction.data) {
-      // Continue with switching translation
-      const translation = unsavedChangesAction.data;
-      setSelectedTranslationId(translation.id);
-      setSelectedTranslationData(translation); // Store full object for immediate canEdit checks
-      setSourceText(translation.sourceText);
-      setTitle(translation.title);
-      setSelectedLanguages(translation.selectedLanguages || []);
-      setIsPrivate(translation.isPrivate ?? false);
-      if (translation.lastUsedModelId) {
-        setSelectedModel(translation.lastUsedModelId);
-      }
+      // Navigate to the translation - state will be populated by the effect watching selectedTranslationFull
       setEditedOutputs({});
-      setHasUnsavedChanges(false);
-      setLastSavedContent(translation.sourceText);
-      
-      // Auto-select first language tab if languages exist
-      if (translation.selectedLanguages && translation.selectedLanguages.length > 0) {
-        setActiveLanguageTab(translation.selectedLanguages[0]);
-      } else {
-        setActiveLanguageTab("");
-      }
+      setLocation(`/translate/${unsavedChangesAction.data.id}`);
     } else if (unsavedChangesAction.type === 'new') {
       // Continue with creating new translation
-      setHasUnsavedChanges(false);
       createMutation.mutate();
     }
     
@@ -862,138 +852,56 @@ export default function Translate() {
 
     setIsImportingPdf(true);
     const importType = pdfImportType;
-    const fileName = file.name.replace(/\.pdf$/i, '');
-
-    // Update title early
-    if (!title || title === "Untitled Translation") {
-      setTitle(fileName);
-      setEditedTitle(fileName);
-    }
 
     try {
       const formData = new FormData();
       formData.append('pdf', file);
 
-      if (importType === 'quick') {
-        // Quick import - non-streaming
-        const response = await fetch('/api/pdf/quick-import', {
-          method: 'POST',
-          body: formData,
-          credentials: 'include',
-        });
+      const endpoint = importType === 'quick' ? '/api/pdf/quick-import' : '/api/pdf/deep-import';
+      
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        body: formData,
+        credentials: 'include',
+      });
 
-        if (!response.ok) {
-          const errorData = await response.json();
-          throw new Error(errorData.message || 'Failed to import PDF');
-        }
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.message || 'Failed to import PDF');
+      }
 
-        const data = await response.json() as { html: string; text: string; pageCount: number };
-        setSourceText(data.html);
+      const data = await response.json() as { html: string; text: string; pageCount: number };
 
-        // Save the changes
-        if (selectedTranslationId) {
-          updateMutation.mutate({
-            id: selectedTranslationId,
-            data: { 
-              sourceText: data.html, 
-              title: !title || title === "Untitled Translation" ? fileName : title 
-            },
-          });
-          // Mark as saved to clear unsaved changes indicator
-          setLastSavedContent(data.html);
-          setHasUnsavedChanges(false);
-        }
+      // Update the source text with the imported content
+      setSourceText(data.html);
+      
+      // Optionally update the translation title with the filename
+      const fileName = file.name.replace(/\.pdf$/i, '');
+      if (!title || title === "Untitled Translation") {
+        setTitle(fileName);
+        setEditedTitle(fileName);
+      }
 
-        const tempDiv = document.createElement('div');
-        tempDiv.innerHTML = data.html;
-        const charCount = tempDiv.textContent?.length || 0;
-
-        toast({
-          title: `✓ PDF imported successfully (Quick)`,
-          description: `"${fileName}" (${data.pageCount} page${data.pageCount !== 1 ? 's' : ''}, ${charCount.toLocaleString()} characters)`,
-        });
-      } else {
-        // Deep import - streaming for real-time updates
-        const response = await fetch('/api/pdf/deep-import-stream', {
-          method: 'POST',
-          body: formData,
-          credentials: 'include',
-        });
-
-        if (!response.ok) {
-          const errorData = await response.json();
-          throw new Error(errorData.message || 'Failed to import PDF');
-        }
-
-        const reader = response.body?.getReader();
-        if (!reader) throw new Error('No response body');
-
-        const decoder = new TextDecoder();
-        let accumulatedHtml = '';
-        let pageCount = 0;
-
-        // Process the SSE stream
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-
-          const text = decoder.decode(value, { stream: true });
-          const lines = text.split('\n');
-
-          for (const line of lines) {
-            if (line.startsWith('data: ')) {
-              try {
-                const data = JSON.parse(line.slice(6));
-                
-                if (data.type === 'start') {
-                  pageCount = data.pageCount;
-                } else if (data.type === 'chunk') {
-                  accumulatedHtml += data.content;
-                  // Update the editor in real-time
-                  setSourceText(accumulatedHtml);
-                } else if (data.type === 'complete') {
-                  // Final cleanup of html
-                  let finalHtml = data.html || accumulatedHtml;
-                  if (finalHtml.startsWith('```html')) {
-                    finalHtml = finalHtml.replace(/^```html\s*/, '').replace(/\s*```$/, '');
-                  } else if (finalHtml.startsWith('```')) {
-                    finalHtml = finalHtml.replace(/^```\s*/, '').replace(/\s*```$/, '');
-                  }
-                  setSourceText(finalHtml);
-                  accumulatedHtml = finalHtml;
-                } else if (data.type === 'error') {
-                  throw new Error(data.message);
-                }
-              } catch (parseError) {
-                // Skip invalid JSON lines
-              }
-            }
-          }
-        }
-
-        // Save the final content
-        if (selectedTranslationId && accumulatedHtml) {
-          updateMutation.mutate({
-            id: selectedTranslationId,
-            data: { 
-              sourceText: accumulatedHtml, 
-              title: !title || title === "Untitled Translation" ? fileName : title 
-            },
-          });
-          // Mark as saved to clear unsaved changes indicator
-          setLastSavedContent(accumulatedHtml);
-          setHasUnsavedChanges(false);
-        }
-
-        const tempDiv = document.createElement('div');
-        tempDiv.innerHTML = accumulatedHtml;
-        const charCount = tempDiv.textContent?.length || 0;
-
-        toast({
-          title: `✓ PDF imported successfully (Advanced)`,
-          description: `"${fileName}" (${pageCount} page${pageCount !== 1 ? 's' : ''}, ${charCount.toLocaleString()} characters)`,
+      // Save the changes if a translation is selected
+      if (selectedTranslationId) {
+        updateMutation.mutate({
+          id: selectedTranslationId,
+          data: { 
+            sourceText: data.html, 
+            title: !title || title === "Untitled Translation" ? fileName : title 
+          },
         });
       }
+
+      // Calculate character count
+      const tempDiv = document.createElement('div');
+      tempDiv.innerHTML = data.html;
+      const charCount = tempDiv.textContent?.length || 0;
+
+      toast({
+        title: `✓ PDF imported successfully (${importType === 'quick' ? 'Quick' : 'Deep'})`,
+        description: `"${fileName}" (${data.pageCount} page${data.pageCount !== 1 ? 's' : ''}, ${charCount.toLocaleString()} characters)`,
+      });
     } catch (error: unknown) {
       const message = (error as Error)?.message || "Failed to import PDF";
       toast({
@@ -1021,30 +929,26 @@ export default function Translate() {
     }
   };
 
-  const handleOpenLanguageDialog = () => {
-    setTempSelectedLanguages([...selectedLanguages]);
-    setIsLanguageDialogOpen(true);
-  };
-
-  const handleSaveLanguages = () => {
-    setSelectedLanguages(tempSelectedLanguages);
-    setIsLanguageDialogOpen(false);
+  // Language selection handler - immediate toggle with save
+  const handleLanguageToggle = async (languageCode: string) => {
+    const newSelectedLanguages = selectedLanguages.includes(languageCode)
+      ? selectedLanguages.filter(l => l !== languageCode)
+      : [...selectedLanguages, languageCode];
+    
+    setSelectedLanguages(newSelectedLanguages);
+    
     // Set active tab to first language if not set
-    if (tempSelectedLanguages.length > 0 && !activeLanguageTab) {
-      setActiveLanguageTab(tempSelectedLanguages[0]);
+    if (newSelectedLanguages.length > 0 && !activeLanguageTab) {
+      setActiveLanguageTab(newSelectedLanguages[0]);
     }
+    
     // Save to backend if translation exists
     if (selectedTranslationId) {
       updateMutation.mutate({
         id: selectedTranslationId,
-        data: { selectedLanguages: tempSelectedLanguages },
+        data: { selectedLanguages: newSelectedLanguages },
       });
     }
-  };
-
-  const handleCancelLanguages = () => {
-    setTempSelectedLanguages([...selectedLanguages]);
-    setIsLanguageDialogOpen(false);
   };
 
   const handleRerunLanguage = async (langCode: string) => {
@@ -1253,10 +1157,7 @@ export default function Translate() {
           <ToastAction
             altText="View translation"
             onClick={() => {
-              window.location.hash = currentTranslationId;
-              if (translation) {
-                handleSelectTranslation(translation);
-              }
+              setLocation(`/translate/${currentTranslationId}`);
             }}
           >
             View
@@ -1305,7 +1206,7 @@ export default function Translate() {
     if (!selectedTranslationId) return;
     
     try {
-      const shareUrl = `${window.location.origin}${window.location.pathname}#${selectedTranslationId}`;
+      const shareUrl = `${window.location.origin}/translate/${selectedTranslationId}`;
       await navigator.clipboard.writeText(shareUrl);
       
       setSharedOutputId(outputId);
@@ -1324,13 +1225,6 @@ export default function Translate() {
     }
   };
 
-  const handleLanguageToggle = (languageCode: string) => {
-    setTempSelectedLanguages(prev =>
-      prev.includes(languageCode)
-        ? prev.filter(l => l !== languageCode)
-        : [...prev, languageCode]
-    );
-  };
 
   const handleSaveOutput = (outputId: string) => {
     const editedText = editedOutputs[outputId];
@@ -1389,7 +1283,7 @@ export default function Translate() {
   }
 
   // Permission helper - check if user can edit a translation
-  const canEdit = (translation: Translation | null) => {
+  const canEdit = (translation: TranslationMetadata | Translation | null) => {
     if (!user || !translation) return false;
     
     // User can edit their own translations (public or private)
@@ -1402,7 +1296,7 @@ export default function Translate() {
   };
 
   // Helper to get ownership tooltip text
-  const getOwnershipTooltip = (translation: Translation) => {
+  const getOwnershipTooltip = (translation: TranslationMetadata | Translation) => {
     if (!user) return "";
     if (translation.userId === user.id) {
       return "Owned by me";
@@ -1418,12 +1312,11 @@ export default function Translate() {
     return `Owned by ${translation.userId}`;
   };
 
-  // Get currently selected translation - use stored data first (for newly created items), fall back to list lookup
-  const selectedTranslation = selectedTranslationData?.id === selectedTranslationId 
-    ? selectedTranslationData 
-    : translations.find(t => t.id === selectedTranslationId) || null;
+  // Get currently selected translation - use fetched full data first, fall back to stored data for newly created items
+  const selectedTranslation = selectedTranslationFull || selectedTranslationData;
   const canEditSelected = canEdit(selectedTranslation);
   const isMobile = useIsMobile();
+  const [mobileActivePanel, setMobileActivePanel] = useState<PanelType>('source');
 
   // Create proofreading from translation output
   const createProofreadingMutation = useMutation({
@@ -1546,89 +1439,31 @@ export default function Translate() {
             <div className="space-y-0.5 p-2" style={{ width: '100%', maxWidth: '20rem' }}>
               <TooltipProvider>
                 {translations.map((translation) => (
-                  <Card
+                  <HistoryCard
                     key={translation.id}
-                    className={`group cursor-pointer p-2 hover-elevate overflow-hidden ${
-                      selectedTranslationId === translation.id ? "bg-sidebar-accent" : ""
-                    }`}
+                    item={translation}
+                    isSelected={selectedTranslationId === translation.id}
+                    isRenaming={isRenamingId === translation.id}
+                    renameValue={renameValue}
+                    canEdit={canEdit(translation)}
+                    ownershipTooltip={getOwnershipTooltip(translation)}
                     onClick={() => handleSelectTranslation(translation)}
-                    data-testid={`card-translation-${translation.id}`}
-                  >
-                    <div className="flex items-start gap-2 min-w-0">
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <div className="flex-shrink-0 pt-0.5" onClick={(e) => e.stopPropagation()}>
-                            {translation.isPrivate ? (
-                              <Lock className="h-4 w-4 text-muted-foreground/60" data-testid={`icon-ownership-private-${translation.id}`} />
-                            ) : (
-                              <Globe className="h-4 w-4 text-muted-foreground/60" data-testid={`icon-ownership-public-${translation.id}`} />
-                            )}
-                          </div>
-                        </TooltipTrigger>
-                        <TooltipContent side="right">
-                          <p>{getOwnershipTooltip(translation)}</p>
-                        </TooltipContent>
-                      </Tooltip>
-                      <div className="flex-1 min-w-0">
-                        {isRenamingId === translation.id ? (
-                          <Input
-                            value={renameValue}
-                            onChange={(e) => setRenameValue(e.target.value)}
-                            onBlur={() => handleRenameInList(translation.id, renameValue)}
-                            onKeyDown={(e) => {
-                              if (e.key === "Enter") {
+                    onStartRename={() => {
+                      setIsRenamingId(translation.id);
+                      setRenameValue(translation.title);
+                    }}
+                    onRenameChange={setRenameValue}
+                    onRenameConfirm={() => {
                                 setIsEscapePressed(false);
                                 handleRenameInList(translation.id, renameValue);
-                              } else if (e.key === "Escape") {
+                    }}
+                    onRenameCancel={() => {
                                 setIsEscapePressed(true);
                                 setIsRenamingId(null);
-                              }
-                            }}
-                            autoFocus
-                            className="h-auto p-0 border-none focus-visible:ring-0"
-                            onClick={(e) => e.stopPropagation()}
-                            data-testid="input-rename-translation"
-                          />
-                        ) : (
-                          <div className="flex items-center gap-2 min-w-0">
-                            <h3 className="text-sm font-medium truncate flex-1 min-w-0">{translation.title}</h3>
-                          </div>
-                        )}
-                        <p className="text-xs text-muted-foreground mt-1 truncate">
-                          {new Date(translation.updatedAt!).toLocaleDateString()}
-                        </p>
-                      </div>
-                      {canEdit(translation) && (
-                        <div className="flex items-center gap-1 invisible group-hover:visible flex-shrink-0">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-6 w-6"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setIsRenamingId(translation.id);
-                              setRenameValue(translation.title);
-                            }}
-                            data-testid={`button-edit-${translation.id}`}
-                          >
-                            <Pencil className="h-3 w-3" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-6 w-6 text-destructive"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setDeleteConfirmId(translation.id);
-                            }}
-                            data-testid={`button-delete-${translation.id}`}
-                          >
-                            <Trash2 className="h-3 w-3" />
-                          </Button>
-                        </div>
-                      )}
-                    </div>
-                  </Card>
+                    }}
+                    onDelete={() => setDeleteConfirmId(translation.id)}
+                    testIdPrefix="translation"
+                  />
                   ))}
               </TooltipProvider>
               
@@ -1659,9 +1494,10 @@ export default function Translate() {
         )}
       </div>
 
-      {/* Mobile History Sheet Button */}
+      {/* Mobile Header - History + Title + Edit + New */}
       {isMobile && (
-        <div className="flex items-center justify-between gap-2 border-b p-3 bg-background md:hidden">
+        <div className="flex items-center gap-2 border-b p-3 bg-background md:hidden">
+          {/* History button */}
           <MobileHistorySheet
             translations={translations}
             isLoading={translationsLoading}
@@ -1676,97 +1512,244 @@ export default function Translate() {
             }}
             canEdit={canEdit}
             getOwnershipTooltip={getOwnershipTooltip}
+            hasNextPage={hasNextPage}
+            fetchNextPage={fetchNextPage}
+            isFetchingNextPage={isFetchingNextPage}
             trigger={
-              <Button variant="outline" size="sm" className="gap-2">
+              <Button variant="ghost" size="icon" className="h-10 w-10 min-h-touch min-w-touch flex-shrink-0">
                 <History className="h-4 w-4" />
-                History
-                {selectedTranslation && (
-                  <span className="text-xs text-muted-foreground truncate max-w-[120px]">
-                    {selectedTranslation.title}
-                  </span>
-                )}
               </Button>
             }
           />
+          
+          {/* Title + Edit */}
+          <div className="flex items-center gap-2 min-w-0 flex-1">
+            {isEditingTitle ? (
+              <div className="flex items-center gap-1 flex-1">
+                <Input
+                  value={editedTitle}
+                  onChange={(e) => setEditedTitle(e.target.value)}
+                  className="h-9 flex-1"
+                  autoFocus
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') handleSaveTitle();
+                    if (e.key === 'Escape') handleCancelEditingTitle();
+                  }}
+                />
+                <Button size="icon" variant="ghost" onClick={handleSaveTitle} disabled={updateMutation.isPending} className="h-10 w-10 min-h-touch min-w-touch flex-shrink-0">
+                  {updateMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                </Button>
+                <Button size="icon" variant="ghost" onClick={handleCancelEditingTitle} className="h-10 w-10 min-h-touch min-w-touch flex-shrink-0">
+                  <X className="h-4 w-4" />
+                </Button>
+              </div>
+            ) : (
+              <>
+                <h1 className="text-base font-semibold truncate flex-1">{title || "Untitled"}</h1>
+                {canEditSelected && selectedTranslationId && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 flex-shrink-0"
+                    onClick={handleStartEditingTitle}
+                  >
+                    <Pencil className="h-3 w-3" />
+                  </Button>
+                )}
+              </>
+            )}
+          </div>
+          
+          {/* New button (icon only) */}
           <Button
-            size="sm"
+            size="icon"
             onClick={handleNewTranslation}
             disabled={createMutation.isPending}
             variant="outline"
-            className="gap-2"
+            className="h-10 w-10 min-h-touch min-w-touch flex-shrink-0"
           >
             {createMutation.isPending ? (
               <Loader2 className="h-4 w-4 animate-spin" />
             ) : (
               <Plus className="h-4 w-4" />
             )}
-            New
           </Button>
         </div>
       )}
 
-      {/* Main Content Area - Middle + Right panels */}
-      <div className="flex flex-1 flex-col md:flex-row min-w-0 md:overflow-hidden">
-        {/* Middle Panel - Input */}
-        <div className="flex flex-1 flex-col min-w-0 md:overflow-hidden">
-          <TooltipProvider delayDuration={100}>
-            <div className="flex flex-wrap items-center gap-2 border-b p-3 md:p-4">
-            {/* Language Multi-Select */}
-            <div className="flex items-center gap-2 flex-shrink-0 w-full sm:w-auto">
-            <Label className="text-sm font-medium whitespace-nowrap">Languages:</Label>
-            <Dialog open={isLanguageDialogOpen} onOpenChange={setIsLanguageDialogOpen}>
-              <DialogTrigger asChild>
+      {/* Mobile Panel Toggle */}
+      {isMobile && selectedTranslationId && (
+        <div className="p-3 border-b md:hidden">
+          <MobilePanelToggle
+            activePanel={mobileActivePanel}
+            onPanelChange={setMobileActivePanel}
+            sourceLabel="Source"
+            outputLabel="Translations"
+            sourceIcon={<FileText className="h-4 w-4" />}
+            outputIcon={<Languages className="h-4 w-4" />}
+          />
+        </div>
+      )}
+
+      {/* Mobile Collapsible Controls */}
+      {isMobile && selectedTranslationId && (
+        <CollapsibleControls
+          title="Translation Options"
+          badge={selectedLanguages.length > 0 ? `${selectedLanguages.length} lang` : undefined}
+          modelName={models.find(m => m.id === selectedModel)?.name}
+          className="md:hidden"
+        >
+          {/* Languages Selection */}
+          <div className="space-y-2">
+            <Label className="text-sm font-medium">Target Languages</Label>
+            <Popover open={isMobileLanguagePopoverOpen} onOpenChange={setIsMobileLanguagePopoverOpen}>
+              <PopoverTrigger asChild>
                 <Button 
                   variant="outline" 
-                  className="w-32" 
-                  onClick={handleOpenLanguageDialog}
+                  role="combobox"
+                  aria-expanded={isMobileLanguagePopoverOpen}
+                  className="w-full justify-between h-11 min-h-touch" 
                   disabled={!canEditSelected}
-                  data-testid="button-select-languages"
+                  data-testid="button-select-languages-mobile"
                 >
                   {selectedLanguages.length === 0
-                    ? "Select..."
-                    : `${selectedLanguages.length} selected`}
+                    ? "Select languages..."
+                    : `${selectedLanguages.length} language${selectedLanguages.length > 1 ? 's' : ''} selected`}
+                  <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                 </Button>
-              </DialogTrigger>
-              <DialogContent className="max-w-md">
-                <DialogHeader>
-                  <DialogTitle>Select Target Languages</DialogTitle>
-                </DialogHeader>
-                <ScrollArea className="max-h-96">
-                  <div className="space-y-2 p-4">
-                    {activeLanguages.map((lang) => (
-                      <div key={lang.code} className="flex items-center gap-2">
-                        <Checkbox
-                          id={`lang-${lang.code}`}
-                          checked={tempSelectedLanguages.includes(lang.code)}
-                          onCheckedChange={() => handleLanguageToggle(lang.code)}
-                          data-testid={`checkbox-lang-${lang.code}`}
-                        />
-                        <Label htmlFor={`lang-${lang.code}`} className="cursor-pointer">
+              </PopoverTrigger>
+              <PopoverContent className="w-[calc(100vw-2rem)] p-0" align="start">
+                <Command>
+                  <CommandInput placeholder="Search languages..." />
+                  <CommandList>
+                    <CommandEmpty>No language found.</CommandEmpty>
+                    <CommandGroup>
+                      {activeLanguages.map((lang) => (
+                        <CommandItem
+                          key={lang.code}
+                          value={`${lang.name} ${lang.nativeName}`}
+                          onSelect={() => handleLanguageToggle(lang.code)}
+                          className="min-h-touch"
+                        >
+                          <Check
+                            className={`mr-2 h-4 w-4 ${
+                              selectedLanguages.includes(lang.code) ? "opacity-100" : "opacity-0"
+                            }`}
+                          />
                           {lang.name} ({lang.nativeName})
-                        </Label>
-                      </div>
-                    ))}
-                  </div>
-                </ScrollArea>
-                <DialogFooter>
-                  <Button variant="outline" onClick={handleCancelLanguages} data-testid="button-cancel-languages">
-                    Cancel
-                  </Button>
-                  <Button onClick={handleSaveLanguages} data-testid="button-save-languages">
-                    Save
-                  </Button>
-                </DialogFooter>
-              </DialogContent>
-            </Dialog>
+                        </CommandItem>
+                      ))}
+                    </CommandGroup>
+                  </CommandList>
+                </Command>
+              </PopoverContent>
+            </Popover>
           </div>
 
           {/* Model Selection */}
-          <div className="flex items-center gap-2 flex-1 min-w-0 w-full sm:w-auto">
+          <div className="space-y-2">
+            <Label className="text-sm font-medium">Model</Label>
+            <Select value={selectedModel} onValueChange={setSelectedModel} disabled={!canEditSelected}>
+              <SelectTrigger className="w-full h-11 min-h-touch">
+                <SelectValue placeholder="Select model..." />
+              </SelectTrigger>
+              <SelectContent>
+                {models.filter(m => m.isActive).map((model) => (
+                  <SelectItem key={model.id} value={model.id} className="min-h-touch">
+                    {model.name} {model.isDefault && "(Default)"}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </CollapsibleControls>
+      )}
+
+      {/* Main Content Wrapper - Header + Two Columns */}
+      <div className="flex flex-1 flex-col min-w-0 overflow-hidden">
+        {/* Desktop Header Row - Title + Controls (like proofread) */}
+        <div className="hidden md:flex items-center gap-4 border-b p-3 md:p-4">
+          {/* Left side: Title + Privacy Toggle */}
+          <div className="flex items-center gap-2 min-w-0 flex-1">
+            {isEditingTitle ? (
+              <div className="flex items-center gap-2">
+                <Input
+                  value={editedTitle}
+                  onChange={(e) => setEditedTitle(e.target.value)}
+                  className="w-48"
+                  autoFocus
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') handleSaveTitle();
+                    if (e.key === 'Escape') handleCancelEditingTitle();
+                  }}
+                />
+                <Button size="icon" variant="ghost" onClick={handleSaveTitle} disabled={updateMutation.isPending} className="h-8 w-8">
+                  {updateMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                </Button>
+                <Button size="icon" variant="ghost" onClick={handleCancelEditingTitle} className="h-8 w-8">
+                  <X className="h-4 w-4" />
+                </Button>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2 min-w-0">
+                <h1 className="text-lg font-semibold truncate">{title || "Untitled"}</h1>
+                {canEditSelected && selectedTranslationId && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 flex-shrink-0"
+                    onClick={handleStartEditingTitle}
+                  >
+                    <Pencil className="h-3 w-3" />
+                  </Button>
+                )}
+              </div>
+            )}
+          </div>
+          
+          {/* Right side: Privacy Toggle, Languages, Model, Translate Button */}
+          <TooltipProvider delayDuration={100}>
+            <div className="flex items-center gap-4 flex-shrink-0">
+            {/* Public/Private Toggle */}
+            {canEditSelected && selectedTranslationId && (
+              <div className="flex items-center gap-2 flex-shrink-0">
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={isPrivate}
+                  onClick={() => handleTogglePrivacy(!isPrivate)}
+                  className={`
+                    relative inline-flex h-7 w-12 shrink-0 cursor-pointer items-center rounded-full 
+                    border border-gray-300 transition-colors duration-200
+                    focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2
+                    ${isPrivate ? 'bg-primary' : 'bg-input'}
+                  `}
+                >
+                  <span
+                    className={`
+                      pointer-events-none flex h-5 w-5 items-center justify-center rounded-full 
+                      bg-background shadow-lg ring-0 transition-transform duration-200
+                      border border-gray-300
+                      ${isPrivate ? 'translate-x-6' : 'translate-x-0.5'}
+                    `}
+                  >
+                    {isPrivate ? (
+                      <Lock className="h-3 w-3 text-muted-foreground" />
+                    ) : (
+                      <Globe className="h-3 w-3 text-muted-foreground" />
+                    )}
+                  </span>
+                </button>
+                <Label className="text-sm">{isPrivate ? 'Private' : 'Public'}</Label>
+              </div>
+            )}
+
+          {/* Model Selection */}
+              <div className="flex items-center gap-2">
             <Label className="text-sm font-medium whitespace-nowrap">Model:</Label>
             <Select value={selectedModel} onValueChange={setSelectedModel} disabled={!canEditSelected}>
-              <SelectTrigger className="w-full max-w-xs flex-1" data-testid="select-model">
-                <SelectValue placeholder="Select model..." />
+                  <SelectTrigger className="w-40" data-testid="select-model">
+                    <SelectValue placeholder="Select..." />
               </SelectTrigger>
               <SelectContent>
                 {models.filter(m => m.isActive).map((model) => (
@@ -1776,6 +1759,53 @@ export default function Translate() {
                 ))}
               </SelectContent>
             </Select>
+          </div>
+
+            {/* Language Multi-Select */}
+              <div className="flex items-center gap-2">
+            <Label className="text-sm font-medium whitespace-nowrap">Languages:</Label>
+                <Popover open={isLanguagePopoverOpen} onOpenChange={setIsLanguagePopoverOpen}>
+                  <PopoverTrigger asChild>
+                <Button 
+                  variant="outline" 
+                      role="combobox"
+                      aria-expanded={isLanguagePopoverOpen}
+                      className="w-40 justify-between" 
+                  disabled={!canEditSelected}
+                  data-testid="button-select-languages"
+                >
+                  {selectedLanguages.length === 0
+                    ? "Select..."
+                    : `${selectedLanguages.length} selected`}
+                      <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-64 p-0" align="start">
+                    <Command>
+                      <CommandInput placeholder="Search languages..." />
+                      <CommandList>
+                        <CommandEmpty>No language found.</CommandEmpty>
+                        <CommandGroup>
+                    {activeLanguages.map((lang) => (
+                            <CommandItem
+                              key={lang.code}
+                              value={`${lang.name} ${lang.nativeName}`}
+                              onSelect={() => handleLanguageToggle(lang.code)}
+                          data-testid={`checkbox-lang-${lang.code}`}
+                            >
+                              <Check
+                                className={`mr-2 h-4 w-4 ${
+                                  selectedLanguages.includes(lang.code) ? "opacity-100" : "opacity-0"
+                                }`}
+                        />
+                          {lang.name} ({lang.nativeName})
+                            </CommandItem>
+                    ))}
+                        </CommandGroup>
+                      </CommandList>
+                    </Command>
+                  </PopoverContent>
+                </Popover>
           </div>
 
           {/* Translate Button */}
@@ -1793,7 +1823,6 @@ export default function Translate() {
                         disabled={!selectedTranslationId || !canEditSelected || isTranslating || selectedLanguages.length === 0}
                         className="flex-shrink-0"
                         data-testid="button-translate"
-                        variant="outline"
                       >
                         {isTranslating && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                         Translate
@@ -1812,7 +1841,6 @@ export default function Translate() {
                   disabled={!selectedTranslationId || !canEditSelected || isTranslating || selectedLanguages.length === 0}
                   className="flex-shrink-0"
                   data-testid="button-translate"
-                  variant="outline"
                 >
                   {isTranslating && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                   Translate
@@ -1822,78 +1850,27 @@ export default function Translate() {
           })()}
           </div>
         </TooltipProvider>
+        </div>
 
-        <div className="flex-1 overflow-y-auto md:overflow-hidden p-4 md:p-6">
-          <div className="flex h-full flex-col gap-3 md:gap-4">
-            <div className="flex-shrink-0">
-              <div className="flex items-center gap-2 sm:gap-4">
-                <div className="flex-1 min-w-0">
-                  {isEditingTitle ? (
-                    <Input
-                      value={editedTitle}
-                      onChange={(e) => setEditedTitle(e.target.value)}
-                      onBlur={handleSaveTitle}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") {
-                          handleSaveTitle();
-                        } else if (e.key === "Escape") {
-                          handleCancelEditingTitle();
-                        }
-                      }}
-                      autoFocus
-                      placeholder="Enter translation title..."
-                      disabled={!selectedTranslationId || !canEditSelected}
-                      data-testid="input-translation-title"
-                    />
-                  ) : (
-                    <div
-                      className={`rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background min-h-9 ${canEditSelected ? 'cursor-text hover:border-accent-foreground/20' : 'cursor-default'}`}
-                      onClick={selectedTranslationId && canEditSelected ? handleStartEditingTitle : undefined}
-                      data-testid="text-translation-title"
-                    >
-                      {title || "Enter translation title..."}
-                    </div>
-                  )}
-                </div>
-                {selectedTranslationId && (
-                  <div className="flex items-center gap-2 flex-shrink-0">
-                    {/* Mobile: Show only icon, Desktop: Show full labels */}
-                    <div className="hidden sm:flex items-center gap-2">
-                      <Globe className="h-4 w-4 text-muted-foreground" />
-                      <span className="text-xs text-muted-foreground">Public</span>
-                    </div>
-                    {/* Mobile icon - changes based on state */}
-                    <div className="sm:hidden">
-                      {isPrivate ? (
-                        <Lock className="h-4 w-4 text-muted-foreground" />
-                      ) : (
-                        <Globe className="h-4 w-4 text-muted-foreground" />
-                      )}
-                    </div>
-                    <Switch
-                      checked={isPrivate}
-                      onCheckedChange={handleTogglePrivacy}
-                      disabled={!canEditSelected}
-                      className="data-[state=checked]:bg-red-600 data-[state=unchecked]:bg-green-600"
-                      data-testid="switch-toggle-privacy"
-                    />
-                    <div className="hidden sm:flex items-center gap-2">
-                      <span className="text-xs text-muted-foreground">Private</span>
-                      <Lock className="h-4 w-4 text-muted-foreground" />
-                    </div>
-                  </div>
-                )}
-              </div>
+      {/* Main Content Area - Middle + Right panels */}
+      <div className={`flex flex-1 flex-col md:flex-row min-w-0 overflow-hidden ${isMobile ? 'pb-20' : ''}`}>
+        {/* Middle Panel - Input */}
+        <div className={`flex flex-1 flex-col min-w-0 overflow-hidden ${isMobile && mobileActivePanel !== 'source' ? 'hidden' : ''}`}>
+
+        <div className="flex-1 overflow-y-auto md:overflow-hidden flex flex-col">
+          {/* Row 1: Source Text label - matches TabsList height on right */}
+          {!isMobile && (
+            <div className="border-b px-4 md:px-6 py-3 flex-shrink-0">
+              <h2 className="text-lg font-semibold">Source Text</h2>
             </div>
-
+          )}
+          
+          <div className="flex-1 overflow-y-auto md:overflow-hidden p-4 md:p-6">
+          <div className="flex h-full flex-col gap-3 md:gap-4">
             <div className="flex flex-1 flex-col min-h-0">
+              {/* Row 2: Import (left) | chars + share (right) */}
               <div className="mb-2 flex items-center justify-between flex-shrink-0">
                 <div className="flex items-center gap-2">
-                  {!isMobile && (
-                    <Label className="text-sm font-medium">
-                      Source Text
-                    </Label>
-                  )}
                   {/* Unified Import Dropdown */}
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
@@ -2043,14 +2020,10 @@ export default function Translate() {
           </div>
         </div>
         </div>
+        </div>
 
         {/* Right Panel - Output */}
-        <div className="flex flex-1 flex-col min-w-0 border-t md:border-t-0 md:border-l md:overflow-hidden">
-          <div className="border-b px-4 py-5 flex-shrink-0">
-            <h2 className="text-lg font-semibold">Translations</h2>
-          </div>
-
-          <div className="flex-1 overflow-y-auto md:overflow-hidden">
+        <div className={`flex flex-1 flex-col min-w-0 border-t md:border-t-0 md:border-l overflow-hidden ${isMobile && mobileActivePanel !== 'output' ? 'hidden' : ''}`}>
           {!selectedTranslationId ? (
             <div className="flex h-full items-center justify-center p-8 text-center">
               <div>
@@ -2071,7 +2044,10 @@ export default function Translate() {
             </div>
           ) : (
             <Tabs value={activeLanguageTab} onValueChange={setActiveLanguageTab} className="flex h-full flex-col">
-              <TabsList className="mx-2 md:mx-4 mt-2 md:mt-4 w-auto justify-start overflow-x-auto overflow-y-hidden flex-shrink-0 scrollbar-hide">
+              {/* Row 1: Language tabs - matches Source Text header height */}
+              {!isMobile && (
+                <div className="border-b px-4 md:px-6 py-2 flex-shrink-0">
+                  <TabsList className="w-auto justify-start overflow-x-auto overflow-y-hidden scrollbar-hide h-auto p-0 bg-transparent">
                 {selectedLanguages.map((langCode) => {
                   const language = activeLanguages.find(l => l.code === langCode);
                   const output = outputs.find(o => o.languageCode === langCode);
@@ -2083,7 +2059,7 @@ export default function Translate() {
                   const isPollingStopped = output && stoppedPollingOutputs.has(output.id);
                   
                   return (
-                    <TabsTrigger key={langCode} value={langCode} data-testid={`tab-${langCode}`} className="gap-2 h-16 md:h-20 whitespace-nowrap">
+                    <TabsTrigger key={langCode} value={langCode} data-testid={`tab-${langCode}`} className="gap-1 whitespace-nowrap data-[state=active]:bg-background">
                       {language?.name || langCode}
                       {isTranslating && !isPollingStopped && <Loader2 className="h-3 w-3 animate-spin" />}
                       {isProofreading && !isPollingStopped && <Loader2 className="h-3 w-3 animate-spin text-blue-500" />}
@@ -2092,7 +2068,34 @@ export default function Translate() {
                     </TabsTrigger>
                   );
                 })}
-              </TabsList>
+                  </TabsList>
+                </div>
+              )}
+              
+              {/* Mobile: Show tabs normally */}
+              {isMobile && (
+                <TabsList className="mx-2 mt-2 w-auto justify-start overflow-x-auto overflow-y-hidden flex-shrink-0 scrollbar-hide">
+                  {selectedLanguages.map((langCode) => {
+                    const language = activeLanguages.find(l => l.code === langCode);
+                    const output = outputs.find(o => o.languageCode === langCode);
+                    const isTranslating = output?.translationStatus === 'translating';
+                    const isProofreading = output?.proofreadStatus === 'proof_reading' || output?.proofreadStatus === 'applying_proofread';
+                    const isCompleted = output?.translationStatus === 'completed' && output?.proofreadStatus === 'completed';
+                    const isFailed = output?.translationStatus === 'failed' || output?.proofreadStatus === 'failed';
+                    const isPollingStopped = output && stoppedPollingOutputs.has(output.id);
+                    
+                    return (
+                      <TabsTrigger key={langCode} value={langCode} data-testid={`tab-mobile-${langCode}`} className="gap-1 whitespace-nowrap">
+                        {language?.name || langCode}
+                        {isTranslating && !isPollingStopped && <Loader2 className="h-3 w-3 animate-spin" />}
+                        {isProofreading && !isPollingStopped && <Loader2 className="h-3 w-3 animate-spin text-blue-500" />}
+                        {isCompleted && <Check className="h-3 w-3 text-green-600" />}
+                        {isFailed && <X className="h-3 w-3 text-red-600" />}
+                      </TabsTrigger>
+                    );
+                  })}
+                </TabsList>
+              )}
 
               {selectedLanguages.map((langCode) => {
                 const output = outputs.find(o => o.languageCode === langCode);
@@ -2104,7 +2107,7 @@ export default function Translate() {
                 return <TabsContent
                   key={langCode}
                   value={langCode}
-                  className="flex-1 overflow-hidden"
+                  className="flex-1 overflow-hidden data-[state=active]:flex data-[state=active]:flex-col"
                 >
                   {isTranslating && output && stoppedPollingOutputs.has(output.id) ? (
                     <div className="flex h-full items-center justify-center p-8">
@@ -2154,6 +2157,9 @@ export default function Translate() {
                           <Label className="text-sm font-medium">
                             {output.languageName}
                           </Label>
+                          {/* Desktop: Show text labels */}
+                          {!isMobile && (
+                            <>
                           {output.translationStatus === 'completed' && (
                             <span className="inline-flex items-center gap-1 text-green-600">
                               <Check className="h-3 w-3" />
@@ -2207,6 +2213,83 @@ export default function Translate() {
                                 </Button>
                               )}
                             </>
+                              )}
+                            </>
+                          )}
+                          {/* Mobile: Show icon-only status indicators */}
+                          {isMobile && (
+                            <div className="flex items-center gap-0.5">
+                              {/* Translation status icon */}
+                              <span 
+                                className={`inline-flex items-center justify-center h-7 w-7 rounded ${
+                                  output.translationStatus === 'completed' 
+                                    ? 'text-green-600' 
+                                    : 'text-muted-foreground/40'
+                                }`}
+                                title={output.translationStatus === 'completed' ? 'Translated' : 'Not translated'}
+                              >
+                                <Languages className="h-4 w-4" />
+                              </span>
+                              {/* Proofread status icon - spinner or tick */}
+                              <span 
+                                className={`inline-flex items-center justify-center h-7 w-7 rounded ${
+                                  output.proofreadStatus === 'completed' 
+                                    ? 'text-green-600' 
+                                    : output.proofreadStatus === 'proofreading' && !stoppedPollingOutputs.has(output.id)
+                                    ? 'text-blue-600'
+                                    : 'text-muted-foreground/40'
+                                }`}
+                                title={output.proofreadStatus === 'completed' ? 'Proofread complete' : output.proofreadStatus === 'proofreading' ? 'Generating changes...' : 'Not proofread'}
+                              >
+                                {output.proofreadStatus === 'proofreading' && !stoppedPollingOutputs.has(output.id) ? (
+                                  <Loader2 className="h-4 w-4 animate-spin" />
+                                ) : (
+                                  <Search className="h-4 w-4" />
+                                )}
+                              </span>
+                              {/* Applying changes status icon - tool with spinner */}
+                              {output.proofreadStatus === 'applying_proofread' && !stoppedPollingOutputs.has(output.id) && (
+                                <span 
+                                  className="inline-flex items-center justify-center h-7 w-7 rounded text-blue-600"
+                                  title="Applying changes..."
+                                >
+                                  <Loader2 className="h-4 w-4 animate-spin" />
+                                </span>
+                              )}
+                              {/* View Changes icon button */}
+                              {output.proofreadProposedChanges != null && (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-7 w-7 p-0"
+                                  onClick={() => {
+                                    setProofreadChangesOutputId(output.id);
+                                    setProofreadChangesDialogOpen(true);
+                                  }}
+                                  title="View Changes"
+                                >
+                                  <Eye className="h-4 w-4" />
+                                </Button>
+                              )}
+                              {/* Stop button */}
+                              {!stoppedPollingOutputs.has(output.id) && output.translationStatus === 'completed' && (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-7 w-7 p-0"
+                                  onClick={() => {
+                                    setStoppedPollingOutputs(prev => new Set(prev).add(output.id));
+                                    toast({
+                                      title: "Polling stopped",
+                                      description: "You can restart the translation if needed.",
+                                    });
+                                  }}
+                                  title="Stop polling"
+                                >
+                                  <Square className="h-4 w-4 fill-current" />
+                                </Button>
+                              )}
+                            </div>
                           )}
                         </div>
                         {/* Icons - desktop only */}
@@ -2274,61 +2357,69 @@ export default function Translate() {
                             </DropdownMenu>
                           </div>
                         )}
-                      </div>
-                      
-                      {/* Icons row - mobile only */}
+                        {/* Icons - mobile only (right aligned) */}
                       {isMobile && (
-                        <div className="flex items-center gap-1 flex-shrink-0">
+                          <div className="flex items-center gap-0.5">
+                            {/* Rerun translation button - disabled during running */}
                           <Button
                             variant="ghost"
                             size="sm"
+                              className="h-7 w-7 p-0"
                             onClick={() => handleRerunLanguage(langCode)}
-                            disabled={isTranslating}
-                            data-testid={`button-rerun-${output.id}`}
+                              disabled={isTranslating || isProofreading || !stoppedPollingOutputs.has(output.id)}
                             title="Rerun translation"
                           >
                             <RotateCw className="h-4 w-4" />
                           </Button>
+                            {/* Share dropdown menu - disabled during running */}
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
                           <Button
                             variant="ghost"
                             size="sm"
+                                  className="h-7 w-7 p-0"
+                                  disabled={!output.translatedText || isProofreading || !stoppedPollingOutputs.has(output.id)}
+                                >
+                                  <Share className="h-4 w-4" />
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end">
+                                <DropdownMenuItem
                             onClick={() => handleCopyOutput(editedOutputs[output.id] ?? output.translatedText ?? '', output.id)}
-                            data-testid={`button-copy-${output.id}`}
                           >
                             {copiedOutputId === output.id ? (
-                              <Check className="h-4 w-4" />
+                                    <Check className="mr-2 h-4 w-4" />
                             ) : (
-                              <Copy className="h-4 w-4" />
+                                    <Copy className="mr-2 h-4 w-4" />
                             )}
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
+                                  Copy Text
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
                             onClick={() => handleCreateGoogleDoc(output.id, output.languageName)}
-                            disabled={!output.translatedText || creatingGoogleDocOutputId === output.id || isTranslating || isProofreading}
-                            data-testid={`button-create-google-doc-proofreading-${output.id}`}
-                            title="Create Google Doc"
+                                  disabled={!output.translatedText || creatingGoogleDocOutputId === output.id}
                           >
                             {creatingGoogleDocOutputId === output.id ? (
-                              <Loader2 className="h-4 w-4 animate-spin" />
+                                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                             ) : (
-                              <FileText className="h-4 w-4" />
+                                    <FileText className="mr-2 h-4 w-4" />
                             )}
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
+                                  Create Google Doc
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
                             onClick={() => handleShareOutput(output.id)}
-                            data-testid={`button-share-${output.id}`}
                           >
                             {sharedOutputId === output.id ? (
-                              <Check className="h-4 w-4" />
+                                    <Check className="mr-2 h-4 w-4" />
                             ) : (
-                              <Share className="h-4 w-4" />
+                                    <Link2 className="mr-2 h-4 w-4" />
                             )}
-                          </Button>
+                                  Share Link
+                                </DropdownMenuItem>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
                         </div>
                       )}
+                      </div>
 
                       {/* Show restart button if polling is stopped */}
                       {stoppedPollingOutputs.has(output.id) && (
@@ -2371,7 +2462,7 @@ export default function Translate() {
                             )}
                           </div>
                           <div>
-                            Last Updated: {output.updatedAt ? formatDistanceToNow(new Date(output.updatedAt), { addSuffix: true }) : 'N/A'}
+                            {isMobile ? `Updated: ${formatRelativeTime(output.updatedAt)}` : `Last Updated: ${formatDate(output.updatedAt)}`}
                           </div>
                         </div>
                         <Button
@@ -2394,12 +2485,15 @@ export default function Translate() {
                     </div>
                   ) : output ? (
                     <div className="flex flex-col h-full px-4 md:px-6 pt-3 md:pt-4 pb-4 md:pb-6 gap-3 md:gap-4">
-                      {/* Header with language, status, and View Changes */}
+                      {/* Header with language, status icons, and actions */}
                       <div className="flex items-center justify-between flex-shrink-0 gap-2">
                         <div className="flex items-center gap-2 flex-wrap">
                           <Label className="text-sm font-medium">
                             {output.languageName}
                           </Label>
+                          {/* Desktop: Show text labels */}
+                          {!isMobile && (
+                            <>
                           {output.translationStatus === 'completed' && (
                             <span className="inline-flex items-center gap-1 text-green-600">
                               <Check className="h-3 w-3" />
@@ -2423,6 +2517,50 @@ export default function Translate() {
                             >
                               View Changes
                             </Badge>
+                              )}
+                            </>
+                          )}
+                          {/* Mobile: Show icon-only status indicators */}
+                          {isMobile && (
+                            <div className="flex items-center gap-0.5">
+                              {/* Translate status icon */}
+                              <span 
+                                className={`inline-flex items-center justify-center h-7 w-7 rounded ${
+                                  output.translationStatus === 'completed' 
+                                    ? 'text-green-600' 
+                                    : 'text-muted-foreground/40'
+                                }`}
+                                title={output.translationStatus === 'completed' ? 'Translated' : 'Not translated'}
+                              >
+                                <Languages className="h-4 w-4" />
+                              </span>
+                              {/* Proofread status icon */}
+                              <span 
+                                className={`inline-flex items-center justify-center h-7 w-7 rounded ${
+                                  output.proofreadStatus === 'completed' 
+                                    ? 'text-green-600' 
+                                    : 'text-muted-foreground/40'
+                                }`}
+                                title={output.proofreadStatus === 'completed' ? 'Proofread' : 'Not proofread'}
+                              >
+                                <Search className="h-4 w-4" />
+                              </span>
+                              {/* View Changes icon button */}
+                              {output.proofreadProposedChanges != null && (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-7 w-7 p-0"
+                                  onClick={() => {
+                                    setProofreadChangesOutputId(output.id);
+                                    setProofreadChangesDialogOpen(true);
+                                  }}
+                                  title="View Changes"
+                                >
+                                  <Eye className="h-4 w-4" />
+                                </Button>
+                              )}
+                            </div>
                           )}
                         </div>
                         {/* Icons - desktop only */}
@@ -2490,61 +2628,69 @@ export default function Translate() {
                             </DropdownMenu>
                           </div>
                         )}
-                      </div>
-                      
-                      {/* Icons row - mobile only */}
+                        {/* Icons - mobile only (right aligned) */}
                       {isMobile && (
-                        <div className="flex items-center gap-1 flex-shrink-0">
+                          <div className="flex items-center gap-0.5">
+                            {/* Rerun translation button */}
                           <Button
                             variant="ghost"
                             size="sm"
+                              className="h-7 w-7 p-0"
                             onClick={() => handleRerunLanguage(langCode)}
                             disabled={isTranslating}
-                            data-testid={`button-rerun-${output.id}`}
                             title="Rerun translation"
                           >
                             <RotateCw className="h-4 w-4" />
                           </Button>
+                            {/* Share dropdown menu */}
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
                           <Button
                             variant="ghost"
                             size="sm"
+                                  className="h-7 w-7 p-0"
+                                  disabled={!output.translatedText}
+                                >
+                                  <Share className="h-4 w-4" />
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end">
+                                <DropdownMenuItem
                             onClick={() => handleCopyOutput(editedOutputs[output.id] ?? output.translatedText ?? '', output.id)}
-                            data-testid={`button-copy-${output.id}`}
                           >
                             {copiedOutputId === output.id ? (
-                              <Check className="h-4 w-4" />
+                                    <Check className="mr-2 h-4 w-4" />
                             ) : (
-                              <Copy className="h-4 w-4" />
+                                    <Copy className="mr-2 h-4 w-4" />
                             )}
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
+                                  Copy Text
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
                             onClick={() => handleCreateGoogleDoc(output.id, output.languageName)}
                             disabled={!output.translatedText || creatingGoogleDocOutputId === output.id || isTranslating || isProofreading}
-                            data-testid={`button-create-google-doc-proofreading-${output.id}`}
-                            title="Create Google Doc"
                           >
                             {creatingGoogleDocOutputId === output.id ? (
-                              <Loader2 className="h-4 w-4 animate-spin" />
+                                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                             ) : (
-                              <FileText className="h-4 w-4" />
+                                    <FileText className="mr-2 h-4 w-4" />
                             )}
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
+                                  Create Google Doc
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
                             onClick={() => handleShareOutput(output.id)}
-                            data-testid={`button-share-${output.id}`}
                           >
                             {sharedOutputId === output.id ? (
-                              <Check className="h-4 w-4" />
+                                    <Check className="mr-2 h-4 w-4" />
                             ) : (
-                              <Share className="h-4 w-4" />
+                                    <Link2 className="mr-2 h-4 w-4" />
                             )}
-                          </Button>
+                                  Share Link
+                                </DropdownMenuItem>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
                         </div>
                       )}
+                      </div>
 
                       {/* Editor with internal scrolling */}
                       <RichTextEditor
@@ -2574,7 +2720,7 @@ export default function Translate() {
                             )}
                           </div>
                           <div>
-                            Last Updated: {output.updatedAt ? formatDistanceToNow(new Date(output.updatedAt), { addSuffix: true }) : 'N/A'}
+                            {isMobile ? `Updated: ${formatRelativeTime(output.updatedAt)}` : `Last Updated: ${formatDate(output.updatedAt)}`}
                           </div>
                         </div>
                         <Button
@@ -2661,8 +2807,8 @@ export default function Translate() {
               })}
             </Tabs>
           )}
-          </div>
         </div>
+      </div>
       </div>
 
       {/* Google Docs Picker */}
@@ -2770,6 +2916,36 @@ export default function Translate() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Mobile Sticky Action Bar */}
+      {isMobile && selectedTranslationId && canEditSelected && (
+        <StickyMobileToolbar>
+          {(() => {
+            const currentTranslating = selectedTranslationId ? translatingLanguages[selectedTranslationId] : undefined;
+            const isTranslating = (currentTranslating?.size ?? 0) > 0;
+            
+            return (
+              <Button
+                onClick={handleTranslate}
+                disabled={!selectedTranslationId || !canEditSelected || isTranslating || selectedLanguages.length === 0}
+                className="flex-1 h-11 min-h-touch"
+              >
+                {isTranslating ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Translating...
+                  </>
+                ) : (
+                  <>
+                    <Languages className="mr-2 h-4 w-4" />
+                    Translate ({selectedLanguages.length})
+                  </>
+                )}
+              </Button>
+            );
+          })()}
+        </StickyMobileToolbar>
+      )}
     </div>
   );
 }

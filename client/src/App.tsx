@@ -9,6 +9,7 @@ import { AppHeader } from "@/components/app-header";
 import Landing from "@/pages/landing";
 import Translate from "@/pages/translate";
 import Proofread from "@/pages/proofread";
+import ImageTranslate from "@/pages/image-translate";
 import Feedback from "@/pages/feedback";
 import Settings from "@/pages/settings";
 import Privacy from "@/pages/privacy";
@@ -80,11 +81,45 @@ function ProtectedProofread() {
   return <Proofread />;
 }
 
+// Wrapper component to handle unauthenticated access to /image-translate
+function ProtectedImageTranslate() {
+  const { isAuthenticated, isLoading } = useAuth();
+  const { toast } = useToast();
+  const [_location, setLocation] = useLocation();
+
+  // Save this page as last visited
+  useSaveLastVisitedPage("/image-translate");
+
+  useEffect(() => {
+    if (!isLoading && !isAuthenticated) {
+      toast({
+        title: "Authentication Required",
+        description: "Please sign in to access image translation.",
+        variant: "default",
+      });
+      setLocation("/");
+    }
+  }, [isAuthenticated, isLoading, toast, setLocation]);
+
+  if (isLoading) {
+    return null;
+  }
+
+  if (!isAuthenticated) {
+    return null;
+  }
+
+  return <ImageTranslate />;
+}
+
 // Wrapper component to handle unauthenticated access to /feedback
 function ProtectedFeedback() {
   const { isAuthenticated, isLoading } = useAuth();
   const { toast } = useToast();
   const [_location, setLocation] = useLocation();
+
+  // Save this page as last visited
+  useSaveLastVisitedPage("/feedback");
 
   useEffect(() => {
     if (!isLoading && !isAuthenticated) {
@@ -111,17 +146,29 @@ function ProtectedFeedback() {
 // Reference: javascript_log_in_with_replit blueprint
 function Router() {
   const { isAuthenticated, isLoading, user } = useAuth();
-  const { getLastVisitedPage } = useLastVisitedPage();
+  const { getLastVisitedPage, getLastVisitedBasePage } = useLastVisitedPage();
 
   // Get the last visited page or default to /translate
   const redirectPath = useMemo(() => {
     const lastPage = getLastVisitedPage();
+    const basePage = getLastVisitedBasePage();
+    
     // Only redirect to settings if user is admin
-    if (lastPage === "/settings" && !user?.isAdmin) {
+    if (basePage === "/settings" && !user?.isAdmin) {
       return "/translate";
     }
-    return lastPage || "/translate";
-  }, [getLastVisitedPage, user?.isAdmin]);
+    
+    // Valid base pages (can have IDs appended for translate, proofread, image-translate)
+    const validBasePages = ["/translate", "/proofread", "/image-translate", "/feedback", "/settings"];
+    if (lastPage && basePage && validBasePages.includes(basePage)) {
+      // For settings, only allow admins
+      if (basePage === "/settings" && !user?.isAdmin) {
+        return "/translate";
+      }
+      return lastPage;
+    }
+    return "/translate";
+  }, [getLastVisitedPage, getLastVisitedBasePage, user?.isAdmin]);
 
   return (
     <Switch>
@@ -136,9 +183,15 @@ function Router() {
       
       {/* Protected proofread route */}
       <Route path="/proofread" component={ProtectedProofread} />
+      <Route path="/proofread/:id" component={ProtectedProofread} />
       
       {/* Protected translate route */}
       <Route path="/translate" component={ProtectedTranslate} />
+      <Route path="/translate/:id" component={ProtectedTranslate} />
+      
+      {/* Protected image translate route */}
+      <Route path="/image-translate" component={ProtectedImageTranslate} />
+      <Route path="/image-translate/:id" component={ProtectedImageTranslate} />
       
       {/* Protected feedback route */}
       <Route path="/feedback" component={ProtectedFeedback} />
@@ -183,3 +236,4 @@ function App() {
 }
 
 export default App;
+

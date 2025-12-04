@@ -179,145 +179,150 @@ const MenuBar = ({
     }
   };
 
+  // Mobile-responsive button classes
+  const btnClass = "h-9 w-9 md:h-7 md:w-7 p-0 min-h-touch md:min-h-0 min-w-touch md:min-w-0 flex-shrink-0";
+  const iconClass = "h-4 w-4 md:h-3.5 md:w-3.5";
+  const dividerClass = "w-px h-6 md:h-5 bg-border mx-1 md:mx-0.5 self-center flex-shrink-0";
+
   return (
-    <div className="border-b border-border p-1.5 flex flex-wrap gap-0.5">
+    <div className="border-b border-border p-2 md:p-1.5 flex overflow-x-auto scrollbar-hide md:overflow-visible md:flex-wrap gap-1 md:gap-0.5">
       <Button
         type="button"
         variant="ghost"
         size="sm"
         onClick={() => editor.chain().focus().toggleBold().run()}
-        className={cn(editor.isActive('bold') && 'bg-accent', 'h-7 w-7 p-0')}
+        className={cn(editor.isActive('bold') && 'bg-accent', btnClass)}
       >
-        <Bold className="h-3.5 w-3.5" />
+        <Bold className={iconClass} />
       </Button>
       <Button
         type="button"
         variant="ghost"
         size="sm"
         onClick={() => editor.chain().focus().toggleItalic().run()}
-        className={cn(editor.isActive('italic') && 'bg-accent', 'h-7 w-7 p-0')}
+        className={cn(editor.isActive('italic') && 'bg-accent', btnClass)}
       >
-        <Italic className="h-3.5 w-3.5" />
+        <Italic className={iconClass} />
       </Button>
       <Button
         type="button"
         variant="ghost"
         size="sm"
         onClick={() => editor.chain().focus().toggleUnderline().run()}
-        className={cn(editor.isActive('underline') && 'bg-accent', 'h-7 w-7 p-0')}
+        className={cn(editor.isActive('underline') && 'bg-accent', btnClass)}
       >
-        <UnderlineIcon className="h-3.5 w-3.5" />
+        <UnderlineIcon className={iconClass} />
       </Button>
-      <div className="w-px h-5 bg-border mx-0.5" />
+      <div className={dividerClass} />
       <Button
         type="button"
         variant="ghost"
         size="sm"
         onClick={() => editor.chain().focus().toggleHeading({ level: 1 }).run()}
-        className={cn(editor.isActive('heading', { level: 1 }) && 'bg-accent', 'h-7 w-7 p-0')}
+        className={cn(editor.isActive('heading', { level: 1 }) && 'bg-accent', btnClass)}
       >
-        <Heading1 className="h-3.5 w-3.5" />
+        <Heading1 className={iconClass} />
       </Button>
       <Button
         type="button"
         variant="ghost"
         size="sm"
         onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()}
-        className={cn(editor.isActive('heading', { level: 2 }) && 'bg-accent', 'h-7 w-7 p-0')}
+        className={cn(editor.isActive('heading', { level: 2 }) && 'bg-accent', btnClass)}
       >
-        <Heading2 className="h-3.5 w-3.5" />
+        <Heading2 className={iconClass} />
       </Button>
       <Button
         type="button"
         variant="ghost"
         size="sm"
         onClick={() => editor.chain().focus().toggleHeading({ level: 3 }).run()}
-        className={cn(editor.isActive('heading', { level: 3 }) && 'bg-accent', 'h-7 w-7 p-0')}
+        className={cn(editor.isActive('heading', { level: 3 }) && 'bg-accent', btnClass)}
       >
-        <Heading3 className="h-3.5 w-3.5" />
+        <Heading3 className={iconClass} />
       </Button>
-      <div className="w-px h-5 bg-border mx-0.5" />
+      <div className={dividerClass} />
       <Button
         type="button"
         variant="ghost"
         size="sm"
         onClick={() => editor.chain().focus().toggleBulletList().run()}
-        className={cn(editor.isActive('bulletList') && 'bg-accent', 'h-7 w-7 p-0')}
+        className={cn(editor.isActive('bulletList') && 'bg-accent', btnClass)}
       >
-        <List className="h-3.5 w-3.5" />
+        <List className={iconClass} />
       </Button>
       <Button
         type="button"
         variant="ghost"
         size="sm"
         onClick={() => editor.chain().focus().toggleOrderedList().run()}
-        className={cn(editor.isActive('orderedList') && 'bg-accent', 'h-7 w-7 p-0')}
+        className={cn(editor.isActive('orderedList') && 'bg-accent', btnClass)}
       >
-        <ListOrdered className="h-3.5 w-3.5" />
+        <ListOrdered className={iconClass} />
       </Button>
-      <div className="w-px h-5 bg-border mx-0.5" />
+      <div className={dividerClass} />
       <Button
         type="button"
         variant="ghost"
         size="sm"
         onClick={() => editor.chain().focus().setTextAlign('left').run()}
-        className={cn(editor.isActive({ textAlign: 'left' }) && 'bg-accent', 'h-7 w-7 p-0')}
+        className={cn(editor.isActive({ textAlign: 'left' }) && 'bg-accent', btnClass)}
       >
-        <AlignLeft className="h-3.5 w-3.5" />
+        <AlignLeft className={iconClass} />
       </Button>
       <Button
         type="button"
         variant="ghost"
         size="sm"
         onClick={() => editor.chain().focus().setTextAlign('center').run()}
-        className={cn(editor.isActive({ textAlign: 'center' }) && 'bg-accent', 'h-7 w-7 p-0')}
+        className={cn(editor.isActive({ textAlign: 'center' }) && 'bg-accent', btnClass)}
       >
-        <AlignCenter className="h-3.5 w-3.5" />
+        <AlignCenter className={iconClass} />
       </Button>
       <Button
         type="button"
         variant="ghost"
         size="sm"
         onClick={() => editor.chain().focus().setTextAlign('right').run()}
-        className={cn(editor.isActive({ textAlign: 'right' }) && 'bg-accent', 'h-7 w-7 p-0')}
+        className={cn(editor.isActive({ textAlign: 'right' }) && 'bg-accent', btnClass)}
       >
-        <AlignRight className="h-3.5 w-3.5" />
+        <AlignRight className={iconClass} />
       </Button>
-      <div className="w-px h-5 bg-border mx-0.5" />
+      <div className={dividerClass} />
       <Button
         type="button"
         variant="ghost"
         size="sm"
         onClick={addLink}
-        className={cn(editor.isActive('link') && 'bg-accent', 'h-7 w-7 p-0')}
+        className={cn(editor.isActive('link') && 'bg-accent', btnClass)}
       >
-        <LinkIcon className="h-3.5 w-3.5" />
+        <LinkIcon className={iconClass} />
       </Button>
       {showRawHtmlButton && (
         <>
-          <div className="w-px h-5 bg-border mx-0.5" />
+          <div className={dividerClass} />
           <Button
             type="button"
             variant="ghost"
             size="sm"
             onClick={onRawViewToggle}
-            className={cn(isRawView && 'bg-accent', 'h-7 w-7 p-0')}
+            className={cn(isRawView && 'bg-accent', btnClass)}
             title={isRawView ? "Switch to Rich Text" : "Switch to Raw HTML"}
           >
-            <Code className="h-3.5 w-3.5" />
+            <Code className={iconClass} />
           </Button>
         </>
       )}
-      <div className="w-px h-5 bg-border mx-0.5" />
+      <div className={dividerClass} />
       <Button
         type="button"
         variant="ghost"
         size="sm"
         onClick={() => editor.chain().focus().undo().run()}
         disabled={!editor.can().undo()}
-        className="h-7 w-7 p-0"
+        className={btnClass}
       >
-        <Undo className="h-3.5 w-3.5" />
+        <Undo className={iconClass} />
       </Button>
       <Button
         type="button"
@@ -325,21 +330,21 @@ const MenuBar = ({
         size="sm"
         onClick={() => editor.chain().focus().redo().run()}
         disabled={!editor.can().redo()}
-        className="h-7 w-7 p-0"
+        className={btnClass}
       >
-        <Redo className="h-3.5 w-3.5" />
+        <Redo className={iconClass} />
       </Button>
       {showFeedbackButton && hasSelection && (
         <>
-          <div className="w-px h-5 bg-border mx-0.5" />
+          <div className={dividerClass} />
           <Button
             type="button"
             variant="default"
             size="sm"
             onClick={handleFeedbackClick}
-            className="h-7 px-2 bg-primary text-primary-foreground"
+            className="h-9 md:h-7 px-2 md:px-2 bg-primary text-primary-foreground min-h-touch md:min-h-0"
           >
-            <MessageSquare className="h-3.5 w-3.5 mr-1" />
+            <MessageSquare className={iconClass + " mr-1"} />
             Feedback
           </Button>
         </>
@@ -364,6 +369,8 @@ export const RichTextEditor = forwardRef<RichTextEditorRef, RichTextEditorProps>
 }, ref) => {
   // Track when we're applying view-only highlights (shouldn't trigger onChange)
   const isApplyingHighlightsRef = useRef(false);
+  // Track when we're programmatically setting content (shouldn't trigger onChange)
+  const isSettingContentRef = useRef(false);
   
   // Memoize extensions to prevent duplicate warnings and unnecessary recreations
   // Each extension instance is created once and reused across renders
@@ -400,8 +407,8 @@ export const RichTextEditor = forwardRef<RichTextEditorRef, RichTextEditorProps>
     content,
     editable,
     onUpdate: ({ editor }) => {
-      // Skip onChange when applying view-only highlights to prevent false "unsaved changes"
-      if (isApplyingHighlightsRef.current) {
+      // Skip onChange when applying view-only highlights or programmatically setting content
+      if (isApplyingHighlightsRef.current || isSettingContentRef.current) {
         return;
       }
       onChange(editor.getHTML());
@@ -435,16 +442,28 @@ export const RichTextEditor = forwardRef<RichTextEditorRef, RichTextEditorProps>
     if (editor.isFocused) return;
     
     const currentContent = editor.getHTML();
-    const isEmpty = currentContent === '<p></p>' || currentContent === '';
-    const newIsEmpty = content === '<p></p>' || content === '' || !content;
     
-    // Don't update if both are empty or if content is the same
-    if ((isEmpty && newIsEmpty) || currentContent === content) {
+    // Normalize for comparison - treat empty states as equivalent
+    const normalizeContent = (c: string | null | undefined) => {
+      if (!c || c === '<p></p>' || c === '') return '';
+      return c;
+    };
+    
+    const normalizedCurrent = normalizeContent(currentContent);
+    const normalizedNew = normalizeContent(content);
+    
+    // Don't update if content is effectively the same
+    if (normalizedCurrent === normalizedNew) {
       return;
     }
     
-    // Update content
+    // Set flag to prevent onChange from firing (this is a programmatic update, not a user edit)
+    isSettingContentRef.current = true;
     editor.commands.setContent(content || '');
+    // Clear flag after a tick to allow future user edits to trigger onChange
+    setTimeout(() => {
+      isSettingContentRef.current = false;
+    }, 0);
   }, [content, editor]);
 
   // Cleanup on unmount

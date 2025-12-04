@@ -1,11 +1,41 @@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { PanelLeftClose, Search, CheckCircle, Shield, Zap, Database, Share, FileText, Navigation, Upload } from "lucide-react";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { PanelLeftClose, Search, CheckCircle, Shield, Zap, Share, FileText, Image, Navigation, Upload, Calendar, BarChart3, Smartphone, Sparkles, ChevronDown } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { useState } from "react";
 
 interface ReleaseNotesModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+}
+
+interface VersionHeaderProps {
+  version: string;
+  date: string;
+  isLatest?: boolean;
+  isOpen: boolean;
+}
+
+function VersionHeader({ version, date, isLatest, isOpen }: VersionHeaderProps) {
+  return (
+    <CollapsibleTrigger className="w-full">
+      <div className={cn(
+        "border-l-4 pl-3 pr-2 flex items-center justify-between group cursor-pointer hover:bg-muted/50 py-1 rounded-r transition-colors",
+        isLatest ? "border-purple-600" : "border-gray-400"
+      )}>
+        <div className="text-left">
+          <h3 className="font-semibold text-base">{version}</h3>
+          <p className="text-xs text-muted-foreground">{date}</p>
+        </div>
+        <ChevronDown className={cn(
+          "h-4 w-4 text-muted-foreground transition-transform duration-200 flex-shrink-0",
+          isOpen && "rotate-180"
+        )} />
+      </div>
+    </CollapsibleTrigger>
+  );
 }
 
 /**
@@ -16,13 +46,26 @@ interface ReleaseNotesModalProps {
  * @returns The release notes modal element.
  */
 export function ReleaseNotesModal({ open, onOpenChange }: ReleaseNotesModalProps) {
+  const [openSections, setOpenSections] = useState<Record<string, boolean>>({
+    "v1.5": true,
+    "v1.4.3": false,
+    "v1.4.2": false,
+    "v1.4.1": false,
+    "v1.4": false,
+    "v1.3": false,
+  });
+
+  const toggleSection = (key: string) => {
+    setOpenSections(prev => ({ ...prev, [key]: !prev[key] }));
+  };
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-lg max-h-[70vh]">
-        <DialogHeader>
+        <DialogHeader className="text-left">
           <DialogTitle className="flex items-center gap-2 text-base">
             Release Notes
-            <Badge variant="secondary" className="text-xs">v1.4.3</Badge>
+            <Badge variant="secondary" className="text-xs">v1.5</Badge>
           </DialogTitle>
           <DialogDescription className="text-xs">
             What's new in this release
@@ -30,17 +73,96 @@ export function ReleaseNotesModal({ open, onOpenChange }: ReleaseNotesModalProps
         </DialogHeader>
         
         <ScrollArea className="max-h-[50vh] pr-4">
-          <div className="space-y-6">
+          <div className="space-y-4">
+            {/* Version 1.5 */}
+            <Collapsible open={openSections["v1.5"]} onOpenChange={() => toggleSection("v1.5")}>
+              <VersionHeader version="Version 1.5" date="Latest Release" isLatest isOpen={openSections["v1.5"]} />
+              <CollapsibleContent className="space-y-3 pt-3">
+                {/* IMAGE TRANSLATION update with icon and bold header */}
+                <div className="flex gap-2 items-start ml-4">
+                  <Image className="h-3 w-3 text-primary mt-0.5 flex-shrink-0" />
+                  <div>
+                    <span className="font-semibold text-xs">Image Translation:</span>
+                    <span className="text-xs text-muted-foreground ml-1">
+                      Using <span className="font-semibold">Nano Banana Pro</span>, you can now translate text in images directly in Babellion! Supports dozens of languages, automatic layout detection, and high quality exports.
+                    </span>
+                  </div>
+                </div>
+
+                {/* Mobile Friendly View */}
+                <div className="flex gap-2 items-start ml-4">
+                  <Smartphone className="h-3 w-3 text-primary mt-0.5 flex-shrink-0" />
+                  <div>
+                    <span className="font-semibold text-xs">Mobile-Friendly View:</span>
+                    <span className="text-xs text-muted-foreground ml-1">
+                      Babellion now works beautifully on mobile devices! Enjoy optimized layouts, touch-friendly controls, and a seamless experience across phones and tablets.
+                    </span>
+                  </div>
+                </div>
+
+                {/* UI/UX Standardization */}
+                <div className="flex gap-2 items-start ml-4">
+                  <Sparkles className="h-3 w-3 text-primary mt-0.5 flex-shrink-0" />
+                  <div>
+                    <span className="font-semibold text-xs">Refined UI/UX:</span>
+                    <span className="text-xs text-muted-foreground ml-1">
+                      Massive standardization of the interface with consistent spacing, improved visual hierarchy, unified card designs, and streamlined controls throughout the app.
+                    </span>
+                  </div>
+                </div>
+
+                <div className="space-y-2 ml-4">
+                  <div className="flex gap-2 items-start">
+                    <BarChart3 className="h-3 w-3 text-primary mt-0.5 flex-shrink-0" />
+                    <div>
+                      <span className="font-medium text-xs">Admin Analytics Dashboard:</span>
+                      <span className="text-xs text-muted-foreground ml-1">
+                        New analytics tab in Settings with usage charts, top languages, model usage, feedback sentiment, and active user rankings.
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="flex gap-2 items-start">
+                    <Calendar className="h-3 w-3 text-primary mt-0.5 flex-shrink-0" />
+                    <div>
+                      <span className="font-medium text-xs">Improved Date Display:</span>
+                      <span className="text-xs text-muted-foreground ml-1">
+                        All dates now show both the full date and relative time (e.g., "Dec 04, 2025 (2 days ago)") for better context.
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="flex gap-2 items-start">
+                    <Zap className="h-3 w-3 text-primary mt-0.5 flex-shrink-0" />
+                    <div>
+                      <span className="font-medium text-xs">Faster Page Loading:</span>
+                      <span className="text-xs text-muted-foreground ml-1">
+                        Translate and Proofread pages now load significantly faster with on-demand content fetching.
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="flex gap-2 items-start">
+                    <Navigation className="h-3 w-3 text-primary mt-0.5 flex-shrink-0" />
+                    <div>
+                      <span className="font-medium text-xs">Smart Delete Navigation:</span>
+                      <span className="text-xs text-muted-foreground ml-1">
+                        Deleting an item now automatically selects the next (or previous) item instead of clearing the view.
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </CollapsibleContent>
+            </Collapsible>
+
             {/* Version 1.4.3 */}
-            <div className="space-y-3">
-              <div className="border-l-4 border-purple-600 pl-4">
-                <h3 className="font-semibold text-base">Version 1.4.3</h3>
-                <p className="text-xs text-muted-foreground">Latest Release</p>
+            <Collapsible open={openSections["v1.4.3"]} onOpenChange={() => toggleSection("v1.4.3")}>
+              <div className="pt-4 border-t">
+                <VersionHeader version="Version 1.4.3" date="December 2025" isOpen={openSections["v1.4.3"]} />
               </div>
-              
-              <div className="space-y-2 ml-4">
+              <CollapsibleContent className="space-y-2 ml-4 pt-3">
                 <div className="flex gap-2 items-start">
-                  <Upload className="h-3 w-3 text-primary mt-[0.125rem] flex-shrink-0" />
+                  <Upload className="h-3 w-3 text-primary mt-0.5 flex-shrink-0" />
                   <div>
                     <span className="font-medium text-xs">PDF Import:</span>
                     <span className="text-xs text-muted-foreground ml-1">
@@ -48,19 +170,17 @@ export function ReleaseNotesModal({ open, onOpenChange }: ReleaseNotesModalProps
                     </span>
                   </div>
                 </div>
-              </div>
-            </div>
+              </CollapsibleContent>
+            </Collapsible>
 
             {/* Version 1.4.2 */}
-            <div className="space-y-3 pt-4 border-t">
-              <div className="border-l-4 border-gray-400 pl-4">
-                <h3 className="font-semibold text-base">Version 1.4.2</h3>
-                <p className="text-xs text-muted-foreground">November 2025</p>
+            <Collapsible open={openSections["v1.4.2"]} onOpenChange={() => toggleSection("v1.4.2")}>
+              <div className="pt-4 border-t">
+                <VersionHeader version="Version 1.4.2" date="November 2025" isOpen={openSections["v1.4.2"]} />
               </div>
-              
-              <div className="space-y-2 ml-4">
+              <CollapsibleContent className="space-y-2 ml-4 pt-3">
                 <div className="flex gap-2 items-start">
-                  <CheckCircle className="h-3 w-3 text-primary mt-[0.125rem] flex-shrink-0" />
+                  <CheckCircle className="h-3 w-3 text-primary mt-0.5 flex-shrink-0" />
                   <div>
                     <span className="font-medium text-xs">Unsaved Changes Protection:</span>
                     <span className="text-xs text-muted-foreground ml-1">
@@ -70,7 +190,7 @@ export function ReleaseNotesModal({ open, onOpenChange }: ReleaseNotesModalProps
                 </div>
 
                 <div className="flex gap-2 items-start">
-                  <CheckCircle className="h-3 w-3 text-primary mt-[0.125rem] flex-shrink-0" />
+                  <CheckCircle className="h-3 w-3 text-primary mt-0.5 flex-shrink-0" />
                   <div>
                     <span className="font-medium text-xs">Autosave on Translate:</span>
                     <span className="text-xs text-muted-foreground ml-1">
@@ -80,7 +200,7 @@ export function ReleaseNotesModal({ open, onOpenChange }: ReleaseNotesModalProps
                 </div>
 
                 <div className="flex gap-2 items-start">
-                  <CheckCircle className="h-3 w-3 text-primary mt-[0.125rem] flex-shrink-0" />
+                  <CheckCircle className="h-3 w-3 text-primary mt-0.5 flex-shrink-0" />
                   <div>
                     <span className="font-medium text-xs">Fixed Accept Changes:</span>
                     <span className="text-xs text-muted-foreground ml-1">
@@ -90,7 +210,7 @@ export function ReleaseNotesModal({ open, onOpenChange }: ReleaseNotesModalProps
                 </div>
 
                 <div className="flex gap-2 items-start">
-                  <CheckCircle className="h-3 w-3 text-primary mt-[0.125rem] flex-shrink-0" />
+                  <CheckCircle className="h-3 w-3 text-primary mt-0.5 flex-shrink-0" />
                   <div>
                     <span className="font-medium text-xs">Fixed New Document Editor:</span>
                     <span className="text-xs text-muted-foreground ml-1">
@@ -100,7 +220,7 @@ export function ReleaseNotesModal({ open, onOpenChange }: ReleaseNotesModalProps
                 </div>
 
                 <div className="flex gap-2 items-start">
-                  <CheckCircle className="h-3 w-3 text-primary mt-[0.125rem] flex-shrink-0" />
+                  <CheckCircle className="h-3 w-3 text-primary mt-0.5 flex-shrink-0" />
                   <div>
                     <span className="font-medium text-xs">Fixed Suggestion Highlight:</span>
                     <span className="text-xs text-muted-foreground ml-1">
@@ -110,7 +230,7 @@ export function ReleaseNotesModal({ open, onOpenChange }: ReleaseNotesModalProps
                 </div>
 
                 <div className="flex gap-2 items-start">
-                  <CheckCircle className="h-3 w-3 text-primary mt-[0.125rem] flex-shrink-0" />
+                  <CheckCircle className="h-3 w-3 text-primary mt-0.5 flex-shrink-0" />
                   <div>
                     <span className="font-medium text-xs">Fixed Google Docs Session Expiry:</span>
                     <span className="text-xs text-muted-foreground ml-1">
@@ -118,19 +238,17 @@ export function ReleaseNotesModal({ open, onOpenChange }: ReleaseNotesModalProps
                     </span>
                   </div>
                 </div>
-              </div>
-            </div>
+              </CollapsibleContent>
+            </Collapsible>
 
             {/* Version 1.4.1 */}
-            <div className="space-y-3 pt-4 border-t">
-              <div className="border-l-4 border-gray-400 pl-4">
-                <h3 className="font-semibold text-base">Version 1.4.1</h3>
-                <p className="text-xs text-muted-foreground">November 2025</p>
+            <Collapsible open={openSections["v1.4.1"]} onOpenChange={() => toggleSection("v1.4.1")}>
+              <div className="pt-4 border-t">
+                <VersionHeader version="Version 1.4.1" date="November 2025" isOpen={openSections["v1.4.1"]} />
               </div>
-              
-              <div className="space-y-2 ml-4">
+              <CollapsibleContent className="space-y-2 ml-4 pt-3">
                 <div className="flex gap-2 items-start">
-                  <CheckCircle className="h-3 w-3 text-primary mt-[0.125rem] flex-shrink-0" />
+                  <CheckCircle className="h-3 w-3 text-primary mt-0.5 flex-shrink-0" />
                   <div>
                     <span className="font-medium text-xs">Color-Coded Highlights:</span>
                     <span className="text-xs text-muted-foreground ml-1">
@@ -140,7 +258,7 @@ export function ReleaseNotesModal({ open, onOpenChange }: ReleaseNotesModalProps
                 </div>
 
                 <div className="flex gap-2 items-start">
-                  <CheckCircle className="h-3 w-3 text-primary mt-[0.125rem] flex-shrink-0" />
+                  <CheckCircle className="h-3 w-3 text-primary mt-0.5 flex-shrink-0" />
                   <div>
                     <span className="font-medium text-xs">Rich Formatting in Cards:</span>
                     <span className="text-xs text-muted-foreground ml-1">
@@ -150,7 +268,7 @@ export function ReleaseNotesModal({ open, onOpenChange }: ReleaseNotesModalProps
                 </div>
 
                 <div className="flex gap-2 items-start">
-                  <CheckCircle className="h-3 w-3 text-primary mt-[0.125rem] flex-shrink-0" />
+                  <CheckCircle className="h-3 w-3 text-primary mt-0.5 flex-shrink-0" />
                   <div>
                     <span className="font-medium text-xs">Collapsed Share Menu:</span>
                     <span className="text-xs text-muted-foreground ml-1">
@@ -160,7 +278,7 @@ export function ReleaseNotesModal({ open, onOpenChange }: ReleaseNotesModalProps
                 </div>
 
                 <div className="flex gap-2 items-start">
-                  <CheckCircle className="h-3 w-3 text-primary mt-[0.125rem] flex-shrink-0" />
+                  <CheckCircle className="h-3 w-3 text-primary mt-0.5 flex-shrink-0" />
                   <div>
                     <span className="font-medium text-xs">Accept All Progress:</span>
                     <span className="text-xs text-muted-foreground ml-1">
@@ -170,7 +288,7 @@ export function ReleaseNotesModal({ open, onOpenChange }: ReleaseNotesModalProps
                 </div>
 
                 <div className="flex gap-2 items-start">
-                  <CheckCircle className="h-3 w-3 text-primary mt-[0.125rem] flex-shrink-0" />
+                  <CheckCircle className="h-3 w-3 text-primary mt-0.5 flex-shrink-0" />
                   <div>
                     <span className="font-medium text-xs">Fixed Accept All Race Condition:</span>
                     <span className="text-xs text-muted-foreground ml-1">
@@ -178,19 +296,17 @@ export function ReleaseNotesModal({ open, onOpenChange }: ReleaseNotesModalProps
                     </span>
                   </div>
                 </div>
-              </div>
-            </div>
+              </CollapsibleContent>
+            </Collapsible>
 
             {/* Version 1.4 */}
-            <div className="space-y-3 pt-4 border-t">
-              <div className="border-l-4 border-gray-400 pl-4">
-                <h3 className="font-semibold text-base">Version 1.4</h3>
-                <p className="text-xs text-muted-foreground">November 12, 2025</p>
+            <Collapsible open={openSections["v1.4"]} onOpenChange={() => toggleSection("v1.4")}>
+              <div className="pt-4 border-t">
+                <VersionHeader version="Version 1.4" date="November 12, 2025" isOpen={openSections["v1.4"]} />
               </div>
-              
-              <div className="space-y-2 ml-4">
+              <CollapsibleContent className="space-y-2 ml-4 pt-3">
                 <div className="flex gap-2 items-start">
-                  <FileText className="h-3 w-3 text-primary mt-[0.125rem] flex-shrink-0" />
+                  <FileText className="h-3 w-3 text-primary mt-0.5 flex-shrink-0" />
                   <div>
                     <span className="font-medium text-xs">Export to Google Docs:</span>
                     <span className="text-xs text-muted-foreground ml-1">
@@ -200,7 +316,7 @@ export function ReleaseNotesModal({ open, onOpenChange }: ReleaseNotesModalProps
                 </div>
 
                 <div className="flex gap-2 items-start">
-                  <PanelLeftClose className="h-3 w-3 text-primary mt-[0.125rem] flex-shrink-0" />
+                  <PanelLeftClose className="h-3 w-3 text-primary mt-0.5 flex-shrink-0" />
                   <div>
                     <span className="font-medium text-xs">Collapsible Side Panel:</span>
                     <span className="text-xs text-muted-foreground ml-1">
@@ -209,10 +325,8 @@ export function ReleaseNotesModal({ open, onOpenChange }: ReleaseNotesModalProps
                   </div>
                 </div>
 
-
-
                 <div className="flex gap-2 items-start">
-                  <Share className="h-3 w-3 text-primary mt-[0.125rem] flex-shrink-0" />
+                  <Share className="h-3 w-3 text-primary mt-0.5 flex-shrink-0" />
                   <div>
                     <span className="font-medium text-xs">Copy & Share Buttons:</span>
                     <span className="text-xs text-muted-foreground ml-1">
@@ -222,7 +336,7 @@ export function ReleaseNotesModal({ open, onOpenChange }: ReleaseNotesModalProps
                 </div>
 
                 <div className="flex gap-2 items-start">
-                  <CheckCircle className="h-3 w-3 text-primary mt-[0.125rem] flex-shrink-0" />
+                  <CheckCircle className="h-3 w-3 text-primary mt-0.5 flex-shrink-0" />
                   <div>
                     <span className="font-medium text-xs">Improved Duplication Detection:</span>
                     <span className="text-xs text-muted-foreground ml-1">
@@ -232,7 +346,7 @@ export function ReleaseNotesModal({ open, onOpenChange }: ReleaseNotesModalProps
                 </div>
 
                 <div className="flex gap-2 items-start">
-                  <Navigation className="h-3 w-3 text-primary mt-[0.125rem] flex-shrink-0" />
+                  <Navigation className="h-3 w-3 text-primary mt-0.5 flex-shrink-0" />
                   <div>
                     <span className="font-medium text-xs">Auto-Scroll to Highlights:</span>
                     <span className="text-xs text-muted-foreground ml-1">
@@ -240,19 +354,17 @@ export function ReleaseNotesModal({ open, onOpenChange }: ReleaseNotesModalProps
                     </span>
                   </div>
                 </div>
-              </div>
-            </div>
+              </CollapsibleContent>
+            </Collapsible>
 
             {/* Version 1.3 */}
-            <div className="space-y-3 pt-4 border-t">
-              <div className="border-l-4 border-gray-400 pl-4">
-                <h3 className="font-semibold text-base">Version 1.3</h3>
-                <p className="text-xs text-muted-foreground">November 11, 2025</p>
+            <Collapsible open={openSections["v1.3"]} onOpenChange={() => toggleSection("v1.3")}>
+              <div className="pt-4 border-t">
+                <VersionHeader version="Version 1.3" date="November 11, 2025" isOpen={openSections["v1.3"]} />
               </div>
-              
-              <div className="space-y-2 ml-4">
+              <CollapsibleContent className="space-y-2 ml-4 pt-3">
                 <div className="flex gap-2 items-start">
-                  <Search className="h-3 w-3 text-primary mt-[0.125rem] flex-shrink-0" />
+                  <Search className="h-3 w-3 text-primary mt-0.5 flex-shrink-0" />
                   <div>
                     <span className="font-medium text-xs">Server-Side Search:</span>
                     <span className="text-xs text-muted-foreground ml-1">
@@ -262,7 +374,7 @@ export function ReleaseNotesModal({ open, onOpenChange }: ReleaseNotesModalProps
                 </div>
 
                 <div className="flex gap-2 items-start">
-                  <Zap className="h-3 w-3 text-primary mt-[0.125rem] flex-shrink-0" />
+                  <Zap className="h-3 w-3 text-primary mt-0.5 flex-shrink-0" />
                   <div>
                     <span className="font-medium text-xs">Infinite Scroll Loading:</span>
                     <span className="text-xs text-muted-foreground ml-1">
@@ -272,7 +384,7 @@ export function ReleaseNotesModal({ open, onOpenChange }: ReleaseNotesModalProps
                 </div>
 
                 <div className="flex gap-2 items-start">
-                  <CheckCircle className="h-3 w-3 text-primary mt-[0.125rem] flex-shrink-0" />
+                  <CheckCircle className="h-3 w-3 text-primary mt-0.5 flex-shrink-0" />
                   <div>
                     <span className="font-medium text-xs">Deletion Confirmation:</span>
                     <span className="text-xs text-muted-foreground ml-1">
@@ -282,7 +394,7 @@ export function ReleaseNotesModal({ open, onOpenChange }: ReleaseNotesModalProps
                 </div>
 
                 <div className="flex gap-2 items-start">
-                  <Shield className="h-3 w-3 text-primary mt-[0.125rem] flex-shrink-0" />
+                  <Shield className="h-3 w-3 text-primary mt-0.5 flex-shrink-0" />
                   <div>
                     <span className="font-medium text-xs">Enhanced Data Protection:</span>
                     <span className="text-xs text-muted-foreground ml-1">
@@ -290,8 +402,8 @@ export function ReleaseNotesModal({ open, onOpenChange }: ReleaseNotesModalProps
                     </span>
                   </div>
                 </div>
-              </div>
-            </div>
+              </CollapsibleContent>
+            </Collapsible>
 
             {/* Footer */}
             <div className="border-t pt-4">

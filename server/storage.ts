@@ -12,6 +12,8 @@ import {
   proofreadingRules,
   proofreadings,
   proofreadingOutputs,
+  imageTranslations,
+  imageTranslationOutputs,
   type User,
   type UpsertUser,
   type Translation,
@@ -36,6 +38,12 @@ import {
   type InsertProofreading,
   type ProofreadingOutput,
   type InsertProofreadingOutput,
+  type ImageTranslation,
+  type InsertImageTranslation,
+  type ImageTranslationOutput,
+  type InsertImageTranslationOutput,
+  type TranslationMetadata,
+  type ProofreadingMetadata,
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, or, desc, sql, inArray, ilike } from "drizzle-orm";
@@ -51,7 +59,7 @@ export interface IStorage {
   // Translation operations
   getTranslations(userId: string): Promise<Translation[]>;
   getTranslationsPaginated(userId: string, page: number, limit: number, search?: string): Promise<{
-    data: Translation[];
+    data: TranslationMetadata[];
     pagination: {
       page: number;
       limit: number;
@@ -97,7 +105,7 @@ export interface IStorage {
   // API Keys operations
   getApiKey(provider: string): Promise<ApiKey | undefined>;
   upsertApiKey(apiKey: InsertApiKey): Promise<ApiKey>;
-  getApiKeysStatus(): Promise<{ openai: boolean; anthropic: boolean }>;
+  getApiKeysStatus(): Promise<{ openai: boolean; anthropic: boolean; gemini: boolean }>;
 
   // Translation feedback operations
   createTranslationFeedback(feedback: InsertTranslationFeedback): Promise<TranslationFeedback>;
@@ -132,7 +140,7 @@ export interface IStorage {
   // Proofreading operations
   getProofreadings(userId: string): Promise<Proofreading[]>;
   getProofreadingsPaginated(userId: string, page: number, limit: number, search?: string): Promise<{
-    data: Proofreading[];
+    data: ProofreadingMetadata[];
     pagination: {
       page: number;
       limit: number;
@@ -151,6 +159,78 @@ export interface IStorage {
   getProofreadingOutputByProofreadingId(proofreadingId: string): Promise<ProofreadingOutput | undefined>;
   createProofreadingOutput(output: InsertProofreadingOutput): Promise<ProofreadingOutput>;
   updateProofreadingOutput(id: string, data: Partial<ProofreadingOutput>): Promise<ProofreadingOutput>;
+
+  // Image translation operations
+  getImageTranslations(userId: string): Promise<Omit<ImageTranslation, 'sourceImageBase64'>[]>;
+  getImageTranslationsPaginated(userId: string, page: number, limit: number, search?: string): Promise<{
+    data: Omit<ImageTranslation, 'sourceImageBase64'>[];
+    pagination: {
+      page: number;
+      limit: number;
+      total: number;
+      totalPages: number;
+      hasMore: boolean;
+    };
+  }>;
+  getImageTranslation(id: string): Promise<ImageTranslation | undefined>;
+  getImageTranslationMetadata(id: string): Promise<Omit<ImageTranslation, 'sourceImageBase64'> | undefined>;
+  getImageTranslationSourceImage(id: string): Promise<{ sourceImageBase64: string; sourceMimeType: string } | undefined>;
+  createImageTranslation(imageTranslation: InsertImageTranslation & { userId: string }): Promise<ImageTranslation>;
+  updateImageTranslation(id: string, data: Partial<ImageTranslation>): Promise<ImageTranslation>;
+  deleteImageTranslation(id: string): Promise<void>;
+
+  // Image translation output operations
+  getImageTranslationOutput(id: string): Promise<ImageTranslationOutput | undefined>;
+  getImageTranslationOutputs(imageTranslationId: string): Promise<ImageTranslationOutput[]>;
+  getImageTranslationOutputsMetadata(imageTranslationId: string): Promise<Omit<ImageTranslationOutput, 'translatedImageBase64'>[]>;
+  getImageTranslationOutputImage(outputId: string): Promise<{ translatedImageBase64: string | null; translatedMimeType: string | null } | undefined>;
+  createImageTranslationOutput(output: InsertImageTranslationOutput): Promise<ImageTranslationOutput>;
+  updateImageTranslationOutput(id: string, data: Partial<ImageTranslationOutput>): Promise<ImageTranslationOutput>;
+  updateImageTranslationOutputStatus(id: string, status: 'pending' | 'translating' | 'completed' | 'failed'): Promise<ImageTranslationOutput>;
+  deleteImageTranslationOutput(id: string): Promise<void>;
+
+  // Analytics operations
+  getAnalyticsOverview(startDate: Date): Promise<{
+    totalTranslations: number;
+    totalProofreadings: number;
+    totalImageTranslations: number;
+    activeUsers: number;
+    totalFeedback: number;
+  }>;
+  getUsageOverTime(startDate: Date, granularity: 'day' | 'week' | 'month'): Promise<{
+    date: string;
+    translations: number;
+    proofreadings: number;
+    imageTranslations: number;
+  }[]>;
+  getTopLanguages(startDate: Date, limit?: number): Promise<{
+    languageName: string;
+    count: number;
+  }[]>;
+  getProofreadingCategoryUsage(startDate: Date): Promise<{
+    categoryId: string;
+    categoryName: string;
+    count: number;
+  }[]>;
+  getFeedbackSentiment(startDate: Date): Promise<{
+    positive: number;
+    negative: number;
+  }>;
+  getModelUsage(startDate: Date): Promise<{
+    modelId: string;
+    modelName: string;
+    count: number;
+  }[]>;
+  getTopUsers(startDate: Date, limit?: number): Promise<{
+    userId: string;
+    email: string | null;
+    firstName: string | null;
+    lastName: string | null;
+    profileImageUrl: string | null;
+    translationCount: number;
+    proofreadingCount: number;
+    totalCount: number;
+  }[]>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -269,7 +349,7 @@ export class DatabaseStorage implements IStorage {
     limit: number = 20,
     search?: string
   ): Promise<{
-    data: Translation[];
+    data: TranslationMetadata[];
     pagination: {
       page: number;
       limit: number;
@@ -284,14 +364,11 @@ export class DatabaseStorage implements IStorage {
       eq(translations.userId, userId)
     );
 
-    // Add search conditions if search query provided
+    // Add search conditions if search query provided (search title only for performance)
     const searchConditions = search && search.length >= 2
       ? and(
           baseConditions,
-          or(
-            ilike(translations.title, `%${search}%`),
-            ilike(translations.sourceText, `%${search}%`)
-          )
+          ilike(translations.title, `%${search}%`)
         )
       : baseConditions;
 
@@ -305,10 +382,17 @@ export class DatabaseStorage implements IStorage {
     const totalPages = Math.ceil(total / limit);
     const offset = (page - 1) * limit;
 
-    // Get paginated results
+    // Get paginated results (metadata only, exclude sourceText for performance)
     const results = await db
       .select({
-        translation: translations,
+        id: translations.id,
+        userId: translations.userId,
+        title: translations.title,
+        isPrivate: translations.isPrivate,
+        selectedLanguages: translations.selectedLanguages,
+        lastUsedModelId: translations.lastUsedModelId,
+        createdAt: translations.createdAt,
+        updatedAt: translations.updatedAt,
         owner: {
           id: users.id,
           email: users.email,
@@ -325,9 +409,16 @@ export class DatabaseStorage implements IStorage {
 
     return {
       data: results.map(r => ({
-        ...r.translation,
+        id: r.id,
+        userId: r.userId,
+        title: r.title,
+        isPrivate: r.isPrivate,
+        selectedLanguages: r.selectedLanguages,
+        lastUsedModelId: r.lastUsedModelId,
+        createdAt: r.createdAt,
+        updatedAt: r.updatedAt,
         owner: r.owner
-      })) as Translation[],
+      })) as TranslationMetadata[],
       pagination: {
         page,
         limit,
@@ -534,11 +625,12 @@ export class DatabaseStorage implements IStorage {
     return upserted;
   }
 
-  async getApiKeysStatus(): Promise<{ openai: boolean; anthropic: boolean }> {
+  async getApiKeysStatus(): Promise<{ openai: boolean; anthropic: boolean; gemini: boolean }> {
     const allKeys = await db.select().from(apiKeys);
     return {
       openai: allKeys.some(k => k.provider === 'openai'),
       anthropic: allKeys.some(k => k.provider === 'anthropic'),
+      gemini: allKeys.some(k => k.provider === 'gemini'),
     };
   }
 
@@ -797,7 +889,7 @@ export class DatabaseStorage implements IStorage {
     limit: number = 20,
     search?: string
   ): Promise<{
-    data: Proofreading[];
+    data: ProofreadingMetadata[];
     pagination: {
       page: number;
       limit: number;
@@ -812,14 +904,11 @@ export class DatabaseStorage implements IStorage {
       eq(proofreadings.userId, userId)
     );
 
-    // Add search conditions if search query provided
+    // Add search conditions if search query provided (only search title for performance)
     const searchConditions = search && search.length >= 2
       ? and(
           baseConditions,
-          or(
-            ilike(proofreadings.title, `%${search}%`),
-            ilike(proofreadings.sourceText, `%${search}%`)
-          )
+          ilike(proofreadings.title, `%${search}%`)
         )
       : baseConditions;
 
@@ -833,10 +922,17 @@ export class DatabaseStorage implements IStorage {
     const totalPages = Math.ceil(total / limit);
     const offset = (page - 1) * limit;
 
-    // Get paginated results
+    // Get paginated results (metadata only, exclude sourceText for performance)
     const results = await db
       .select({
-        proofreading: proofreadings,
+        id: proofreadings.id,
+        userId: proofreadings.userId,
+        title: proofreadings.title,
+        isPrivate: proofreadings.isPrivate,
+        selectedCategories: proofreadings.selectedCategories,
+        lastUsedModelId: proofreadings.lastUsedModelId,
+        createdAt: proofreadings.createdAt,
+        updatedAt: proofreadings.updatedAt,
         owner: {
           id: users.id,
           email: users.email,
@@ -853,9 +949,16 @@ export class DatabaseStorage implements IStorage {
 
     return {
       data: results.map(r => ({
-        ...r.proofreading,
+        id: r.id,
+        userId: r.userId,
+        title: r.title,
+        isPrivate: r.isPrivate,
+        selectedCategories: r.selectedCategories,
+        lastUsedModelId: r.lastUsedModelId,
+        createdAt: r.createdAt,
+        updatedAt: r.updatedAt,
         owner: r.owner
-      })) as Proofreading[],
+      })) as ProofreadingMetadata[],
       pagination: {
         page,
         limit,
@@ -926,6 +1029,651 @@ export class DatabaseStorage implements IStorage {
       .where(eq(proofreadingOutputs.id, id))
       .returning();
     return updated;
+  }
+
+  // Image translation operations
+  async getImageTranslations(userId: string): Promise<Omit<ImageTranslation, 'sourceImageBase64'>[]> {
+    // Return all public image translations + user's private image translations with user info
+    // Excludes sourceImageBase64 for performance
+    const results = await db
+      .select({
+        imageTranslation: {
+          id: imageTranslations.id,
+          userId: imageTranslations.userId,
+          title: imageTranslations.title,
+          sourceMimeType: imageTranslations.sourceMimeType,
+          isPrivate: imageTranslations.isPrivate,
+          selectedLanguages: imageTranslations.selectedLanguages,
+          createdAt: imageTranslations.createdAt,
+          updatedAt: imageTranslations.updatedAt,
+        },
+        owner: {
+          id: users.id,
+          email: users.email,
+          firstName: users.firstName,
+          lastName: users.lastName,
+        }
+      })
+      .from(imageTranslations)
+      .leftJoin(users, eq(imageTranslations.userId, users.id))
+      .where(
+        or(
+          eq(imageTranslations.isPrivate, false),
+          eq(imageTranslations.userId, userId)
+        )
+      )
+      .orderBy(desc(imageTranslations.updatedAt));
+    
+    return results.map(r => ({
+      ...r.imageTranslation,
+      owner: r.owner
+    })) as Omit<ImageTranslation, 'sourceImageBase64'>[];
+  }
+
+  async getImageTranslationsPaginated(
+    userId: string,
+    page: number = 1,
+    limit: number = 20,
+    search?: string
+  ): Promise<{
+    data: Omit<ImageTranslation, 'sourceImageBase64'>[];
+    pagination: {
+      page: number;
+      limit: number;
+      total: number;
+      totalPages: number;
+      hasMore: boolean;
+    };
+  }> {
+    // Build base conditions
+    const baseConditions = or(
+      eq(imageTranslations.isPrivate, false),
+      eq(imageTranslations.userId, userId)
+    );
+
+    // Add search conditions if search query provided
+    const searchConditions = search && search.length >= 2
+      ? and(
+          baseConditions,
+          ilike(imageTranslations.title, `%${search}%`)
+        )
+      : baseConditions;
+
+    // Get total count
+    const [{ count }] = await db
+      .select({ count: sql<number>`cast(count(*) as integer)` })
+      .from(imageTranslations)
+      .where(searchConditions);
+
+    const total = Number(count);
+    const totalPages = Math.ceil(total / limit);
+    const offset = (page - 1) * limit;
+
+    // Get paginated results - exclude sourceImageBase64 for performance
+    const results = await db
+      .select({
+        imageTranslation: {
+          id: imageTranslations.id,
+          userId: imageTranslations.userId,
+          title: imageTranslations.title,
+          sourceMimeType: imageTranslations.sourceMimeType,
+          isPrivate: imageTranslations.isPrivate,
+          selectedLanguages: imageTranslations.selectedLanguages,
+          createdAt: imageTranslations.createdAt,
+          updatedAt: imageTranslations.updatedAt,
+        },
+        owner: {
+          id: users.id,
+          email: users.email,
+          firstName: users.firstName,
+          lastName: users.lastName,
+        }
+      })
+      .from(imageTranslations)
+      .leftJoin(users, eq(imageTranslations.userId, users.id))
+      .where(searchConditions)
+      .orderBy(desc(imageTranslations.updatedAt))
+      .limit(limit)
+      .offset(offset);
+
+    return {
+      data: results.map(r => ({
+        ...r.imageTranslation,
+        owner: r.owner
+      })) as Omit<ImageTranslation, 'sourceImageBase64'>[],
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages,
+        hasMore: page < totalPages,
+      },
+    };
+  }
+
+  async getImageTranslation(id: string): Promise<ImageTranslation | undefined> {
+    const [imageTranslation] = await db
+      .select()
+      .from(imageTranslations)
+      .where(eq(imageTranslations.id, id));
+    return imageTranslation;
+  }
+
+  async getImageTranslationMetadata(id: string): Promise<Omit<ImageTranslation, 'sourceImageBase64'> | undefined> {
+    const [result] = await db
+      .select({
+        id: imageTranslations.id,
+        userId: imageTranslations.userId,
+        title: imageTranslations.title,
+        sourceMimeType: imageTranslations.sourceMimeType,
+        isPrivate: imageTranslations.isPrivate,
+        selectedLanguages: imageTranslations.selectedLanguages,
+        lastUsedModelId: imageTranslations.lastUsedModelId,
+        createdAt: imageTranslations.createdAt,
+        updatedAt: imageTranslations.updatedAt,
+      })
+      .from(imageTranslations)
+      .where(eq(imageTranslations.id, id));
+    return result;
+  }
+
+  async getImageTranslationSourceImage(id: string): Promise<{ sourceImageBase64: string; sourceMimeType: string } | undefined> {
+    const [result] = await db
+      .select({
+        sourceImageBase64: imageTranslations.sourceImageBase64,
+        sourceMimeType: imageTranslations.sourceMimeType,
+      })
+      .from(imageTranslations)
+      .where(eq(imageTranslations.id, id));
+    return result;
+  }
+
+  async createImageTranslation(imageTranslation: InsertImageTranslation & { userId: string }): Promise<ImageTranslation> {
+    const [newImageTranslation] = await db
+      .insert(imageTranslations)
+      .values(imageTranslation)
+      .returning();
+    return newImageTranslation;
+  }
+
+  async updateImageTranslation(id: string, data: Partial<ImageTranslation>): Promise<ImageTranslation> {
+    const [updated] = await db
+      .update(imageTranslations)
+      .set({ ...data, updatedAt: new Date() })
+      .where(eq(imageTranslations.id, id))
+      .returning();
+    return updated;
+  }
+
+  async deleteImageTranslation(id: string): Promise<void> {
+    await db.delete(imageTranslations).where(eq(imageTranslations.id, id));
+  }
+
+  // Image translation output operations
+  async getImageTranslationOutput(id: string): Promise<ImageTranslationOutput | undefined> {
+    const [output] = await db
+      .select()
+      .from(imageTranslationOutputs)
+      .where(eq(imageTranslationOutputs.id, id));
+    return output;
+  }
+
+  async getImageTranslationOutputs(imageTranslationId: string): Promise<ImageTranslationOutput[]> {
+    return await db
+      .select()
+      .from(imageTranslationOutputs)
+      .where(eq(imageTranslationOutputs.imageTranslationId, imageTranslationId));
+  }
+
+  async getImageTranslationOutputsMetadata(imageTranslationId: string): Promise<Omit<ImageTranslationOutput, 'translatedImageBase64'>[]> {
+    return await db
+      .select({
+        id: imageTranslationOutputs.id,
+        imageTranslationId: imageTranslationOutputs.imageTranslationId,
+        languageCode: imageTranslationOutputs.languageCode,
+        languageName: imageTranslationOutputs.languageName,
+        translatedMimeType: imageTranslationOutputs.translatedMimeType,
+        modelId: imageTranslationOutputs.modelId,
+        status: imageTranslationOutputs.status,
+        createdAt: imageTranslationOutputs.createdAt,
+        updatedAt: imageTranslationOutputs.updatedAt,
+      })
+      .from(imageTranslationOutputs)
+      .where(eq(imageTranslationOutputs.imageTranslationId, imageTranslationId));
+  }
+
+  async getImageTranslationOutputImage(outputId: string): Promise<{ translatedImageBase64: string | null; translatedMimeType: string | null } | undefined> {
+    const [result] = await db
+      .select({
+        translatedImageBase64: imageTranslationOutputs.translatedImageBase64,
+        translatedMimeType: imageTranslationOutputs.translatedMimeType,
+      })
+      .from(imageTranslationOutputs)
+      .where(eq(imageTranslationOutputs.id, outputId));
+    return result;
+  }
+
+  async createImageTranslationOutput(output: InsertImageTranslationOutput): Promise<ImageTranslationOutput> {
+    const [newOutput] = await db
+      .insert(imageTranslationOutputs)
+      .values(output)
+      .returning();
+    return newOutput;
+  }
+
+  async updateImageTranslationOutput(id: string, data: Partial<ImageTranslationOutput>): Promise<ImageTranslationOutput> {
+    const [updated] = await db
+      .update(imageTranslationOutputs)
+      .set({ ...data, updatedAt: new Date() })
+      .where(eq(imageTranslationOutputs.id, id))
+      .returning();
+    return updated;
+  }
+
+  async updateImageTranslationOutputStatus(id: string, status: 'pending' | 'translating' | 'completed' | 'failed'): Promise<ImageTranslationOutput> {
+    const [updated] = await db
+      .update(imageTranslationOutputs)
+      .set({ status, updatedAt: new Date() })
+      .where(eq(imageTranslationOutputs.id, id))
+      .returning();
+    return updated;
+  }
+
+  async deleteImageTranslationOutput(id: string): Promise<void> {
+    await db.delete(imageTranslationOutputs).where(eq(imageTranslationOutputs.id, id));
+  }
+
+  // Analytics operations
+  async getAnalyticsOverview(startDate: Date): Promise<{
+    totalTranslations: number;
+    totalProofreadings: number;
+    totalImageTranslations: number;
+    activeUsers: number;
+    totalFeedback: number;
+  }> {
+    // Get total translations in period
+    const [translationsCount] = await db
+      .select({ count: sql<number>`cast(count(*) as integer)` })
+      .from(translations)
+      .where(sql`${translations.createdAt} >= ${startDate}`);
+
+    // Get total proofreadings in period
+    const [proofreadingsCount] = await db
+      .select({ count: sql<number>`cast(count(*) as integer)` })
+      .from(proofreadings)
+      .where(sql`${proofreadings.createdAt} >= ${startDate}`);
+
+    // Get total image translations in period
+    const [imageTranslationsCount] = await db
+      .select({ count: sql<number>`cast(count(*) as integer)` })
+      .from(imageTranslations)
+      .where(sql`${imageTranslations.createdAt} >= ${startDate}`);
+
+    // Get unique active users (who created translations or proofreadings)
+    const activeUsersResult = await db
+      .select({ userId: translations.userId })
+      .from(translations)
+      .where(sql`${translations.createdAt} >= ${startDate}`)
+      .union(
+        db.select({ userId: proofreadings.userId })
+          .from(proofreadings)
+          .where(sql`${proofreadings.createdAt} >= ${startDate}`)
+      )
+      .union(
+        db.select({ userId: imageTranslations.userId })
+          .from(imageTranslations)
+          .where(sql`${imageTranslations.createdAt} >= ${startDate}`)
+      );
+    const uniqueUserIds = new Set(activeUsersResult.map(r => r.userId));
+
+    // Get total feedback in period
+    const [feedbackCount] = await db
+      .select({ count: sql<number>`cast(count(*) as integer)` })
+      .from(translationFeedback)
+      .where(sql`${translationFeedback.createdAt} >= ${startDate}`);
+
+    return {
+      totalTranslations: translationsCount?.count || 0,
+      totalProofreadings: proofreadingsCount?.count || 0,
+      totalImageTranslations: imageTranslationsCount?.count || 0,
+      activeUsers: uniqueUserIds.size,
+      totalFeedback: feedbackCount?.count || 0,
+    };
+  }
+
+  async getUsageOverTime(startDate: Date, granularity: 'day' | 'week' | 'month'): Promise<{
+    date: string;
+    translations: number;
+    proofreadings: number;
+    imageTranslations: number;
+  }[]> {
+    // Determine date truncation based on granularity
+    const dateTrunc = granularity === 'day' ? 'day' : granularity === 'week' ? 'week' : 'month';
+
+    // Get translations grouped by period
+    const translationsData = await db
+      .select({
+        date: sql<string>`date_trunc('${sql.raw(dateTrunc)}', ${translations.createdAt})::date::text`,
+        count: sql<number>`cast(count(*) as integer)`,
+      })
+      .from(translations)
+      .where(sql`${translations.createdAt} >= ${startDate}`)
+      .groupBy(sql`date_trunc('${sql.raw(dateTrunc)}', ${translations.createdAt})`)
+      .orderBy(sql`date_trunc('${sql.raw(dateTrunc)}', ${translations.createdAt})`);
+
+    // Get proofreadings grouped by period
+    const proofreadingsData = await db
+      .select({
+        date: sql<string>`date_trunc('${sql.raw(dateTrunc)}', ${proofreadings.createdAt})::date::text`,
+        count: sql<number>`cast(count(*) as integer)`,
+      })
+      .from(proofreadings)
+      .where(sql`${proofreadings.createdAt} >= ${startDate}`)
+      .groupBy(sql`date_trunc('${sql.raw(dateTrunc)}', ${proofreadings.createdAt})`)
+      .orderBy(sql`date_trunc('${sql.raw(dateTrunc)}', ${proofreadings.createdAt})`);
+
+    // Get image translations grouped by period
+    const imageTranslationsData = await db
+      .select({
+        date: sql<string>`date_trunc('${sql.raw(dateTrunc)}', ${imageTranslations.createdAt})::date::text`,
+        count: sql<number>`cast(count(*) as integer)`,
+      })
+      .from(imageTranslations)
+      .where(sql`${imageTranslations.createdAt} >= ${startDate}`)
+      .groupBy(sql`date_trunc('${sql.raw(dateTrunc)}', ${imageTranslations.createdAt})`)
+      .orderBy(sql`date_trunc('${sql.raw(dateTrunc)}', ${imageTranslations.createdAt})`);
+
+    // Merge data by date
+    const dateMap = new Map<string, { translations: number; proofreadings: number; imageTranslations: number }>();
+
+    for (const row of translationsData) {
+      const existing = dateMap.get(row.date) || { translations: 0, proofreadings: 0, imageTranslations: 0 };
+      existing.translations = row.count;
+      dateMap.set(row.date, existing);
+    }
+
+    for (const row of proofreadingsData) {
+      const existing = dateMap.get(row.date) || { translations: 0, proofreadings: 0, imageTranslations: 0 };
+      existing.proofreadings = row.count;
+      dateMap.set(row.date, existing);
+    }
+
+    for (const row of imageTranslationsData) {
+      const existing = dateMap.get(row.date) || { translations: 0, proofreadings: 0, imageTranslations: 0 };
+      existing.imageTranslations = row.count;
+      dateMap.set(row.date, existing);
+    }
+
+    // Convert to sorted array
+    return Array.from(dateMap.entries())
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([date, data]) => ({
+        date,
+        translations: data.translations,
+        proofreadings: data.proofreadings,
+        imageTranslations: data.imageTranslations,
+      }));
+  }
+
+  async getTopLanguages(startDate: Date, limit: number = 10): Promise<{
+    languageName: string;
+    count: number;
+  }[]> {
+    // Get text translation language counts
+    const textLanguages = await db
+      .select({
+        languageName: translationOutputs.languageName,
+        count: sql<number>`cast(count(*) as integer)`,
+      })
+      .from(translationOutputs)
+      .innerJoin(translations, eq(translationOutputs.translationId, translations.id))
+      .where(sql`${translations.createdAt} >= ${startDate}`)
+      .groupBy(translationOutputs.languageName);
+
+    // Get image translation language counts
+    const imageLanguages = await db
+      .select({
+        languageName: imageTranslationOutputs.languageName,
+        count: sql<number>`cast(count(*) as integer)`,
+      })
+      .from(imageTranslationOutputs)
+      .innerJoin(imageTranslations, eq(imageTranslationOutputs.imageTranslationId, imageTranslations.id))
+      .where(sql`${imageTranslations.createdAt} >= ${startDate}`)
+      .groupBy(imageTranslationOutputs.languageName);
+
+    // Merge counts by language name
+    const languageMap = new Map<string, number>();
+    for (const row of textLanguages) {
+      const existing = languageMap.get(row.languageName) || 0;
+      languageMap.set(row.languageName, existing + row.count);
+    }
+    for (const row of imageLanguages) {
+      const existing = languageMap.get(row.languageName) || 0;
+      languageMap.set(row.languageName, existing + row.count);
+    }
+
+    // Sort by count and return top N
+    return Array.from(languageMap.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, limit)
+      .map(([languageName, count]) => ({ languageName, count }));
+  }
+
+  async getProofreadingCategoryUsage(startDate: Date): Promise<{
+    categoryId: string;
+    categoryName: string;
+    count: number;
+  }[]> {
+    // Get all proofreadings with their selected categories
+    const proofreadingRecords = await db
+      .select({
+        selectedCategories: proofreadings.selectedCategories,
+      })
+      .from(proofreadings)
+      .where(sql`${proofreadings.createdAt} >= ${startDate}`);
+
+    // Count category usage
+    const categoryCountMap = new Map<string, number>();
+    for (const record of proofreadingRecords) {
+      const categories = record.selectedCategories || [];
+      for (const categoryId of categories) {
+        const existing = categoryCountMap.get(categoryId) || 0;
+        categoryCountMap.set(categoryId, existing + 1);
+      }
+    }
+
+    // Get category names
+    const allCategories = await db.select().from(proofreadingRuleCategories);
+    const categoryNameMap = new Map(allCategories.map(c => [c.id, c.name]));
+
+    // Build result with names
+    return Array.from(categoryCountMap.entries())
+      .map(([categoryId, count]) => ({
+        categoryId,
+        categoryName: categoryNameMap.get(categoryId) || 'Unknown',
+        count,
+      }))
+      .sort((a, b) => b.count - a.count);
+  }
+
+  async getFeedbackSentiment(startDate: Date): Promise<{
+    positive: number;
+    negative: number;
+  }> {
+    const sentimentData = await db
+      .select({
+        sentiment: translationFeedback.sentiment,
+        count: sql<number>`cast(count(*) as integer)`,
+      })
+      .from(translationFeedback)
+      .where(sql`${translationFeedback.createdAt} >= ${startDate}`)
+      .groupBy(translationFeedback.sentiment);
+
+    const result = { positive: 0, negative: 0 };
+    for (const row of sentimentData) {
+      if (row.sentiment === 'positive') {
+        result.positive = row.count;
+      } else if (row.sentiment === 'negative') {
+        result.negative = row.count;
+      }
+    }
+    return result;
+  }
+
+  async getModelUsage(startDate: Date): Promise<{
+    modelId: string;
+    modelName: string;
+    count: number;
+  }[]> {
+    // Get translation output model usage
+    const translationModelUsage = await db
+      .select({
+        modelId: translationOutputs.modelId,
+        count: sql<number>`cast(count(*) as integer)`,
+      })
+      .from(translationOutputs)
+      .innerJoin(translations, eq(translationOutputs.translationId, translations.id))
+      .where(and(
+        sql`${translations.createdAt} >= ${startDate}`,
+        sql`${translationOutputs.modelId} IS NOT NULL`
+      ))
+      .groupBy(translationOutputs.modelId);
+
+    // Get proofreading output model usage
+    const proofreadingModelUsage = await db
+      .select({
+        modelId: proofreadingOutputs.modelId,
+        count: sql<number>`cast(count(*) as integer)`,
+      })
+      .from(proofreadingOutputs)
+      .innerJoin(proofreadings, eq(proofreadingOutputs.proofreadingId, proofreadings.id))
+      .where(and(
+        sql`${proofreadings.createdAt} >= ${startDate}`,
+        sql`${proofreadingOutputs.modelId} IS NOT NULL`
+      ))
+      .groupBy(proofreadingOutputs.modelId);
+
+    // Merge counts by model
+    const modelCountMap = new Map<string, number>();
+    for (const row of translationModelUsage) {
+      if (row.modelId) {
+        const existing = modelCountMap.get(row.modelId) || 0;
+        modelCountMap.set(row.modelId, existing + row.count);
+      }
+    }
+    for (const row of proofreadingModelUsage) {
+      if (row.modelId) {
+        const existing = modelCountMap.get(row.modelId) || 0;
+        modelCountMap.set(row.modelId, existing + row.count);
+      }
+    }
+
+    // Get model names
+    const allModels = await db.select().from(aiModels);
+    const modelNameMap = new Map(allModels.map(m => [m.id, m.name]));
+
+    // Build result with names
+    return Array.from(modelCountMap.entries())
+      .map(([modelId, count]) => ({
+        modelId,
+        modelName: modelNameMap.get(modelId) || 'Unknown',
+        count,
+      }))
+      .sort((a, b) => b.count - a.count);
+  }
+
+  async getTopUsers(startDate: Date, limit: number = 10): Promise<{
+    userId: string;
+    email: string | null;
+    firstName: string | null;
+    lastName: string | null;
+    profileImageUrl: string | null;
+    translationCount: number;
+    proofreadingCount: number;
+    totalCount: number;
+  }[]> {
+    // Get translation counts per user
+    const translationCounts = await db
+      .select({
+        userId: translations.userId,
+        count: sql<number>`cast(count(*) as integer)`,
+      })
+      .from(translations)
+      .where(sql`${translations.createdAt} >= ${startDate}`)
+      .groupBy(translations.userId);
+
+    // Get proofreading counts per user
+    const proofreadingCounts = await db
+      .select({
+        userId: proofreadings.userId,
+        count: sql<number>`cast(count(*) as integer)`,
+      })
+      .from(proofreadings)
+      .where(sql`${proofreadings.createdAt} >= ${startDate}`)
+      .groupBy(proofreadings.userId);
+
+    // Get image translation counts per user (add to translation count)
+    const imageTranslationCounts = await db
+      .select({
+        userId: imageTranslations.userId,
+        count: sql<number>`cast(count(*) as integer)`,
+      })
+      .from(imageTranslations)
+      .where(sql`${imageTranslations.createdAt} >= ${startDate}`)
+      .groupBy(imageTranslations.userId);
+
+    // Merge counts
+    const userCountMap = new Map<string, { translationCount: number; proofreadingCount: number }>();
+    for (const row of translationCounts) {
+      const existing = userCountMap.get(row.userId) || { translationCount: 0, proofreadingCount: 0 };
+      existing.translationCount += row.count;
+      userCountMap.set(row.userId, existing);
+    }
+    for (const row of imageTranslationCounts) {
+      const existing = userCountMap.get(row.userId) || { translationCount: 0, proofreadingCount: 0 };
+      existing.translationCount += row.count;
+      userCountMap.set(row.userId, existing);
+    }
+    for (const row of proofreadingCounts) {
+      const existing = userCountMap.get(row.userId) || { translationCount: 0, proofreadingCount: 0 };
+      existing.proofreadingCount += row.count;
+      userCountMap.set(row.userId, existing);
+    }
+
+    // Get user details
+    const userIds = Array.from(userCountMap.keys());
+    if (userIds.length === 0) return [];
+
+    const userDetails = await db
+      .select({
+        id: users.id,
+        email: users.email,
+        firstName: users.firstName,
+        lastName: users.lastName,
+        profileImageUrl: users.profileImageUrl,
+      })
+      .from(users)
+      .where(inArray(users.id, userIds));
+
+    const userDetailsMap = new Map(userDetails.map(u => [u.id, u]));
+
+    // Build result and sort by total count
+    return Array.from(userCountMap.entries())
+      .map(([userId, counts]) => {
+        const user = userDetailsMap.get(userId);
+        return {
+          userId,
+          email: user?.email ?? null,
+          firstName: user?.firstName ?? null,
+          lastName: user?.lastName ?? null,
+          profileImageUrl: user?.profileImageUrl ?? null,
+          translationCount: counts.translationCount,
+          proofreadingCount: counts.proofreadingCount,
+          totalCount: counts.translationCount + counts.proofreadingCount,
+        };
+      })
+      .sort((a, b) => b.totalCount - a.totalCount)
+      .slice(0, limit);
   }
 }
 

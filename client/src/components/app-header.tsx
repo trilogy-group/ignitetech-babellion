@@ -31,10 +31,20 @@ export function AppHeader() {
   const isMobile = useIsMobile();
   const [isReleaseNotesOpen, setIsReleaseNotesOpen] = useState(false);
 
-  const isProofread = location === "/proofread";
-  const isTranslate = location === "/translate";
+  const isProofread = location === "/proofread" || location.startsWith("/proofread/");
+  const isTranslate = location === "/translate" || location.startsWith("/translate/");
+  const isImageTranslate = location === "/image-translate" || location.startsWith("/image-translate/");
   const isFeedback = location === "/feedback";
   const isSettings = location === "/settings";
+
+  // Get current page title for mobile indicator
+  const currentPageTitle = isProofread
+    ? "Proofread"
+    : isTranslate
+    ? "Translate"
+    : isImageTranslate
+    ? "Image"
+    : null;
 
   return (
     <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
@@ -47,6 +57,14 @@ export function AppHeader() {
               <span className="text-lg sm:text-xl font-semibold">Babellion</span>
             </div>
           </Link>
+
+          {/* Mobile page indicator */}
+          {isMobile && currentPageTitle && (
+            <div className="flex items-center gap-1.5 md:hidden">
+              <span className="text-xs text-muted-foreground">/</span>
+              <span className="text-xs font-medium text-muted-foreground">{currentPageTitle}</span>
+            </div>
+          )}
 
           {/* Desktop Navigation */}
           <nav className="hidden md:flex items-center gap-6">
@@ -83,6 +101,26 @@ export function AppHeader() {
               >
                 Translate
                 {isTranslate && (
+                  <div 
+                    className="absolute bottom-0 left-0 right-0 h-1 bg-purple-600 rounded-full"
+                    style={{ boxShadow: '0 0 8px rgba(147, 51, 234, 0.6)' }}
+                  />
+                )}
+              </button>
+            </Link>
+            <Link href="/image-translate">
+              <button
+                data-testid="nav-image-translate"
+                className={`
+                  relative px-1 py-2 text-sm font-medium transition-all
+                  ${isImageTranslate 
+                    ? "text-foreground" 
+                    : "text-muted-foreground hover:text-foreground"
+                  }
+                `}
+              >
+                Image Translation
+                {isImageTranslate && (
                   <div 
                     className="absolute bottom-0 left-0 right-0 h-1 bg-purple-600 rounded-full"
                     style={{ boxShadow: '0 0 8px rgba(147, 51, 234, 0.6)' }}
@@ -163,7 +201,7 @@ export function AppHeader() {
                 <Info className="mr-2 h-4 w-4" />
                 <div className="flex items-center justify-between flex-1">
                   <span>Babellion</span>
-                  <Badge variant="secondary" className="ml-2 text-xs">v1.4.3</Badge>
+                  <Badge variant="secondary" className="ml-2 text-xs">v1.5.0</Badge>
                 </div>
               </DropdownMenuItem>
               <DropdownMenuSeparator />

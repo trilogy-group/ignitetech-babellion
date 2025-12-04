@@ -9,6 +9,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { Badge } from "@/components/ui/badge";
+import { formatDate } from "@/lib/utils";
+import { useIsMobile } from "@/hooks/use-mobile";
 
 interface GoogleDoc {
   id: string;
@@ -28,6 +30,7 @@ interface GoogleDocsPickerProps {
 
 export function GoogleDocsPicker({ open, onOpenChange, onDocumentSelect }: GoogleDocsPickerProps) {
   const { toast } = useToast();
+  const isMobile = useIsMobile();
   const [searchInput, setSearchInput] = useState("");
   const [activeSearch, setActiveSearch] = useState("");
   const [selectedDocId, setSelectedDocId] = useState<string | null>(null);
@@ -101,29 +104,15 @@ export function GoogleDocsPicker({ open, onOpenChange, onDocumentSelect }: Googl
     }
   };
 
-  const formatDate = (dateString?: string) => {
-    if (!dateString) return "";
-    const date = new Date(dateString);
-    const now = new Date();
-    const diffMs = now.getTime() - date.getTime();
-    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-
-    if (diffDays === 0) return "Today";
-    if (diffDays === 1) return "Yesterday";
-    if (diffDays < 7) return `${diffDays} days ago`;
-    if (diffDays < 30) return `${Math.floor(diffDays / 7)} weeks ago`;
-    if (diffDays < 365) return `${Math.floor(diffDays / 30)} months ago`;
-    return date.toLocaleDateString();
-  };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-3xl h-[80vh] flex flex-col">
+      <DialogContent className="max-w-3xl h-[90vh] md:h-[80vh] flex flex-col p-4 md:p-6 gap-3 md:gap-4">
         <DialogHeader className="flex-shrink-0">
           <div>
-            <DialogTitle>Select a Google Doc</DialogTitle>
+            <DialogTitle className="text-base md:text-lg">Select a Google Doc</DialogTitle>
             {!error && !docsLoading && docs.length > 0 && (
-              <p className="text-sm text-muted-foreground mt-1">
+              <p className="text-xs md:text-sm text-muted-foreground mt-1">
                 {docs.length} document{docs.length !== 1 ? 's' : ''} 
                 {activeSearch ? ` matching "${activeSearch}"` : ' found'}
                 {docs.length >= 500 && ' (showing first 500)'}
@@ -133,15 +122,15 @@ export function GoogleDocsPicker({ open, onOpenChange, onDocumentSelect }: Googl
         </DialogHeader>
 
         {error ? (
-          <div className="flex flex-col items-center justify-center py-12 px-4 text-center flex-1">
-            <FileText className="h-12 w-12 text-muted-foreground mb-4" />
-            <h3 className="text-lg font-semibold mb-2">Unable to Access Google Docs</h3>
-            <p className="text-sm text-muted-foreground mb-4 max-w-md">
+          <div className="flex flex-col items-center justify-center py-8 md:py-12 px-4 text-center flex-1">
+            <FileText className="h-10 w-10 md:h-12 md:w-12 text-muted-foreground mb-4" />
+            <h3 className="text-base md:text-lg font-semibold mb-2">Unable to Access Google Docs</h3>
+            <p className="text-xs md:text-sm text-muted-foreground mb-4 max-w-md">
               {(error as Error)?.message?.includes('No Google access token') 
                 ? "Please log out and log back in to grant access to your Google Docs."
                 : "We couldn't connect to your Google Drive. Please try again or contact support."}
             </p>
-            <Button variant="outline" onClick={() => onOpenChange(false)}>
+            <Button variant="outline" onClick={() => onOpenChange(false)} className="h-11 min-h-touch">
               Close
             </Button>
           </div>
@@ -151,16 +140,16 @@ export function GoogleDocsPicker({ open, onOpenChange, onDocumentSelect }: Googl
             <div className="relative flex-shrink-0">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input
-                placeholder="Search documents... (Press Enter to search)"
+                placeholder={isMobile ? "Search... (Enter)" : "Search documents... (Press Enter to search)"}
                 value={searchInput}
                 onChange={(e) => setSearchInput(e.target.value)}
                 onKeyDown={handleSearchKeyDown}
-                className="pl-9 pr-8"
+                className="pl-9 pr-8 h-11 min-h-touch"
               />
               {searchInput && (
                 <button
                   onClick={handleClearSearch}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground h-8 w-8 flex items-center justify-center"
                   aria-label="Clear search"
                 >
                   ×
@@ -170,26 +159,26 @@ export function GoogleDocsPicker({ open, onOpenChange, onDocumentSelect }: Googl
 
             {/* Loading State */}
             {docsLoading && (
-              <div className="flex items-center justify-center py-12 flex-1">
-                <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-                <span className="ml-2 text-sm text-muted-foreground">
-                  {activeSearch ? 'Searching your documents...' : 'Loading your documents...'}
+              <div className="flex items-center justify-center py-8 md:py-12 flex-1">
+                <Loader2 className="h-6 w-6 md:h-8 md:w-8 animate-spin text-muted-foreground" />
+                <span className="ml-2 text-xs md:text-sm text-muted-foreground">
+                  {activeSearch ? 'Searching...' : 'Loading...'}
                 </span>
               </div>
             )}
 
             {/* Documents List */}
             {!docsLoading && (
-              <ScrollArea className="flex-1 -mx-6 px-6 min-h-0">
+              <ScrollArea className="flex-1 -mx-4 md:-mx-6 px-4 md:px-6 min-h-0">
                 {docs.length === 0 ? (
-                  <div className="flex flex-col items-center justify-center py-12 text-center">
-                    <FileText className="h-12 w-12 text-muted-foreground mb-4" />
-                    <p className="text-sm text-muted-foreground">
+                  <div className="flex flex-col items-center justify-center py-8 md:py-12 text-center">
+                    <FileText className="h-10 w-10 md:h-12 md:w-12 text-muted-foreground mb-4" />
+                    <p className="text-xs md:text-sm text-muted-foreground">
                       {activeSearch ? `No documents found matching "${activeSearch}"` : "No Google Docs found"}
                     </p>
                     {activeSearch && (
                       <p className="text-xs text-muted-foreground mt-2">
-                        Try a different search term or clear the search to see all documents
+                        Try a different search term or clear the search
                       </p>
                     )}
                   </div>
@@ -198,7 +187,7 @@ export function GoogleDocsPicker({ open, onOpenChange, onDocumentSelect }: Googl
                     {docs.map((doc) => (
                       <Card
                         key={doc.id}
-                        className={`p-4 cursor-pointer hover:bg-accent transition-colors ${
+                        className={`p-3 md:p-4 cursor-pointer hover:bg-accent active:bg-accent transition-colors ${
                           selectedDocId === doc.id ? 'ring-2 ring-primary' : ''
                         }`}
                         onClick={() => !isLoading && handleSelect(doc)}
@@ -206,11 +195,11 @@ export function GoogleDocsPicker({ open, onOpenChange, onDocumentSelect }: Googl
                         <div className="flex items-start gap-3">
                           <FileText className="h-5 w-5 text-blue-600 flex-shrink-0 mt-0.5" />
                           <div className="flex-1 min-w-0">
-                            <h3 className="font-medium truncate">{doc.name}</h3>
-                            <div className="flex items-center gap-2 mt-1">
+                            <h3 className="font-medium text-sm md:text-base leading-tight line-clamp-2 md:truncate">{doc.name}</h3>
+                            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1.5">
                               {doc.modifiedTime && (
                                 <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                                  <Calendar className="h-3 w-3" />
+                                  <Calendar className="h-3 w-3 flex-shrink-0" />
                                   <span>{formatDate(doc.modifiedTime)}</span>
                                 </div>
                               )}
@@ -222,8 +211,9 @@ export function GoogleDocsPicker({ open, onOpenChange, onDocumentSelect }: Googl
                                   onClick={(e) => e.stopPropagation()}
                                   className="flex items-center gap-1 text-xs text-blue-600 hover:underline"
                                 >
-                                  <ExternalLink className="h-3 w-3" />
-                                  <span>Open in Google Docs</span>
+                                  <ExternalLink className="h-3 w-3 flex-shrink-0" />
+                                  <span className="hidden sm:inline">Open in Google Docs</span>
+                                  <span className="sm:hidden">Open</span>
                                 </a>
                               )}
                             </div>
@@ -241,8 +231,13 @@ export function GoogleDocsPicker({ open, onOpenChange, onDocumentSelect }: Googl
           </>
         )}
 
-        <DialogFooter className="flex-shrink-0">
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isLoading}>
+        <DialogFooter className="flex-shrink-0 pt-2 border-t md:border-t-0 md:pt-0">
+          <Button 
+            variant="outline" 
+            onClick={() => onOpenChange(false)} 
+            disabled={isLoading}
+            className="w-full md:w-auto h-11 min-h-touch"
+          >
             Cancel
           </Button>
         </DialogFooter>

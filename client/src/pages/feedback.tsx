@@ -1,6 +1,6 @@
 import { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { formatDistanceToNow } from "date-fns";
+import { formatDate } from "@/lib/utils";
 import { ThumbsUp, ThumbsDown, Loader2, FileText, User, Calendar, ChevronLeft, ChevronRight, ExternalLink, Filter, ChevronDown, ChevronUp } from "lucide-react";
 import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
@@ -294,7 +294,7 @@ export default function Feedback() {
                                 <p className="text-sm font-medium truncate">{userName}</p>
                                 <p className="text-xs text-muted-foreground flex items-center gap-1">
                                   <Calendar className="h-3 w-3" />
-                                  {feedback.createdAt ? formatDistanceToNow(new Date(feedback.createdAt), { addSuffix: true }) : 'N/A'}
+                                  {formatDate(feedback.createdAt)}
                                 </p>
                               </div>
                             </div>
@@ -435,7 +435,7 @@ export default function Feedback() {
                         <TableCell className="text-xs text-muted-foreground">
                           <div className="flex items-center gap-1">
                             <Calendar className="h-3 w-3" />
-                            {feedback.createdAt ? formatDistanceToNow(new Date(feedback.createdAt), { addSuffix: true }) : 'N/A'}
+                            {formatDate(feedback.createdAt)}
                           </div>
                         </TableCell>
                         <TableCell className="text-xs">

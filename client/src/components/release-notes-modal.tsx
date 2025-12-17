@@ -47,7 +47,8 @@ function VersionHeader({ version, date, isLatest, isOpen }: VersionHeaderProps) 
  */
 export function ReleaseNotesModal({ open, onOpenChange }: ReleaseNotesModalProps) {
   const [openSections, setOpenSections] = useState<Record<string, boolean>>({
-    "v1.5": true,
+    "v1.6": true,
+    "v1.5": false,
     "v1.4.3": false,
     "v1.4.2": false,
     "v1.4.1": false,
@@ -65,7 +66,7 @@ export function ReleaseNotesModal({ open, onOpenChange }: ReleaseNotesModalProps
         <DialogHeader className="text-left">
           <DialogTitle className="flex items-center gap-2 text-base">
             Release Notes
-            <Badge variant="secondary" className="text-xs">v1.5</Badge>
+            <Badge variant="secondary" className="text-xs">v1.6</Badge>
           </DialogTitle>
           <DialogDescription className="text-xs">
             What's new in this release
@@ -74,9 +75,45 @@ export function ReleaseNotesModal({ open, onOpenChange }: ReleaseNotesModalProps
         
         <ScrollArea className="max-h-[50vh] pr-4">
           <div className="space-y-4">
+            {/* Version 1.6 */}
+            <Collapsible open={openSections["v1.6"]} onOpenChange={() => toggleSection("v1.6")}>
+              <VersionHeader version="Version 1.6" date="Latest Release" isLatest isOpen={openSections["v1.6"]} />
+              <CollapsibleContent className="space-y-2 ml-4 pt-3">
+              <div className="flex gap-2 items-start">
+                  <FileText className="h-3 w-3 text-primary mt-0.5 flex-shrink-0" />
+                  <div>
+                    <span className="font-medium text-xs">Table Support:</span>
+                    <span className="text-xs text-muted-foreground ml-1">
+                      Tables from Google Docs now render properly in the Translate and Proofread editors.
+                    </span>
+                  </div>
+                </div>
+                <div className="flex gap-2 items-start">
+                  <BarChart3 className="h-3 w-3 text-primary mt-0.5 flex-shrink-0" />
+                  <div>
+                    <span className="font-medium text-xs">Image Translation Analytics:</span>
+                    <span className="text-xs text-muted-foreground ml-1">
+                      Top Active Users now displays image translation counts separately from text translations for better activity tracking.
+                    </span>
+                  </div>
+                </div>
+                <div className="flex gap-2 items-start">
+                  <CheckCircle className="h-3 w-3 text-primary mt-0.5 flex-shrink-0" />
+                  <div>
+                    <span className="font-medium text-xs">Fixed Editor Responsiveness:</span>
+                    <span className="text-xs text-muted-foreground ml-1">
+                      Fixed an issue preventing users from typing or pasting in the editor immediately after creating or switching documents.
+                    </span>
+                  </div>
+                </div>
+              </CollapsibleContent>
+            </Collapsible>
+
             {/* Version 1.5 */}
             <Collapsible open={openSections["v1.5"]} onOpenChange={() => toggleSection("v1.5")}>
-              <VersionHeader version="Version 1.5" date="Latest Release" isLatest isOpen={openSections["v1.5"]} />
+              <div className="pt-4 border-t">
+                <VersionHeader version="Version 1.5" date="December 2025" isOpen={openSections["v1.5"]} />
+              </div>
               <CollapsibleContent className="space-y-3 pt-3">
                 {/* IMAGE TRANSLATION update with icon and bold header */}
                 <div className="flex gap-2 items-start ml-4">

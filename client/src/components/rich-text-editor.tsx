@@ -7,6 +7,10 @@ import Underline from '@tiptap/extension-underline';
 import TextAlign from '@tiptap/extension-text-align';
 import { TextStyle } from '@tiptap/extension-text-style';
 import { Color } from '@tiptap/extension-color';
+import { Table } from '@tiptap/extension-table';
+import { TableRow } from '@tiptap/extension-table-row';
+import { TableCell } from '@tiptap/extension-table-cell';
+import { TableHeader } from '@tiptap/extension-table-header';
 import { Mark } from '@tiptap/core';
 import { 
   Bold, 
@@ -390,6 +394,14 @@ export const RichTextEditor = forwardRef<RichTextEditorRef, RichTextEditorProps>
       placeholder,
     });
     
+    // Table extensions for rendering tables from Google Docs
+    const tableExtension = Table.configure({
+      resizable: false,
+      HTMLAttributes: {
+        class: 'tiptap-table',
+      },
+    });
+    
     return [
       StarterKit,
       underlineExtension,
@@ -399,6 +411,10 @@ export const RichTextEditor = forwardRef<RichTextEditorRef, RichTextEditorProps>
       Color,
       placeholderExtension,
       Highlight,
+      tableExtension,
+      TableRow,
+      TableCell,
+      TableHeader,
     ];
   }, [placeholder]);
 
@@ -433,6 +449,17 @@ export const RichTextEditor = forwardRef<RichTextEditorRef, RichTextEditorProps>
       },
     },
   }, [editorKey, extensions]); // Re-create editor when key or extensions change
+
+  // Sync editor's editable state with the editable prop
+  // This fixes a race condition where editor.isEditable doesn't update immediately
+  useEffect(() => {
+    if (!editor) return;
+    
+    // Force sync the editable state if it doesn't match the prop
+    if (editor.isEditable !== editable) {
+      editor.setEditable(editable);
+    }
+  }, [editor, editable, editorKey]);
 
   // Update editor content when prop changes
   useEffect(() => {

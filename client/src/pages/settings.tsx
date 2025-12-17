@@ -221,6 +221,7 @@ export default function Settings() {
     lastName: string | null;
     profileImageUrl: string | null;
     translationCount: number;
+    imageTranslationCount: number;
     proofreadingCount: number;
     totalCount: number;
   }[]>({
@@ -1000,8 +1001,9 @@ export default function Settings() {
                             )}
                             <div className="flex-1 min-w-0">
                               <p className="font-medium truncate">{displayName}</p>
-                              <div className="flex gap-4 text-xs text-muted-foreground">
+                              <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
                                 <span>{user.translationCount} translations</span>
+                                <span>{user.imageTranslationCount} image</span>
                                 <span>{user.proofreadingCount} proofreadings</span>
                               </div>
                             </div>
@@ -1018,6 +1020,7 @@ export default function Settings() {
                         <TableHead className="w-12">#</TableHead>
                         <TableHead>User</TableHead>
                         <TableHead className="text-center">Translations</TableHead>
+                        <TableHead className="text-center">Image</TableHead>
                         <TableHead className="text-center">Proofreadings</TableHead>
                         <TableHead className="text-center">Total</TableHead>
                       </TableRow>
@@ -1054,6 +1057,7 @@ export default function Settings() {
                               </div>
                             </TableCell>
                             <TableCell className="text-center">{user.translationCount}</TableCell>
+                            <TableCell className="text-center">{user.imageTranslationCount}</TableCell>
                             <TableCell className="text-center">{user.proofreadingCount}</TableCell>
                             <TableCell className="text-center">
                               <Badge variant="secondary">{user.totalCount}</Badge>

@@ -228,6 +228,7 @@ export interface IStorage {
     lastName: string | null;
     profileImageUrl: string | null;
     translationCount: number;
+    imageTranslationCount: number;
     proofreadingCount: number;
     totalCount: number;
   }[]>;
@@ -1589,6 +1590,7 @@ export class DatabaseStorage implements IStorage {
     lastName: string | null;
     profileImageUrl: string | null;
     translationCount: number;
+    imageTranslationCount: number;
     proofreadingCount: number;
     totalCount: number;
   }[]> {
@@ -1612,7 +1614,7 @@ export class DatabaseStorage implements IStorage {
       .where(sql`${proofreadings.createdAt} >= ${startDate}`)
       .groupBy(proofreadings.userId);
 
-    // Get image translation counts per user (add to translation count)
+    // Get image translation counts per user
     const imageTranslationCounts = await db
       .select({
         userId: imageTranslations.userId,
@@ -1623,19 +1625,19 @@ export class DatabaseStorage implements IStorage {
       .groupBy(imageTranslations.userId);
 
     // Merge counts
-    const userCountMap = new Map<string, { translationCount: number; proofreadingCount: number }>();
+    const userCountMap = new Map<string, { translationCount: number; imageTranslationCount: number; proofreadingCount: number }>();
     for (const row of translationCounts) {
-      const existing = userCountMap.get(row.userId) || { translationCount: 0, proofreadingCount: 0 };
+      const existing = userCountMap.get(row.userId) || { translationCount: 0, imageTranslationCount: 0, proofreadingCount: 0 };
       existing.translationCount += row.count;
       userCountMap.set(row.userId, existing);
     }
     for (const row of imageTranslationCounts) {
-      const existing = userCountMap.get(row.userId) || { translationCount: 0, proofreadingCount: 0 };
-      existing.translationCount += row.count;
+      const existing = userCountMap.get(row.userId) || { translationCount: 0, imageTranslationCount: 0, proofreadingCount: 0 };
+      existing.imageTranslationCount += row.count;
       userCountMap.set(row.userId, existing);
     }
     for (const row of proofreadingCounts) {
-      const existing = userCountMap.get(row.userId) || { translationCount: 0, proofreadingCount: 0 };
+      const existing = userCountMap.get(row.userId) || { translationCount: 0, imageTranslationCount: 0, proofreadingCount: 0 };
       existing.proofreadingCount += row.count;
       userCountMap.set(row.userId, existing);
     }
@@ -1668,8 +1670,9 @@ export class DatabaseStorage implements IStorage {
           lastName: user?.lastName ?? null,
           profileImageUrl: user?.profileImageUrl ?? null,
           translationCount: counts.translationCount,
+          imageTranslationCount: counts.imageTranslationCount,
           proofreadingCount: counts.proofreadingCount,
-          totalCount: counts.translationCount + counts.proofreadingCount,
+          totalCount: counts.translationCount + counts.imageTranslationCount + counts.proofreadingCount,
         };
       })
       .sort((a, b) => b.totalCount - a.totalCount)

@@ -347,3 +347,55 @@
     background-attachment: local, local, scroll, scroll;
   }
 }
+
+/* TipTap Table Styles - Google Docs compatible rendering */
+.ProseMirror table,
+.ProseMirror .tiptap-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1rem 0;
+  table-layout: auto;
+}
+
+.ProseMirror table td,
+.ProseMirror table th {
+  border: 1px solid hsl(var(--border));
+  padding: 0.5rem 0.75rem;
+  vertical-align: top;
+  min-width: 1rem;
+  position: relative;
+}
+
+.ProseMirror table th {
+  font-weight: 600;
+  background-color: hsl(var(--muted));
+  text-align: left;
+}
+
+.ProseMirror table tr:first-child td,
+.ProseMirror table tr:first-child th {
+  border-top: 1px solid hsl(var(--border));
+}
+
+/* Selected cell highlight for editing */
+.ProseMirror table .selectedCell {
+  background-color: hsl(var(--accent) / 0.5);
+}
+
+/* Ensure table content inherits proper text color */
+.ProseMirror table td,
+.ProseMirror table th {
+  color: hsl(var(--foreground));
+}
+
+/* Handle empty cells */
+.ProseMirror table td:empty::before,
+.ProseMirror table th:empty::before {
+  content: '\00a0'; /* Non-breaking space to maintain cell height */
+}
+
+/* Responsive table wrapper - allow horizontal scroll on small screens */
+.ProseMirror table {
+  display: table;
+  overflow-x: auto;
+}

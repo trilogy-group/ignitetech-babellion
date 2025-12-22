@@ -17,6 +17,7 @@ import { MobileNavMenu } from "./mobile-nav-menu";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useState } from "react";
 import { ReleaseNotesModal } from "./release-notes-modal";
+import { GlobalHelpButton } from "./help-panel";
 
 /**
  * Renders the application header containing brand navigation, primary navigation links, feedback and theme controls, and the user menu with release notes and logout.
@@ -56,7 +57,7 @@ export function AppHeader() {
         <div className="flex items-center gap-4 sm:gap-6">
           <Link href="/translate">
             <div className="flex items-center gap-2 sm:gap-3 cursor-pointer">
-              <img src="/favicon.png" alt="Babellion" className="h-8 w-8" />
+              <img src="/favicon.png" alt="Babellion" className="h-8 w-8 rounded-full" />
               <span className="text-lg sm:text-xl font-semibold">Babellion</span>
             </div>
           </Link>
@@ -174,6 +175,9 @@ export function AppHeader() {
             </Button>
           </Link>
 
+          {/* Global Help Button */}
+          <GlobalHelpButton currentPath={location} />
+
           <ThemeToggle />
 
           <DropdownMenu>
@@ -224,7 +228,7 @@ export function AppHeader() {
                 <Info className="mr-2 h-4 w-4" />
                 <div className="flex items-center justify-between flex-1">
                   <span>Babellion</span>
-                  <Badge variant="secondary" className="ml-2 text-xs">v1.7.0</Badge>
+                  <Badge variant="secondary" className="ml-2 text-xs">v1.8.0</Badge>
                 </div>
               </DropdownMenuItem>
               <DropdownMenuSeparator />

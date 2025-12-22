@@ -73,6 +73,9 @@ import { MobileHistorySheet } from "@/components/mobile-history-sheet";
 import { MobilePanelToggle, type PanelType } from "@/components/mobile-panel-toggle";
 import { StickyMobileToolbar } from "@/components/sticky-mobile-toolbar";
 import { CollapsibleControls } from "@/components/collapsible-controls";
+import { WelcomeModal } from "@/components/welcome-modal";
+import { HelpPanel } from "@/components/help-panel";
+import { useFirstVisit } from "@/hooks/useFirstVisit";
 
 interface ProofreadingResult {
   rule: string;
@@ -143,6 +146,10 @@ export default function Proofread() {
   const [acceptAllProgressIndex, setAcceptAllProgressIndex] = useState<number | null>(null);
   // Store the currently selected proofreading object to avoid race conditions with list refresh
   const [selectedProofreadingData, setSelectedProofreadingData] = useState<Proofreading | null>(null);
+
+  // Help system state
+  const { showWelcome, closeWelcome, dismissWelcomePermanently } = useFirstVisit('proofread');
+  const [isHelpOpen, setIsHelpOpen] = useState(false);
 
   // Auto-focus search input when expanded
   useEffect(() => {
@@ -2428,6 +2435,22 @@ export default function Proofread() {
           </Button>
         </StickyMobileToolbar>
       )}
+
+      {/* Welcome Modal for first-time visitors */}
+      <WelcomeModal
+        featureId="proofread"
+        open={showWelcome}
+        onClose={closeWelcome}
+        onDismissPermanently={dismissWelcomePermanently}
+        onShowHelp={() => setIsHelpOpen(true)}
+      />
+
+      {/* Help Panel - controlled by welcome modal's "Learn More" button */}
+      <HelpPanel
+        featureId="proofread"
+        open={isHelpOpen}
+        onOpenChange={setIsHelpOpen}
+      />
     </div>
   );
 }

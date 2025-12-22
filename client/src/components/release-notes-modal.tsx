@@ -2,7 +2,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import { PanelLeftClose, Search, CheckCircle, Shield, Zap, Share, FileText, Image, Navigation, Upload, Calendar, BarChart3, Smartphone, Sparkles, ChevronDown, Pencil } from "lucide-react";
+import { PanelLeftClose, Search, CheckCircle, Shield, Zap, Share, FileText, Image, Navigation, Upload, Calendar, BarChart3, Smartphone, Sparkles, ChevronDown, Pencil, TestTube, HelpCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useState } from "react";
 
@@ -47,7 +47,8 @@ function VersionHeader({ version, date, isLatest, isOpen }: VersionHeaderProps) 
  */
 export function ReleaseNotesModal({ open, onOpenChange }: ReleaseNotesModalProps) {
   const [openSections, setOpenSections] = useState<Record<string, boolean>>({
-    "v1.7": true,
+    "v1.8": true,
+    "v1.7": false,
     "v1.6": false,
     "v1.5": false,
     "v1.4.3": false,
@@ -67,7 +68,7 @@ export function ReleaseNotesModal({ open, onOpenChange }: ReleaseNotesModalProps
         <DialogHeader className="text-left">
           <DialogTitle className="flex items-center gap-2 text-base">
             Release Notes
-            <Badge variant="secondary" className="text-xs">v1.7</Badge>
+            <Badge variant="secondary" className="text-xs">v1.8</Badge>
           </DialogTitle>
           <DialogDescription className="text-xs">
             What's new in this release
@@ -76,9 +77,54 @@ export function ReleaseNotesModal({ open, onOpenChange }: ReleaseNotesModalProps
         
         <ScrollArea className="max-h-[50vh] pr-4">
           <div className="space-y-4">
+            {/* Version 1.8 */}
+            <Collapsible open={openSections["v1.8"]} onOpenChange={() => toggleSection("v1.8")}>
+              <VersionHeader version="Version 1.8" date="Latest Release" isLatest isOpen={openSections["v1.8"]} />
+              <CollapsibleContent className="space-y-2 ml-4 pt-3">
+                <div className="flex gap-2 items-start">
+                  <HelpCircle className="h-3 w-3 text-primary mt-0.5 flex-shrink-0" />
+                  <div>
+                    <span className="font-semibold text-xs">In-App Help System:</span>
+                    <span className="text-xs text-muted-foreground ml-1">
+                      New contextual help with welcome modals for first-time visitors and a slide-out help panel accessible via the header. Each feature has its own illustrated guide with workflow steps and pro tips.
+                    </span>
+                  </div>
+                </div>
+                <div className="flex gap-2 items-start">
+                  <TestTube className="h-3 w-3 text-primary mt-0.5 flex-shrink-0" />
+                  <div>
+                    <span className="font-semibold text-xs">Comprehensive Test Suite:</span>
+                    <span className="text-xs text-muted-foreground ml-1">
+                      Added 185 automated tests covering encryption, database retry logic, authentication middleware, authorization patterns, API routes, storage operations, AI service logic, and schema validation.
+                    </span>
+                  </div>
+                </div>
+                <div className="flex gap-2 items-start">
+                  <FileText className="h-3 w-3 text-primary mt-0.5 flex-shrink-0" />
+                  <div>
+                    <span className="font-medium text-xs">Developer Documentation:</span>
+                    <span className="text-xs text-muted-foreground ml-1">
+                      New comprehensive README with architecture diagrams, authentication flow, AI integration details, database schema, and complete testing documentation.
+                    </span>
+                  </div>
+                </div>
+                <div className="flex gap-2 items-start">
+                  <Shield className="h-3 w-3 text-primary mt-0.5 flex-shrink-0" />
+                  <div>
+                    <span className="font-medium text-xs">Code Quality:</span>
+                    <span className="text-xs text-muted-foreground ml-1">
+                      Vitest testing framework with coverage reporting, mock utilities for storage and API testing, and integration tests for critical endpoints.
+                    </span>
+                  </div>
+                </div>
+              </CollapsibleContent>
+            </Collapsible>
+
             {/* Version 1.7 */}
             <Collapsible open={openSections["v1.7"]} onOpenChange={() => toggleSection("v1.7")}>
-              <VersionHeader version="Version 1.7" date="Latest Release" isLatest isOpen={openSections["v1.7"]} />
+              <div className="pt-4 border-t">
+                <VersionHeader version="Version 1.7" date="December 2025" isOpen={openSections["v1.7"]} />
+              </div>
               <CollapsibleContent className="space-y-2 ml-4 pt-3">
                 <div className="flex gap-2 items-start">
                   <Pencil className="h-3 w-3 text-primary mt-0.5 flex-shrink-0" />

@@ -14,6 +14,8 @@ import {
   proofreadingOutputs,
   imageTranslations,
   imageTranslationOutputs,
+  imageEdits,
+  imageEditOutputs,
   type User,
   type UpsertUser,
   type Translation,
@@ -42,6 +44,12 @@ import {
   type InsertImageTranslation,
   type ImageTranslationOutput,
   type InsertImageTranslationOutput,
+  type ImageEdit,
+  type InsertImageEdit,
+  type ImageEditOutput,
+  type InsertImageEditOutput,
+  type ImageEditMetadata,
+  type ImageEditOutputMetadata,
   type TranslationMetadata,
   type ProofreadingMetadata,
 } from "@shared/schema";
@@ -188,6 +196,34 @@ export interface IStorage {
   updateImageTranslationOutput(id: string, data: Partial<ImageTranslationOutput>): Promise<ImageTranslationOutput>;
   updateImageTranslationOutputStatus(id: string, status: 'pending' | 'translating' | 'completed' | 'failed'): Promise<ImageTranslationOutput>;
   deleteImageTranslationOutput(id: string): Promise<void>;
+
+  // Image edit operations
+  getImageEditsPaginated(userId: string, page: number, limit: number, search?: string): Promise<{
+    data: ImageEditMetadata[];
+    pagination: {
+      page: number;
+      limit: number;
+      total: number;
+      totalPages: number;
+      hasMore: boolean;
+    };
+  }>;
+  getImageEdit(id: string): Promise<ImageEdit | undefined>;
+  getImageEditMetadata(id: string): Promise<ImageEditMetadata | undefined>;
+  getImageEditSourceImage(id: string): Promise<{ sourceImageBase64: string; sourceMimeType: string } | undefined>;
+  createImageEdit(imageEdit: InsertImageEdit & { userId: string }): Promise<ImageEdit>;
+  updateImageEdit(id: string, data: Partial<ImageEdit>): Promise<ImageEdit>;
+  deleteImageEdit(id: string): Promise<void>;
+
+  // Image edit output operations
+  getImageEditOutput(id: string): Promise<ImageEditOutput | undefined>;
+  getImageEditOutputs(imageEditId: string): Promise<ImageEditOutput[]>;
+  getImageEditOutputsMetadata(imageEditId: string): Promise<ImageEditOutputMetadata[]>;
+  getImageEditOutputImage(outputId: string): Promise<{ editedImageBase64: string | null; editedMimeType: string | null } | undefined>;
+  createImageEditOutput(output: InsertImageEditOutput): Promise<ImageEditOutput>;
+  updateImageEditOutput(id: string, data: Partial<ImageEditOutput>): Promise<ImageEditOutput>;
+  updateImageEditOutputStatus(id: string, status: 'pending' | 'processing' | 'completed' | 'failed'): Promise<ImageEditOutput>;
+  deleteImageEditOutput(id: string): Promise<void>;
 
   // Analytics operations
   getAnalyticsOverview(startDate: Date): Promise<{
@@ -1282,6 +1318,222 @@ export class DatabaseStorage implements IStorage {
 
   async deleteImageTranslationOutput(id: string): Promise<void> {
     await db.delete(imageTranslationOutputs).where(eq(imageTranslationOutputs.id, id));
+  }
+
+  // Image edit operations
+  async getImageEditsPaginated(
+    userId: string,
+    page: number = 1,
+    limit: number = 20,
+    search?: string
+  ): Promise<{
+    data: ImageEditMetadata[];
+    pagination: {
+      page: number;
+      limit: number;
+      total: number;
+      totalPages: number;
+      hasMore: boolean;
+    };
+  }> {
+    // Build base conditions - user's own edits or public edits
+    const baseConditions = or(
+      eq(imageEdits.isPrivate, false),
+      eq(imageEdits.userId, userId)
+    );
+
+    // Add search conditions if search query provided
+    const searchConditions = search && search.length >= 2
+      ? and(
+          baseConditions,
+          ilike(imageEdits.title, `%${search}%`)
+        )
+      : baseConditions;
+
+    // Get total count
+    const [{ count }] = await db
+      .select({ count: sql<number>`cast(count(*) as integer)` })
+      .from(imageEdits)
+      .where(searchConditions);
+
+    const total = Number(count);
+    const totalPages = Math.ceil(total / limit);
+    const offset = (page - 1) * limit;
+
+    // Get paginated results - exclude sourceImageBase64 for performance
+    const results = await db
+      .select({
+        id: imageEdits.id,
+        userId: imageEdits.userId,
+        title: imageEdits.title,
+        sourceMimeType: imageEdits.sourceMimeType,
+        isPrivate: imageEdits.isPrivate,
+        createdAt: imageEdits.createdAt,
+        updatedAt: imageEdits.updatedAt,
+        owner: {
+          id: users.id,
+          email: users.email,
+          firstName: users.firstName,
+          lastName: users.lastName,
+        }
+      })
+      .from(imageEdits)
+      .leftJoin(users, eq(imageEdits.userId, users.id))
+      .where(searchConditions)
+      .orderBy(desc(imageEdits.updatedAt))
+      .limit(limit)
+      .offset(offset);
+
+    return {
+      data: results.map(r => ({
+        id: r.id,
+        userId: r.userId,
+        title: r.title,
+        sourceMimeType: r.sourceMimeType,
+        isPrivate: r.isPrivate,
+        createdAt: r.createdAt,
+        updatedAt: r.updatedAt,
+        owner: r.owner
+      })) as ImageEditMetadata[],
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages,
+        hasMore: page < totalPages,
+      },
+    };
+  }
+
+  async getImageEdit(id: string): Promise<ImageEdit | undefined> {
+    const [imageEdit] = await db
+      .select()
+      .from(imageEdits)
+      .where(eq(imageEdits.id, id));
+    return imageEdit;
+  }
+
+  async getImageEditMetadata(id: string): Promise<ImageEditMetadata | undefined> {
+    const [result] = await db
+      .select({
+        id: imageEdits.id,
+        userId: imageEdits.userId,
+        title: imageEdits.title,
+        sourceMimeType: imageEdits.sourceMimeType,
+        isPrivate: imageEdits.isPrivate,
+        createdAt: imageEdits.createdAt,
+        updatedAt: imageEdits.updatedAt,
+      })
+      .from(imageEdits)
+      .where(eq(imageEdits.id, id));
+    return result;
+  }
+
+  async getImageEditSourceImage(id: string): Promise<{ sourceImageBase64: string; sourceMimeType: string } | undefined> {
+    const [result] = await db
+      .select({
+        sourceImageBase64: imageEdits.sourceImageBase64,
+        sourceMimeType: imageEdits.sourceMimeType,
+      })
+      .from(imageEdits)
+      .where(eq(imageEdits.id, id));
+    return result;
+  }
+
+  async createImageEdit(imageEdit: InsertImageEdit & { userId: string }): Promise<ImageEdit> {
+    const [newImageEdit] = await db
+      .insert(imageEdits)
+      .values(imageEdit)
+      .returning();
+    return newImageEdit;
+  }
+
+  async updateImageEdit(id: string, data: Partial<ImageEdit>): Promise<ImageEdit> {
+    const [updated] = await db
+      .update(imageEdits)
+      .set({ ...data, updatedAt: new Date() })
+      .where(eq(imageEdits.id, id))
+      .returning();
+    return updated;
+  }
+
+  async deleteImageEdit(id: string): Promise<void> {
+    await db.delete(imageEdits).where(eq(imageEdits.id, id));
+  }
+
+  // Image edit output operations
+  async getImageEditOutput(id: string): Promise<ImageEditOutput | undefined> {
+    const [output] = await db
+      .select()
+      .from(imageEditOutputs)
+      .where(eq(imageEditOutputs.id, id));
+    return output;
+  }
+
+  async getImageEditOutputs(imageEditId: string): Promise<ImageEditOutput[]> {
+    return await db
+      .select()
+      .from(imageEditOutputs)
+      .where(eq(imageEditOutputs.imageEditId, imageEditId))
+      .orderBy(desc(imageEditOutputs.createdAt));
+  }
+
+  async getImageEditOutputsMetadata(imageEditId: string): Promise<ImageEditOutputMetadata[]> {
+    return await db
+      .select({
+        id: imageEditOutputs.id,
+        imageEditId: imageEditOutputs.imageEditId,
+        prompt: imageEditOutputs.prompt,
+        editedMimeType: imageEditOutputs.editedMimeType,
+        model: imageEditOutputs.model,
+        status: imageEditOutputs.status,
+        createdAt: imageEditOutputs.createdAt,
+        updatedAt: imageEditOutputs.updatedAt,
+      })
+      .from(imageEditOutputs)
+      .where(eq(imageEditOutputs.imageEditId, imageEditId))
+      .orderBy(desc(imageEditOutputs.createdAt));
+  }
+
+  async getImageEditOutputImage(outputId: string): Promise<{ editedImageBase64: string | null; editedMimeType: string | null } | undefined> {
+    const [result] = await db
+      .select({
+        editedImageBase64: imageEditOutputs.editedImageBase64,
+        editedMimeType: imageEditOutputs.editedMimeType,
+      })
+      .from(imageEditOutputs)
+      .where(eq(imageEditOutputs.id, outputId));
+    return result;
+  }
+
+  async createImageEditOutput(output: InsertImageEditOutput): Promise<ImageEditOutput> {
+    const [newOutput] = await db
+      .insert(imageEditOutputs)
+      .values(output)
+      .returning();
+    return newOutput;
+  }
+
+  async updateImageEditOutput(id: string, data: Partial<ImageEditOutput>): Promise<ImageEditOutput> {
+    const [updated] = await db
+      .update(imageEditOutputs)
+      .set({ ...data, updatedAt: new Date() })
+      .where(eq(imageEditOutputs.id, id))
+      .returning();
+    return updated;
+  }
+
+  async updateImageEditOutputStatus(id: string, status: 'pending' | 'processing' | 'completed' | 'failed'): Promise<ImageEditOutput> {
+    const [updated] = await db
+      .update(imageEditOutputs)
+      .set({ status, updatedAt: new Date() })
+      .where(eq(imageEditOutputs.id, id))
+      .returning();
+    return updated;
+  }
+
+  async deleteImageEditOutput(id: string): Promise<void> {
+    await db.delete(imageEditOutputs).where(eq(imageEditOutputs.id, id));
   }
 
   // Analytics operations

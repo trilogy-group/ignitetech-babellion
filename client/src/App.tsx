@@ -10,6 +10,7 @@ import Landing from "@/pages/landing";
 import Translate from "@/pages/translate";
 import Proofread from "@/pages/proofread";
 import ImageTranslate from "@/pages/image-translate";
+import ImageEdit from "@/pages/image-edit";
 import Feedback from "@/pages/feedback";
 import Settings from "@/pages/settings";
 import Privacy from "@/pages/privacy";
@@ -112,6 +113,37 @@ function ProtectedImageTranslate() {
   return <ImageTranslate />;
 }
 
+// Wrapper component to handle unauthenticated access to /image-edit
+function ProtectedImageEdit() {
+  const { isAuthenticated, isLoading } = useAuth();
+  const { toast } = useToast();
+  const [_location, setLocation] = useLocation();
+
+  // Save this page as last visited
+  useSaveLastVisitedPage("/image-edit");
+
+  useEffect(() => {
+    if (!isLoading && !isAuthenticated) {
+      toast({
+        title: "Authentication Required",
+        description: "Please sign in to access AI image editing.",
+        variant: "default",
+      });
+      setLocation("/");
+    }
+  }, [isAuthenticated, isLoading, toast, setLocation]);
+
+  if (isLoading) {
+    return null;
+  }
+
+  if (!isAuthenticated) {
+    return null;
+  }
+
+  return <ImageEdit />;
+}
+
 // Wrapper component to handle unauthenticated access to /feedback
 function ProtectedFeedback() {
   const { isAuthenticated, isLoading } = useAuth();
@@ -158,8 +190,8 @@ function Router() {
       return "/translate";
     }
     
-    // Valid base pages (can have IDs appended for translate, proofread, image-translate)
-    const validBasePages = ["/translate", "/proofread", "/image-translate", "/feedback", "/settings"];
+    // Valid base pages (can have IDs appended for translate, proofread, image-translate, image-edit)
+    const validBasePages = ["/translate", "/proofread", "/image-translate", "/image-edit", "/feedback", "/settings"];
     if (lastPage && basePage && validBasePages.includes(basePage)) {
       // For settings, only allow admins
       if (basePage === "/settings" && !user?.isAdmin) {
@@ -192,6 +224,10 @@ function Router() {
       {/* Protected image translate route */}
       <Route path="/image-translate" component={ProtectedImageTranslate} />
       <Route path="/image-translate/:id" component={ProtectedImageTranslate} />
+      
+      {/* Protected image edit route */}
+      <Route path="/image-edit" component={ProtectedImageEdit} />
+      <Route path="/image-edit/:id" component={ProtectedImageEdit} />
       
       {/* Protected feedback route */}
       <Route path="/feedback" component={ProtectedFeedback} />
@@ -236,5 +272,6 @@ function App() {
 }
 
 export default App;
+
 
 

@@ -9,6 +9,7 @@ import { translationService } from "./translationService";
 import { proofreadingService } from "./proofreadingService";
 import { pdfService } from "./pdfService";
 import { imageTranslationService } from "./imageTranslationService";
+import { imageEditService } from "./imageEditService";
 import { getGoogleAuth, listGoogleDocs, getGoogleDocContent, createGoogleDoc } from "./googleDocsService";
 import {
   insertTranslationSchema,
@@ -1743,6 +1744,334 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Error saving image translation prompt setting:", error);
       res.status(500).json({ message: "Failed to save setting" });
+    }
+  });
+
+  // ===== IMAGE EDIT ROUTES =====
+
+  // Get paginated image edits (metadata only for lazy loading)
+  app.get("/api/image-edits", isAuthenticated, async (req: any, res) => {
+    try {
+      const userId = req.user.id;
+      const page = parseInt(req.query.page as string) || 1;
+      const limit = parseInt(req.query.limit as string) || 20;
+      const search = req.query.search as string | undefined;
+
+      const result = await storage.getImageEditsPaginated(userId, page, limit, search);
+      res.json(result);
+    } catch (error) {
+      console.error("Error fetching image edits:", error);
+      res.status(500).json({ message: "Failed to fetch image edits" });
+    }
+  });
+
+  // Get single image edit metadata
+  app.get("/api/image-edits/:id", isAuthenticated, async (req: any, res) => {
+    try {
+      const metadata = await storage.getImageEditMetadata(req.params.id);
+      if (!metadata) {
+        return res.status(404).json({ message: "Image edit not found" });
+      }
+      // Check if user can access this image edit (owner OR public)
+      const isOwner = metadata.userId === req.user.id;
+      const isPublic = !metadata.isPrivate;
+      if (!isOwner && !isPublic) {
+        return res.status(403).json({ message: "Forbidden" });
+      }
+      res.json(metadata);
+    } catch (error) {
+      console.error("Error fetching image edit:", error);
+      res.status(500).json({ message: "Failed to fetch image edit" });
+    }
+  });
+
+  // Get source image only (lazy load)
+  app.get("/api/image-edits/:id/source-image", isAuthenticated, async (req: any, res) => {
+    try {
+      const metadata = await storage.getImageEditMetadata(req.params.id);
+      if (!metadata) {
+        return res.status(404).json({ message: "Image edit not found" });
+      }
+      const isOwner = metadata.userId === req.user.id;
+      const isPublic = !metadata.isPrivate;
+      if (!isOwner && !isPublic) {
+        return res.status(403).json({ message: "Forbidden" });
+      }
+      const sourceImage = await storage.getImageEditSourceImage(req.params.id);
+      if (!sourceImage) {
+        return res.status(404).json({ message: "Source image not found" });
+      }
+      res.json(sourceImage);
+    } catch (error) {
+      console.error("Error fetching source image:", error);
+      res.status(500).json({ message: "Failed to fetch source image" });
+    }
+  });
+
+  // Get outputs metadata only (without images for lazy loading)
+  app.get("/api/image-edits/:id/outputs-metadata", isAuthenticated, async (req: any, res) => {
+    try {
+      const metadata = await storage.getImageEditMetadata(req.params.id);
+      if (!metadata) {
+        return res.status(404).json({ message: "Image edit not found" });
+      }
+      const isOwner = metadata.userId === req.user.id;
+      const isPublic = !metadata.isPrivate;
+      if (!isOwner && !isPublic) {
+        return res.status(403).json({ message: "Forbidden" });
+      }
+      const outputs = await storage.getImageEditOutputsMetadata(req.params.id);
+      res.json(outputs);
+    } catch (error) {
+      console.error("Error fetching image edit outputs metadata:", error);
+      res.status(500).json({ message: "Failed to fetch outputs metadata" });
+    }
+  });
+
+  // Get edited image only for a specific output (lazy load)
+  app.get("/api/image-edit-outputs/:outputId/image", isAuthenticated, async (req: any, res) => {
+    try {
+      const output = await storage.getImageEditOutput(req.params.outputId);
+      if (!output) {
+        return res.status(404).json({ message: "Output not found" });
+      }
+      const metadata = await storage.getImageEditMetadata(output.imageEditId);
+      if (!metadata) {
+        return res.status(404).json({ message: "Image edit not found" });
+      }
+      const isOwner = metadata.userId === req.user.id;
+      const isPublic = !metadata.isPrivate;
+      if (!isOwner && !isPublic) {
+        return res.status(403).json({ message: "Forbidden" });
+      }
+      const imageData = await storage.getImageEditOutputImage(req.params.outputId);
+      res.json(imageData);
+    } catch (error) {
+      console.error("Error fetching edited image:", error);
+      res.status(500).json({ message: "Failed to fetch edited image" });
+    }
+  });
+
+  // Create new image edit (upload source image)
+  app.post("/api/image-edits", isAuthenticated, imageUpload.single('image'), async (req: any, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ message: "No image file provided" });
+      }
+
+      const userId = req.user.id;
+      const title = req.body.title || 'Untitled Edit';
+      const isPrivate = req.body.isPrivate === 'true' || req.body.isPrivate === true;
+
+      // Convert buffer to base64
+      const sourceImageBase64 = req.file.buffer.toString('base64');
+      const sourceMimeType = req.file.mimetype;
+
+      const imageEdit = await storage.createImageEdit({
+        userId,
+        title,
+        sourceImageBase64,
+        sourceMimeType,
+        isPrivate,
+      });
+
+      res.json(imageEdit);
+    } catch (error) {
+      console.error("Error creating image edit:", error);
+      res.status(400).json({ message: "Failed to create image edit" });
+    }
+  });
+
+  // Update image edit metadata
+  app.patch("/api/image-edits/:id", isAuthenticated, async (req: any, res) => {
+    try {
+      const imageEdit = await storage.getImageEdit(req.params.id);
+      if (!imageEdit) {
+        return res.status(404).json({ message: "Image edit not found" });
+      }
+      // Check if user owns the image edit or is admin (admins can only edit public)
+      const user = await storage.getUser(req.user.id);
+      const isOwner = imageEdit.userId === req.user.id;
+      const isAdminEditingPublic = user?.isAdmin && !imageEdit.isPrivate;
+      const canEdit = isOwner || isAdminEditingPublic;
+      if (!canEdit) {
+        return res.status(403).json({ message: "Forbidden" });
+      }
+      const updated = await storage.updateImageEdit(req.params.id, req.body);
+      res.json(updated);
+    } catch (error) {
+      console.error("Error updating image edit:", error);
+      res.status(400).json({ message: "Failed to update image edit" });
+    }
+  });
+
+  // Replace source image in existing image edit session
+  app.post("/api/image-edits/:id/replace-image", isAuthenticated, imageUpload.single('image'), async (req: any, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ message: "No image file provided" });
+      }
+
+      const imageEdit = await storage.getImageEdit(req.params.id);
+      if (!imageEdit) {
+        return res.status(404).json({ message: "Image edit not found" });
+      }
+
+      // Check if user owns the image edit or is admin (admins can only edit public)
+      const user = await storage.getUser(req.user.id);
+      const isOwner = imageEdit.userId === req.user.id;
+      const isAdminEditingPublic = user?.isAdmin && !imageEdit.isPrivate;
+      const canEdit = isOwner || isAdminEditingPublic;
+      if (!canEdit) {
+        return res.status(403).json({ message: "Forbidden" });
+      }
+
+      // Convert buffer to base64
+      const sourceImageBase64 = req.file.buffer.toString('base64');
+      const sourceMimeType = req.file.mimetype;
+
+      // Update the source image
+      const updated = await storage.updateImageEdit(req.params.id, {
+        sourceImageBase64,
+        sourceMimeType,
+      });
+
+      res.json(updated);
+    } catch (error) {
+      console.error("Error replacing source image:", error);
+      res.status(400).json({ message: "Failed to replace source image" });
+    }
+  });
+
+  // Delete image edit
+  app.delete("/api/image-edits/:id", isAuthenticated, async (req: any, res) => {
+    try {
+      const imageEdit = await storage.getImageEdit(req.params.id);
+      if (!imageEdit) {
+        return res.status(404).json({ message: "Image edit not found" });
+      }
+      // Check if user owns the image edit or is admin (admins can only delete public)
+      const user = await storage.getUser(req.user.id);
+      const isOwner = imageEdit.userId === req.user.id;
+      const isAdminDeletingPublic = user?.isAdmin && !imageEdit.isPrivate;
+      const canDelete = isOwner || isAdminDeletingPublic;
+      if (!canDelete) {
+        return res.status(403).json({ message: "Forbidden" });
+      }
+      await storage.deleteImageEdit(req.params.id);
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Error deleting image edit:", error);
+      res.status(500).json({ message: "Failed to delete image edit" });
+    }
+  });
+
+  // Delete image edit output
+  app.delete("/api/image-edit-outputs/:id", isAuthenticated, async (req: any, res) => {
+    try {
+      const output = await storage.getImageEditOutput(req.params.id);
+      if (!output) {
+        return res.status(404).json({ message: "Output not found" });
+      }
+      const imageEdit = await storage.getImageEdit(output.imageEditId);
+      if (!imageEdit) {
+        return res.status(404).json({ message: "Image edit not found" });
+      }
+      // Check if user owns the image edit or is admin
+      const user = await storage.getUser(req.user.id);
+      const isOwner = imageEdit.userId === req.user.id;
+      const isAdminDeletingPublic = user?.isAdmin && !imageEdit.isPrivate;
+      const canDelete = isOwner || isAdminDeletingPublic;
+      if (!canDelete) {
+        return res.status(403).json({ message: "Forbidden" });
+      }
+      await storage.deleteImageEditOutput(req.params.id);
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Error deleting image edit output:", error);
+      res.status(500).json({ message: "Failed to delete output" });
+    }
+  });
+
+  // Submit image for AI editing (async)
+  app.post("/api/edit-image", isAuthenticated, async (req: any, res) => {
+    try {
+      const { imageEditId, imageData, prompt, model = 'gemini' } = req.body;
+
+      if (!imageEditId) {
+        return res.status(400).json({ message: "imageEditId is required" });
+      }
+      if (!imageData) {
+        return res.status(400).json({ message: "imageData is required" });
+      }
+      if (!prompt) {
+        return res.status(400).json({ message: "prompt is required" });
+      }
+
+      // Verify user owns the image edit or is admin
+      const imageEdit = await storage.getImageEdit(imageEditId);
+      if (!imageEdit) {
+        return res.status(404).json({ message: "Image edit not found" });
+      }
+      const user = await storage.getUser(req.user.id);
+      const isOwner = imageEdit.userId === req.user.id;
+      const isAdminEditingPublic = user?.isAdmin && !imageEdit.isPrivate;
+      const canEdit = isOwner || isAdminEditingPublic;
+      if (!canEdit) {
+        return res.status(403).json({ message: "Forbidden" });
+      }
+
+      // Log edit start
+      logInfo(`Editing image ${imageEditId} with ${model}: "${prompt.slice(0, 50)}..."`, "AI");
+
+      // Create output record with 'processing' status
+      const output = await storage.createImageEditOutput({
+        imageEditId,
+        prompt,
+        editedImageBase64: null,
+        editedMimeType: null,
+        model: model as 'openai' | 'gemini',
+        status: 'processing',
+      });
+
+      // Start async job - don't await, return immediately
+      (async () => {
+        const editStartTime = Date.now();
+        
+        try {
+          // Edit the image
+          const result = await imageEditService.editImage({
+            imageDataUri: imageData,
+            prompt,
+            model: model as 'openai' | 'gemini',
+          });
+
+          const editTime = Math.round((Date.now() - editStartTime) / 1000);
+          logInfo(`Edited image ${imageEditId}, time: ${editTime}s`, "AI");
+
+          // Update with edited image and mark as completed (with retry)
+          await retryOnDatabaseError(() => 
+            storage.updateImageEditOutput(output.id, {
+              editedImageBase64: result.editedImageBase64,
+              editedMimeType: result.editedMimeType,
+              status: 'completed',
+            })
+          );
+        } catch (error) {
+          const editTime = Math.round((Date.now() - editStartTime) / 1000);
+          logError(`Image edit failed ${imageEditId}, time: ${editTime}s`, "AI", error);
+          // Update status to failed with retry
+          await retryOnDatabaseError(() => 
+            storage.updateImageEditOutputStatus(output.id, 'failed')
+          );
+        }
+      })(); // Fire and forget - async job runs in background
+
+      // Return immediately with the output record (status: processing)
+      res.json({ output });
+    } catch (error) {
+      console.error("Error starting image edit:", error);
+      res.status(500).json({ message: error instanceof Error ? error.message : "Failed to start image edit" });
     }
   });
 

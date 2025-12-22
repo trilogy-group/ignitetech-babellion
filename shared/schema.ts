@@ -436,3 +436,78 @@ export const insertImageTranslationOutputSchema = createInsertSchema(imageTransl
 
 export type InsertImageTranslationOutput = z.infer<typeof insertImageTranslationOutputSchema>;
 export type ImageTranslationOutput = typeof imageTranslationOutputs.$inferSelect;
+
+// Image Edit status enum
+export const imageEditStatusEnum = pgEnum('image_edit_status', ['pending', 'processing', 'completed', 'failed']);
+
+// Image Edit sessions table (stores source image for AI editing)
+export const imageEdits = pgTable("image_edits", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: 'cascade' }),
+  title: varchar("title", { length: 255 }).notNull(),
+  sourceImageBase64: text("source_image_base64").notNull(), // Base64 encoded source image
+  sourceMimeType: varchar("source_mime_type", { length: 50 }).notNull(),
+  isPrivate: boolean("is_private").default(false).notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const imageEditsRelations = relations(imageEdits, ({ one, many }) => ({
+  user: one(users, {
+    fields: [imageEdits.userId],
+    references: [users.id],
+  }),
+  outputs: many(imageEditOutputs),
+}));
+
+export const insertImageEditSchema = createInsertSchema(imageEdits).omit({
+  id: true,
+  userId: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertImageEdit = z.infer<typeof insertImageEditSchema>;
+export type ImageEdit = typeof imageEdits.$inferSelect & {
+  owner?: {
+    id: string;
+    email: string | null;
+    firstName: string | null;
+    lastName: string | null;
+  };
+};
+
+// Metadata type - excludes sourceImageBase64 for performance (lazy loading)
+export type ImageEditMetadata = Omit<ImageEdit, 'sourceImageBase64'>;
+
+// Image Edit outputs table (stores AI-edited images)
+export const imageEditOutputs = pgTable("image_edit_outputs", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  imageEditId: varchar("image_edit_id").notNull().references(() => imageEdits.id, { onDelete: 'cascade' }),
+  prompt: text("prompt").notNull(), // The edit instruction/prompt
+  editedImageBase64: text("edited_image_base64"), // Base64 encoded edited image
+  editedMimeType: varchar("edited_mime_type", { length: 50 }),
+  model: varchar("model", { length: 50 }).notNull(), // 'openai' | 'gemini'
+  status: imageEditStatusEnum("status").default('pending').notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const imageEditOutputsRelations = relations(imageEditOutputs, ({ one }) => ({
+  imageEdit: one(imageEdits, {
+    fields: [imageEditOutputs.imageEditId],
+    references: [imageEdits.id],
+  }),
+}));
+
+export const insertImageEditOutputSchema = createInsertSchema(imageEditOutputs).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertImageEditOutput = z.infer<typeof insertImageEditOutputSchema>;
+export type ImageEditOutput = typeof imageEditOutputs.$inferSelect;
+
+// Metadata type - excludes editedImageBase64 for performance (lazy loading)
+export type ImageEditOutputMetadata = Omit<ImageEditOutput, 'editedImageBase64'>;

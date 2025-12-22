@@ -2,7 +2,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import { PanelLeftClose, Search, CheckCircle, Shield, Zap, Share, FileText, Image, Navigation, Upload, Calendar, BarChart3, Smartphone, Sparkles, ChevronDown } from "lucide-react";
+import { PanelLeftClose, Search, CheckCircle, Shield, Zap, Share, FileText, Image, Navigation, Upload, Calendar, BarChart3, Smartphone, Sparkles, ChevronDown, Pencil } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useState } from "react";
 
@@ -47,7 +47,8 @@ function VersionHeader({ version, date, isLatest, isOpen }: VersionHeaderProps) 
  */
 export function ReleaseNotesModal({ open, onOpenChange }: ReleaseNotesModalProps) {
   const [openSections, setOpenSections] = useState<Record<string, boolean>>({
-    "v1.6": true,
+    "v1.7": true,
+    "v1.6": false,
     "v1.5": false,
     "v1.4.3": false,
     "v1.4.2": false,
@@ -66,7 +67,7 @@ export function ReleaseNotesModal({ open, onOpenChange }: ReleaseNotesModalProps
         <DialogHeader className="text-left">
           <DialogTitle className="flex items-center gap-2 text-base">
             Release Notes
-            <Badge variant="secondary" className="text-xs">v1.6</Badge>
+            <Badge variant="secondary" className="text-xs">v1.7</Badge>
           </DialogTitle>
           <DialogDescription className="text-xs">
             What's new in this release
@@ -75,9 +76,45 @@ export function ReleaseNotesModal({ open, onOpenChange }: ReleaseNotesModalProps
         
         <ScrollArea className="max-h-[50vh] pr-4">
           <div className="space-y-4">
+            {/* Version 1.7 */}
+            <Collapsible open={openSections["v1.7"]} onOpenChange={() => toggleSection("v1.7")}>
+              <VersionHeader version="Version 1.7" date="Latest Release" isLatest isOpen={openSections["v1.7"]} />
+              <CollapsibleContent className="space-y-2 ml-4 pt-3">
+                <div className="flex gap-2 items-start">
+                  <Pencil className="h-3 w-3 text-primary mt-0.5 flex-shrink-0" />
+                  <div>
+                    <span className="font-semibold text-xs">AI Image Edit:</span>
+                    <span className="text-xs text-muted-foreground ml-1">
+                      Edit images using AI! Upload an image, annotate it with drawing tools (pencil, shapes, text), add instructions, and let OpenAI or Gemini transform your image. Compare results side-by-side and iterate on edits.
+                    </span>
+                  </div>
+                </div>
+                <div className="flex gap-2 items-start">
+                  <Smartphone className="h-3 w-3 text-primary mt-0.5 flex-shrink-0" />
+                  <div>
+                    <span className="font-medium text-xs">Mobile-Optimized Experience:</span>
+                    <span className="text-xs text-muted-foreground ml-1">
+                      Full mobile support with touch-friendly canvas controls, compact toolbar, and panel toggle for seamless editing on any device.
+                    </span>
+                  </div>
+                </div>
+                <div className="flex gap-2 items-start">
+                  <Image className="h-3 w-3 text-primary mt-0.5 flex-shrink-0" />
+                  <div>
+                    <span className="font-medium text-xs">Edit History Gallery:</span>
+                    <span className="text-xs text-muted-foreground ml-1">
+                      Browse all your edit results in a thumbnail gallery, download images, use any result as the source for further edits, or bulk manage with multi-select.
+                    </span>
+                  </div>
+                </div>
+              </CollapsibleContent>
+            </Collapsible>
+
             {/* Version 1.6 */}
             <Collapsible open={openSections["v1.6"]} onOpenChange={() => toggleSection("v1.6")}>
-              <VersionHeader version="Version 1.6" date="Latest Release" isLatest isOpen={openSections["v1.6"]} />
+              <div className="pt-4 border-t">
+                <VersionHeader version="Version 1.6" date="December 2025" isOpen={openSections["v1.6"]} />
+              </div>
               <CollapsibleContent className="space-y-2 ml-4 pt-3">
               <div className="flex gap-2 items-start">
                   <FileText className="h-3 w-3 text-primary mt-0.5 flex-shrink-0" />

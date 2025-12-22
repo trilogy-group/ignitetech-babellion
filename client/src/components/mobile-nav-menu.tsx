@@ -1,5 +1,5 @@
 import React from "react";
-import { Settings as SettingsIcon, LogOut, MessageSquare, FileText, ImageIcon } from "lucide-react";
+import { Settings as SettingsIcon, LogOut, MessageSquare, Search, Languages, ImageIcon, Pencil } from "lucide-react";
 import { useLocation } from "wouter";
 import {
   Sheet,
@@ -27,6 +27,7 @@ export function MobileNavMenu({ trigger }: MobileNavMenuProps) {
   const isProofread = location === "/proofread";
   const isTranslate = location === "/translate";
   const isImageTranslate = location === "/image-translate";
+  const isImageEdit = location === "/image-edit";
   const isFeedback = location === "/feedback";
   const isSettings = location === "/settings";
 
@@ -67,7 +68,7 @@ export function MobileNavMenu({ trigger }: MobileNavMenuProps) {
             className="w-full justify-start"
             onClick={() => handleNavClick("/proofread")}
           >
-            <FileText className="mr-2 h-4 w-4" />
+            <Search className="mr-2 h-4 w-4" />
             Proofread
           </Button>
           <Button
@@ -75,7 +76,7 @@ export function MobileNavMenu({ trigger }: MobileNavMenuProps) {
             className="w-full justify-start"
             onClick={() => handleNavClick("/translate")}
           >
-            <FileText className="mr-2 h-4 w-4" />
+            <Languages className="mr-2 h-4 w-4" />
             Translate
           </Button>
           <Button
@@ -85,6 +86,14 @@ export function MobileNavMenu({ trigger }: MobileNavMenuProps) {
           >
             <ImageIcon className="mr-2 h-4 w-4" />
             Image Translation
+          </Button>
+          <Button
+            variant={isImageEdit ? "secondary" : "ghost"}
+            className="w-full justify-start"
+            onClick={() => handleNavClick("/image-edit")}
+          >
+            <Pencil className="mr-2 h-4 w-4" />
+            Image Edit
           </Button>
           <Button
             variant={isFeedback ? "secondary" : "ghost"}

@@ -34,6 +34,7 @@ export function AppHeader() {
   const isProofread = location === "/proofread" || location.startsWith("/proofread/");
   const isTranslate = location === "/translate" || location.startsWith("/translate/");
   const isImageTranslate = location === "/image-translate" || location.startsWith("/image-translate/");
+  const isImageEdit = location === "/image-edit" || location.startsWith("/image-edit/");
   const isFeedback = location === "/feedback";
   const isSettings = location === "/settings";
 
@@ -43,7 +44,9 @@ export function AppHeader() {
     : isTranslate
     ? "Translate"
     : isImageTranslate
-    ? "Image"
+    ? "Image Trans"
+    : isImageEdit
+    ? "Image Edit"
     : null;
 
   return (
@@ -128,6 +131,26 @@ export function AppHeader() {
                 )}
               </button>
             </Link>
+            <Link href="/image-edit">
+              <button
+                data-testid="nav-image-edit"
+                className={`
+                  relative px-1 py-2 text-sm font-medium transition-all
+                  ${isImageEdit 
+                    ? "text-foreground" 
+                    : "text-muted-foreground hover:text-foreground"
+                  }
+                `}
+              >
+                Image Edit
+                {isImageEdit && (
+                  <div 
+                    className="absolute bottom-0 left-0 right-0 h-1 bg-purple-600 rounded-full"
+                    style={{ boxShadow: '0 0 8px rgba(147, 51, 234, 0.6)' }}
+                  />
+                )}
+              </button>
+            </Link>
           </nav>
         </div>
 
@@ -201,7 +224,7 @@ export function AppHeader() {
                 <Info className="mr-2 h-4 w-4" />
                 <div className="flex items-center justify-between flex-1">
                   <span>Babellion</span>
-                  <Badge variant="secondary" className="ml-2 text-xs">v1.6.0</Badge>
+                  <Badge variant="secondary" className="ml-2 text-xs">v1.7.0</Badge>
                 </div>
               </DropdownMenuItem>
               <DropdownMenuSeparator />

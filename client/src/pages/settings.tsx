@@ -45,6 +45,9 @@ import { useAuth } from "@/hooks/useAuth";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { cn } from "@/lib/utils";
 import { useSaveLastVisitedPage } from "@/hooks/useLastVisitedPage";
+import { WelcomeModal } from "@/components/welcome-modal";
+import { HelpPanel } from "@/components/help-panel";
+import { useFirstVisit } from "@/hooks/useFirstVisit";
 
 export default function Settings() {
   const { toast } = useToast();
@@ -74,6 +77,10 @@ export default function Settings() {
   const [newRule, setNewRule] = useState({ title: "", categoryId: "", categoryName: "", ruleText: "", isActive: true });
   const [pdfCleanupModel, setPdfCleanupModel] = useState("");
   const [analyticsPeriod, setAnalyticsPeriod] = useState<'30d' | '60d' | '90d' | '1y'>('30d');
+
+  // Help system state
+  const { showWelcome, closeWelcome, dismissWelcomePermanently } = useFirstVisit('settings');
+  const [isHelpOpen, setIsHelpOpen] = useState(false);
 
   // Fetch API keys status
   const { data: apiKeysStatus } = useQuery<{ openai: boolean; anthropic: boolean; gemini: boolean }>({
@@ -2195,6 +2202,22 @@ export default function Settings() {
       </Tabs>
         </div>
       </ScrollArea>
+
+      {/* Welcome Modal for first-time visitors */}
+      <WelcomeModal
+        featureId="settings"
+        open={showWelcome}
+        onClose={closeWelcome}
+        onDismissPermanently={dismissWelcomePermanently}
+        onShowHelp={() => setIsHelpOpen(true)}
+      />
+
+      {/* Help Panel - controlled by welcome modal's "Learn More" button */}
+      <HelpPanel
+        featureId="settings"
+        open={isHelpOpen}
+        onOpenChange={setIsHelpOpen}
+      />
     </div>
   );
 }

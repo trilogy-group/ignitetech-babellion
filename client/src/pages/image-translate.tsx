@@ -65,6 +65,9 @@ import { History } from "lucide-react";
 import { MobilePanelToggle, type PanelType } from "@/components/mobile-panel-toggle";
 import { StickyMobileToolbar } from "@/components/sticky-mobile-toolbar";
 import { CollapsibleControls } from "@/components/collapsible-controls";
+import { WelcomeModal } from "@/components/welcome-modal";
+import { HelpPanel } from "@/components/help-panel";
+import { useFirstVisit } from "@/hooks/useFirstVisit";
 
 // Component to lazily load translated images
 function TranslatedImage({ 
@@ -221,6 +224,10 @@ export default function ImageTranslate() {
   const [mobileHistoryOpen, setMobileHistoryOpen] = useState(false);
   const [previewImage, setPreviewImage] = useState<{ src: string; alt: string } | null>(null);
   const [mobileActivePanel, setMobileActivePanel] = useState<PanelType>('source');
+
+  // Help system state
+  const { showWelcome, closeWelcome, dismissWelcomePermanently } = useFirstVisit('image-translate');
+  const [isHelpOpen, setIsHelpOpen] = useState(false);
 
   // Auto-focus search input when expanded
   useEffect(() => {
@@ -1717,6 +1724,22 @@ export default function ImageTranslate() {
             </Button>
           </StickyMobileToolbar>
         )}
+
+        {/* Welcome Modal for first-time visitors */}
+        <WelcomeModal
+          featureId="image-translate"
+          open={showWelcome}
+          onClose={closeWelcome}
+          onDismissPermanently={dismissWelcomePermanently}
+          onShowHelp={() => setIsHelpOpen(true)}
+        />
+
+        {/* Help Panel - controlled by welcome modal's "Learn More" button */}
+        <HelpPanel
+          featureId="image-translate"
+          open={isHelpOpen}
+          onOpenChange={setIsHelpOpen}
+        />
       </div>
     </TooltipProvider>
   );

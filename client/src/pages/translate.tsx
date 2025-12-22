@@ -79,6 +79,9 @@ import { MobilePanelToggle, type PanelType } from "@/components/mobile-panel-tog
 import { StickyMobileToolbar } from "@/components/sticky-mobile-toolbar";
 import { CollapsibleControls } from "@/components/collapsible-controls";
 import { HistoryCard } from "@/components/history-card";
+import { WelcomeModal } from "@/components/welcome-modal";
+import { HelpPanel } from "@/components/help-panel";
+import { useFirstVisit } from "@/hooks/useFirstVisit";
 
 /**
  * Render the Translate page UI for creating, editing, translating, and managing translation projects.
@@ -144,6 +147,10 @@ export default function Translate() {
   const [lastSavedContent, setLastSavedContent] = useState<string>("");
   // Store the currently selected translation object to avoid race conditions with list refresh
   const [selectedTranslationData, setSelectedTranslationData] = useState<Translation | null>(null);
+
+  // Help system state
+  const { showWelcome, closeWelcome, dismissWelcomePermanently } = useFirstVisit('translate');
+  const [isHelpOpen, setIsHelpOpen] = useState(false);
 
   // Auto-focus search input when expanded
   useEffect(() => {
@@ -2946,6 +2953,22 @@ export default function Translate() {
           })()}
         </StickyMobileToolbar>
       )}
+
+      {/* Welcome Modal for first-time visitors */}
+      <WelcomeModal
+        featureId="translate"
+        open={showWelcome}
+        onClose={closeWelcome}
+        onDismissPermanently={dismissWelcomePermanently}
+        onShowHelp={() => setIsHelpOpen(true)}
+      />
+
+      {/* Help Panel - controlled by welcome modal's "Learn More" button */}
+      <HelpPanel
+        featureId="translate"
+        open={isHelpOpen}
+        onOpenChange={setIsHelpOpen}
+      />
     </div>
   );
 }

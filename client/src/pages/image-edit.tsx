@@ -75,6 +75,9 @@ import { DrawingCanvas, exportStageToBase64 } from "@/components/drawing-canvas"
 import { useIsMobile } from "@/hooks/use-mobile";
 import { MobilePanelToggle, type PanelType } from "@/components/mobile-panel-toggle";
 import { CollapsibleControls } from "@/components/collapsible-controls";
+import { WelcomeModal } from "@/components/welcome-modal";
+import { HelpPanel } from "@/components/help-panel";
+import { useFirstVisit } from "@/hooks/useFirstVisit";
 import type { ImageEdit, ImageEditOutput, ImageEditMetadata, ImageEditOutputMetadata } from "@shared/schema";
 
 // Lazy-loaded output thumbnail component
@@ -279,6 +282,10 @@ export default function ImageEditPage() {
   const [renameValue, setRenameValue] = useState("");
   const [isEscapePressed, setIsEscapePressed] = useState(false);
   const [pendingReplaceFile, setPendingReplaceFile] = useState<File | null>(null);
+
+  // Help system state
+  const { showWelcome, closeWelcome, dismissWelcomePermanently } = useFirstVisit('image-edit');
+  const [isHelpOpen, setIsHelpOpen] = useState(false);
 
   // Save panel state
   useEffect(() => {
@@ -1829,6 +1836,22 @@ export default function ImageEditPage() {
             )}
           </DialogContent>
         </Dialog>
+
+        {/* Welcome Modal for first-time visitors */}
+        <WelcomeModal
+          featureId="image-edit"
+          open={showWelcome}
+          onClose={closeWelcome}
+          onDismissPermanently={dismissWelcomePermanently}
+          onShowHelp={() => setIsHelpOpen(true)}
+        />
+
+        {/* Help Panel - controlled by welcome modal's "Learn More" button */}
+        <HelpPanel
+          featureId="image-edit"
+          open={isHelpOpen}
+          onOpenChange={setIsHelpOpen}
+        />
       </div>
     </TooltipProvider>
   );

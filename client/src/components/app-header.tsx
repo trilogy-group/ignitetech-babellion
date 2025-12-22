@@ -57,7 +57,7 @@ export function AppHeader() {
         <div className="flex items-center gap-4 sm:gap-6">
           <Link href="/translate">
             <div className="flex items-center gap-2 sm:gap-3 cursor-pointer">
-              <img src="/favicon.png" alt="Babellion" className="h-8 w-8" />
+              <img src="/favicon.png" alt="Babellion" className="h-8 w-8 rounded-full" />
               <span className="text-lg sm:text-xl font-semibold">Babellion</span>
             </div>
           </Link>

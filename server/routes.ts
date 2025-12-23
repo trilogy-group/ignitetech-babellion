@@ -5,7 +5,7 @@ import { storage } from "./storage";
 import { setupAuth, isAuthenticated, isAdmin } from "./replitAuth";
 import { z } from "zod";
 import { encrypt } from "./encryption";
-import { translationService } from "./translationService";
+import { translationService, figmaJsonTranslationService } from "./translationService";
 import { proofreadingService } from "./proofreadingService";
 import { pdfService } from "./pdfService";
 import { imageTranslationService } from "./imageTranslationService";
@@ -201,10 +201,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // ===== TRANSLATE ENDPOINT (Single language) =====
+  // ===== UNIFIED TRANSLATE ENDPOINT (Single language, both rich text and JSON) =====
   app.post("/api/translate-single", isAuthenticated, async (req: any, res) => {
     try {
-      const { translationId, languageCode, modelId } = req.body;
+      const { translationId, languageCode, modelId, sourceType: requestedSourceType } = req.body;
 
       // Verify user owns the translation or is admin (admins can only translate public translations)
       const translation = await storage.getTranslation(translationId);
@@ -231,9 +231,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ message: `Language not found: ${languageCode}` });
       }
 
-      // Get system prompt
+      // Auto-detect sourceType if not provided: check if content is Figma JSON
+      const sourceType: 'json' | 'richtext' = requestedSourceType || (() => {
+        try {
+          const parsed = JSON.parse(translation.sourceText);
+          // Check for Figma JSON structure: has 'nodes' array with 'kind' property
+          const isFigmaJson = Array.isArray(parsed.nodes) && 
+            parsed.nodes.some((n: Record<string, unknown>) => n && typeof n === 'object' && 'kind' in n);
+          return isFigmaJson ? 'json' : 'richtext';
+        } catch {
+          return 'richtext';
+        }
+      })();
+
+      // Get system prompts
       const promptSetting = await storage.getSetting('translation_system_prompt');
       const systemPrompt = promptSetting?.value;
+      const proofreadPromptSetting = await storage.getSetting('proofreading_system_prompt');
+      const proofreadSystemPrompt = proofreadPromptSetting?.value;
 
       // Delete existing output for this language
       const existingOutputs = await storage.getTranslationOutputs(translationId);
@@ -243,7 +258,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       // Log translation start
-      logInfo(`Translating ${translationId} into ${language.name}`, "AI");
+      logInfo(`Translating ${translationId} into ${language.name} (${sourceType})`, "AI");
 
       // Create output record with 'translating' status (translatedText will be null initially)
       const output = await storage.createTranslationOutput({
@@ -261,16 +276,50 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const translateStartTime = Date.now();
         
         try {
+          // ========== JSON MODE: Use FigmaJsonTranslationService ==========
+          if (sourceType === 'json') {
+            try {
+              // Parse the source JSON
+              const sourceJson = JSON.parse(translation.sourceText);
+              
+              // Use the unified Figma JSON translation service (handles translate + proofread + reconstruct)
+              await figmaJsonTranslationService.translateAndSaveToDb({
+                outputId: output.id,
+                json: sourceJson,
+                targetLanguage: language.name,
+                modelIdentifier: model.modelIdentifier,
+                provider: model.provider as 'openai' | 'anthropic',
+                systemPrompt,
+                proofreadSystemPrompt,
+              });
+
+              const totalTime = Math.round((Date.now() - translateStartTime) / 1000);
+              logInfo(`Completed JSON translation ${translationId} into ${language.name}, time: ${totalTime}s`, "AI");
+            } catch (error) {
+              const translateTime = Math.round((Date.now() - translateStartTime) / 1000);
+              logError(`JSON translation failed ${translationId} into ${language.name}, time: ${translateTime}s`, "AI", error);
+              await storage.updateTranslationOutputStatus(output.id, { 
+                translationStatus: 'failed',
+                proofreadStatus: 'failed'
+              });
+            }
+            return;
+          }
+
+          // ========== RICH TEXT MODE: Use existing TranslationService ==========
           // Step 1: Translate
           let translatedText: string;
+          let translationOutputTokens = 0;
           try {
-            translatedText = await translationService.translate({
+            const translationResult = await translationService.translate({
               text: translation.sourceText,
               targetLanguage: language.name,
               modelIdentifier: model.modelIdentifier,
               provider: model.provider as 'openai' | 'anthropic',
               systemPrompt,
             });
+            translatedText = translationResult.text;
+            translationOutputTokens = translationResult.outputTokens;
           } catch (error) {
             const translateTime = Math.round((Date.now() - translateStartTime) / 1000);
             logError(`Translation failed ${translationId} into ${language.name}, time: ${translateTime}s`, "AI", error);
@@ -281,8 +330,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
             return; // Exit early if translation fails
           }
 
-          const translateTime = Math.round((Date.now() - translateStartTime) / 1000);
-          logInfo(`Translated ${translationId} into ${language.name}, time: ${translateTime}s`, "AI");
+          const translateTimeMs = Date.now() - translateStartTime;
+          const translateTime = Math.round(translateTimeMs / 1000);
+          logInfo(`Translated ${translationId} into ${language.name}, time: ${translateTime}s, tokens: ${translationOutputTokens}`, "AI");
 
           // Update with translated text and mark translation as completed (with retry)
           await retryOnDatabaseError(() => 
@@ -291,6 +341,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
           await retryOnDatabaseError(() => 
             storage.updateTranslationOutputStatus(output.id, { translationStatus: 'completed' })
           );
+          // Store translation metrics
+          await retryOnDatabaseError(() =>
+            storage.updateTranslationOutputMetrics(output.id, {
+              translationDurationMs: translateTimeMs,
+              translationOutputTokens,
+            })
+          );
 
           // Step 2: Automatically trigger proofreading
           try {
@@ -298,12 +355,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
             await retryOnDatabaseError(() => 
               storage.updateTranslationOutputStatus(output.id, { proofreadStatus: 'proof_reading' })
             );
-
-            // Get proofreading system prompt (with retry)
-            const proofreadPromptSetting = await retryOnDatabaseError(() => 
-              storage.getSetting('proofreading_system_prompt')
-            );
-            const proofreadSystemPrompt = proofreadPromptSetting?.value;
 
             logInfo(`Proofreading ${translationId} into ${language.name}`, "AI");
             const proofreadStartTime = Date.now();
@@ -332,7 +383,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             );
 
             // Execute Step 2: Apply changes to produce final translation
-            const finalTranslation = await translationService.proofreadStep2(
+            const step2Result = await translationService.proofreadStep2(
               step1Result.userInputStep1,
               step1Result.proposedChanges,
               model.modelIdentifier,
@@ -342,7 +393,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
             // Update with final proofread translation (with retry)
             await retryOnDatabaseError(() => 
-              storage.updateTranslationOutput(output.id, finalTranslation)
+              storage.updateTranslationOutput(output.id, step2Result.text)
             );
             
             // Mark proofreading as completed (with retry)
@@ -350,12 +401,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
               storage.updateTranslationOutputStatus(output.id, { proofreadStatus: 'completed' })
             );
 
-            const proofreadTime = Math.round((Date.now() - proofreadStartTime) / 1000);
-            logInfo(`Proofread ${translationId} into ${language.name}, time: ${proofreadTime}s`, "AI");
+            const proofreadTimeMs = Date.now() - proofreadStartTime;
+            const proofreadTime = Math.round(proofreadTimeMs / 1000);
+            const totalProofreadTokens = step1Result.outputTokens + step2Result.outputTokens;
+            logInfo(`Proofread ${translationId} into ${language.name}, time: ${proofreadTime}s, tokens: ${totalProofreadTokens}`, "AI");
+
+            // Store proofreading metrics
+            await retryOnDatabaseError(() =>
+              storage.updateTranslationOutputMetrics(output.id, {
+                proofreadDurationMs: proofreadTimeMs,
+                proofreadOutputTokens: totalProofreadTokens,
+              })
+            );
           } catch (error) {
-            const proofreadStartTime = Date.now();
-            const proofreadTime = Math.round((Date.now() - proofreadStartTime) / 1000);
-            logError(`Proofreading failed ${translationId} into ${language.name}, time: ${proofreadTime}s`, "AI", error);
+            logError(`Proofreading failed ${translationId} into ${language.name}`, "AI", error);
             // Update status to failed, but keep the translated text (with retry)
             await retryOnDatabaseError(() => 
               storage.updateTranslationOutputStatus(output.id, { proofreadStatus: 'failed' })
@@ -1130,21 +1189,30 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const proofreadStartTime = Date.now();
 
           // Execute proofreading - use text from request body (current editor content) instead of saved text
-          const proofreadingResults = await proofreadingService.proofread({
+          const proofreadingServiceResult = await proofreadingService.proofread({
             text: text.trim(),
             rules: activeRules.map(r => ({ title: r.title, ruleText: r.ruleText })),
             modelIdentifier: model.modelIdentifier,
             provider: model.provider as 'openai' | 'anthropic',
           });
 
-          const proofreadTime = Math.round((Date.now() - proofreadStartTime) / 1000);
-          logInfo(`Proofread ${proofreadingId}, time: ${proofreadTime}s`, "AI");
+          const proofreadTimeMs = Date.now() - proofreadStartTime;
+          const proofreadTime = Math.round(proofreadTimeMs / 1000);
+          logInfo(`Proofread ${proofreadingId}, time: ${proofreadTime}s, tokens: ${proofreadingServiceResult.outputTokens}`, "AI");
 
           // Update the output with results and mark as completed (with retry)
           await retryOnDatabaseError(() => 
             storage.updateProofreadingOutput(output.id, { 
-              results: proofreadingResults as unknown as Record<string, unknown>[],
+              results: proofreadingServiceResult.results as unknown as Record<string, unknown>[],
               status: 'completed' 
+            })
+          );
+
+          // Store proofreading metrics
+          await retryOnDatabaseError(() =>
+            storage.updateProofreadingOutputMetrics(output.id, {
+              durationMs: proofreadTimeMs,
+              outputTokens: proofreadingServiceResult.outputTokens,
             })
           );
 
@@ -1153,9 +1221,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             storage.updateProofreading(proofreadingId, { lastUsedModelId: modelId })
           );
         } catch (error) {
-          const proofreadStartTime = Date.now();
-          const proofreadTime = Math.round((Date.now() - proofreadStartTime) / 1000);
-          logError(`Proofreading failed ${proofreadingId}, time: ${proofreadTime}s`, "AI", error);
+          logError(`Proofreading failed ${proofreadingId}`, "AI", error);
           // Update status to failed (with retry)
           await retryOnDatabaseError(() => 
             storage.updateProofreadingOutput(output.id, { status: 'failed' })
@@ -1684,8 +1750,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
             modelIdentifier: IMAGE_TRANSLATION_MODEL.identifier,
           });
 
-          const translateTime = Math.round((Date.now() - translateStartTime) / 1000);
-          logInfo(`Translated image ${imageTranslationId} into ${language.name}, time: ${translateTime}s`, "AI");
+          const translateTimeMs = Date.now() - translateStartTime;
+          const translateTime = Math.round(translateTimeMs / 1000);
+          logInfo(`Translated image ${imageTranslationId} into ${language.name}, time: ${translateTime}s, tokens: ${result.outputTokens}`, "AI");
 
           // Update with translated image and mark as completed (with retry)
           await retryOnDatabaseError(() => 
@@ -1693,6 +1760,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
               translatedImageBase64: result.translatedImageBase64,
               translatedMimeType: result.translatedMimeType,
               status: 'completed',
+            })
+          );
+
+          // Store metrics
+          await retryOnDatabaseError(() =>
+            storage.updateImageTranslationOutputMetrics(output.id, {
+              durationMs: translateTimeMs,
+              outputTokens: result.outputTokens,
             })
           );
         } catch (error) {
@@ -2046,8 +2121,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
             model: model as 'openai' | 'gemini',
           });
 
-          const editTime = Math.round((Date.now() - editStartTime) / 1000);
-          logInfo(`Edited image ${imageEditId}, time: ${editTime}s`, "AI");
+          const editTimeMs = Date.now() - editStartTime;
+          const editTime = Math.round(editTimeMs / 1000);
+          logInfo(`Edited image ${imageEditId}, time: ${editTime}s, tokens: ${result.outputTokens}`, "AI");
 
           // Update with edited image and mark as completed (with retry)
           await retryOnDatabaseError(() => 
@@ -2055,6 +2131,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
               editedImageBase64: result.editedImageBase64,
               editedMimeType: result.editedMimeType,
               status: 'completed',
+            })
+          );
+
+          // Store metrics
+          await retryOnDatabaseError(() =>
+            storage.updateImageEditOutputMetrics(output.id, {
+              durationMs: editTimeMs,
+              outputTokens: result.outputTokens,
             })
           );
         } catch (error) {
@@ -2200,6 +2284,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Error fetching top users:", error);
       res.status(500).json({ message: "Failed to fetch top users" });
+    }
+  });
+
+  // AI Performance analytics (duration, tokens per operation type and model)
+  app.get("/api/admin/analytics/ai-performance", isAuthenticated, isAdmin, async (req, res) => {
+    try {
+      const startDateParam = req.query.startDate as string;
+      const endDateParam = req.query.endDate as string;
+      
+      // Default to last 30 days if not provided
+      const endDate = endDateParam ? new Date(endDateParam) : new Date();
+      const startDate = startDateParam 
+        ? new Date(startDateParam) 
+        : new Date(endDate.getTime() - 30 * 24 * 60 * 60 * 1000);
+      
+      const data = await storage.getAIPerformanceMetrics(startDate, endDate);
+      res.json(data);
+    } catch (error) {
+      console.error("Error fetching AI performance metrics:", error);
+      res.status(500).json({ message: "Failed to fetch AI performance metrics" });
     }
   });
 

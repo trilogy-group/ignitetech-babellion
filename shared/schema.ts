@@ -103,6 +103,11 @@ export const translationOutputs = pgTable("translation_outputs", {
   proofreadStatus: proofreadStatusEnum("proofread_status").default('pending').notNull(),
   proofreadProposedChanges: jsonb("proofread_proposed_changes"), // Stores bullet-point list of proposed changes from Step 1
   proofreadOriginalTranslation: text("proofread_original_translation"), // Stores pre-proofread translation for reference
+  // Performance metrics (only set on successful completion)
+  translationDurationMs: integer("translation_duration_ms"), // Time to complete translation in milliseconds
+  translationOutputTokens: integer("translation_output_tokens"), // Output tokens used for translation
+  proofreadDurationMs: integer("proofread_duration_ms"), // Time to complete proofreading in milliseconds
+  proofreadOutputTokens: integer("proofread_output_tokens"), // Output tokens used for proofreading
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
@@ -336,6 +341,9 @@ export const proofreadingOutputs = pgTable("proofreading_outputs", {
   results: jsonb("results").notNull(), // Array of {rule, original_text, suggested_change, rationale, status: 'pending'|'accepted'|'rejected'}
   modelId: varchar("model_id").references(() => aiModels.id),
   status: proofreadingStatusEnum("status").default('pending').notNull(),
+  // Performance metrics (only set on successful completion)
+  durationMs: integer("duration_ms"), // Time to complete proofreading in milliseconds
+  outputTokens: integer("output_tokens"), // Output tokens used
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
@@ -413,6 +421,9 @@ export const imageTranslationOutputs = pgTable("image_translation_outputs", {
   translatedMimeType: varchar("translated_mime_type", { length: 50 }),
   modelId: varchar("model_id").references(() => aiModels.id),
   status: translationStatusEnum("status").default('pending').notNull(),
+  // Performance metrics (only set on successful completion)
+  durationMs: integer("duration_ms"), // Time to complete image translation in milliseconds
+  outputTokens: integer("output_tokens"), // Output tokens used
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
@@ -489,6 +500,9 @@ export const imageEditOutputs = pgTable("image_edit_outputs", {
   editedMimeType: varchar("edited_mime_type", { length: 50 }),
   model: varchar("model", { length: 50 }).notNull(), // 'openai' | 'gemini'
   status: imageEditStatusEnum("status").default('pending').notNull(),
+  // Performance metrics (only set on successful completion)
+  durationMs: integer("duration_ms"), // Time to complete image edit in milliseconds
+  outputTokens: integer("output_tokens"), // Output tokens used
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });

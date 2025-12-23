@@ -10,6 +10,9 @@ interface ProofreadChange {
   "phrase to change"?: string;
   "phrase to change to"?: string;
   reason?: string;
+  // For Figma JSON format - shows original English and what translation changed to
+  originalEnglish?: string;
+  translatedBefore?: string;
 }
 
 interface ProofreadChangesDialogProps {
@@ -27,6 +30,27 @@ export function ProofreadChangesDialog({
 }: ProofreadChangesDialogProps) {
   const { toast } = useToast();
 
+  // Parse a single item from array into ProofreadChange
+  const parseItem = (obj: Record<string, unknown>): ProofreadChange => {
+    // Check if this is Figma JSON format (has 'improved' field)
+    if ('improved' in obj) {
+      // Figma JSON format: { id, original, translated, improved, reason }
+      return {
+        originalEnglish: String(obj.original || ''),
+        "phrase to change": String(obj.translated || ''), // The initial translation
+        "phrase to change to": String(obj.improved || ''), // The improved version
+        reason: String(obj.reason || 'Improvement'),
+      };
+    }
+    
+    // Rich text format: { original, changes, reason }
+    return {
+      "phrase to change": String(obj.original || ''),
+      "phrase to change to": String(obj.changes || ''),
+      reason: String(obj.reason || 'Improvement'),
+    };
+  };
+
   // Parse the proposed changes into structured format
   const parseChanges = (data: string | Record<string, unknown> | null | undefined): ProofreadChange[] => {
     if (!data) return [];
@@ -34,24 +58,12 @@ export function ProofreadChangesDialog({
     // Handle if it's already a parsed object (from JSONB)
     if (typeof data === 'object' && !Array.isArray(data)) {
       // Single object, wrap in array
-      const obj = data as Record<string, unknown>;
-      return [{
-        "phrase to change": String(obj.original || ''),
-        "phrase to change to": String(obj.changes || ''),
-        reason: String(obj.reason || 'Improvement'),
-      }];
+      return [parseItem(data as Record<string, unknown>)];
     }
     
     if (Array.isArray(data)) {
       // Already an array
-      return data.map((item: unknown) => {
-        const obj = item as Record<string, unknown>;
-        return {
-          "phrase to change": String(obj.original || ''),
-          "phrase to change to": String(obj.changes || ''),
-          reason: String(obj.reason || 'Improvement'),
-        };
-      });
+      return data.map((item: unknown) => parseItem(item as Record<string, unknown>));
     }
     
     // Handle string input
@@ -62,14 +74,7 @@ export function ProofreadChangesDialog({
     try {
       const parsed = JSON.parse(text);
       if (Array.isArray(parsed)) {
-        return parsed.map((item: unknown) => {
-          const obj = item as Record<string, unknown>;
-          return {
-            "phrase to change": String(obj.original || ''),
-            "phrase to change to": String(obj.changes || ''),
-            reason: String(obj.reason || 'Improvement'),
-          };
-        });
+        return parsed.map((item: unknown) => parseItem(item as Record<string, unknown>));
       }
     } catch {
       // If JSON parsing fails, fall back to bullet point format for backward compatibility
@@ -187,12 +192,19 @@ export function ProofreadChangesDialog({
                           {index + 1}
                         </Badge>
                         <div className="flex-1 min-w-0 space-y-1">
+                          {/* For Figma JSON: show original English text */}
+                          {change.originalEnglish && (
+                            <div className="flex gap-2">
+                              <span className="font-medium text-muted-foreground shrink-0 w-16">Original:</span>
+                              <span className="flex-1 bg-blue-50 dark:bg-blue-950/20 px-2 py-0.5 rounded break-words text-blue-700 dark:text-blue-300">{change.originalEnglish}</span>
+                            </div>
+                          )}
                           <div className="flex gap-2">
-                            <span className="font-medium text-muted-foreground shrink-0 w-16">Original:</span>
+                            <span className="font-medium text-muted-foreground shrink-0 w-16">{change.originalEnglish ? 'Before:' : 'Original:'}</span>
                             <span className="flex-1 bg-muted/50 px-2 py-0.5 rounded break-words">{change["phrase to change"]}</span>
                           </div>
                           <div className="flex gap-2">
-                            <span className="font-medium text-muted-foreground shrink-0 w-16">Changes:</span>
+                            <span className="font-medium text-muted-foreground shrink-0 w-16">{change.originalEnglish ? 'After:' : 'Changes:'}</span>
                             <span className="flex-1 bg-green-50 dark:bg-green-950/20 px-2 py-0.5 rounded break-words">{change["phrase to change to"]}</span>
                           </div>
                           {change.reason && (

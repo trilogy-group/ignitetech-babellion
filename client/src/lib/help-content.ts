@@ -98,14 +98,15 @@ export const helpContent: Record<FeatureId, FeatureHelp> = {
     title: 'Translate',
     tagline: 'One source, many languages',
     heroIllustration: '/help/illustration-translate-hero.png',
-    overview: 'Translate your text into multiple languages simultaneously while preserving rich text formatting. Edit translations as needed and export anywhere.',
+    overview: 'Translate your text into multiple languages simultaneously while preserving rich text formatting. Supports both rich text and Figma JSON input. Edit translations as needed and export anywhere.',
     capabilities: [
       'Translate to multiple languages at once',
       'Rich text formatting preserved (bold, italic, lists)',
+      'Figma JSON translation with structure preservation',
       'Import from Google Docs or PDF',
       'Edit translations after generation',
-      'Built-in proofreading for translations',
-      'Export to Google Docs or clipboard',
+      'Built-in AI proofreading for quality improvements',
+      'Export to Google Docs, clipboard, or download JSON',
     ],
     workflow: [
       {
@@ -113,35 +114,42 @@ export const helpContent: Record<FeatureId, FeatureHelp> = {
         description: 'Start a new translation project or select an existing one from the History panel.',
       },
       {
-        title: 'Add your source text',
-        description: 'Enter your content directly or import from Google Docs or PDF. Your formatting will be preserved.',
+        title: 'Choose input mode',
+        description: 'Toggle between Rich Text and Figma JSON mode using the switch in the source panel header. For Figma, import your JSON file directly.',
+      },
+      {
+        title: 'Add your source content',
+        description: 'Enter text directly, import from Google Docs/PDF, or upload a Figma JSON file. Your formatting and structure will be preserved.',
       },
       {
         title: 'Select target languages',
-        description: 'Choose one or more target languages from the dropdown. You can translate to multiple languages simultaneously.',
+        description: 'Choose one or more target languages from the dropdown. All selected languages translate simultaneously in parallel.',
       },
       {
         title: 'Run translation',
-        description: 'Select an AI model and click "Translate". Each language appears in its own tab as it completes.',
+        description: 'Select an AI model and click "Translate". Watch the progress: grey spinner = translating, blue spinner = proofreading.',
+      },
+      {
+        title: 'Monitor progress',
+        description: 'The translation goes through 3 phases: Translating → Generating changes (proofreading) → Applying changes. Click "Stop" anytime to pause.',
       },
       {
         title: 'Review and edit',
-        description: 'Switch between language tabs to review translations. Make edits directly in the output area if needed.',
-      },
-      {
-        title: 'Proofread translations',
-        description: 'Use the built-in proofreading feature to check and improve your translations.',
+        description: 'Switch between language tabs to review. Click "View Changes" to see proofreading improvements. Make edits directly if needed.',
       },
       {
         title: 'Export your translations',
-        description: 'Copy to clipboard, create a Google Doc, or share a link. Each language can be exported separately.',
+        description: 'Use the Share menu to copy, download, or create a shareable link. For JSON, download preserves the original structure.',
       },
     ],
     tips: [
-      { text: 'Select multiple languages to translate simultaneously' },
-      { text: 'Your rich text formatting (bold, italic, lists) is preserved' },
-      { text: 'Use the built-in proofreading to polish translations' },
-      { text: 'Give feedback on translations to help improve quality' },
+      { text: 'Select multiple languages to translate simultaneously in parallel' },
+      { text: 'Grey spinner = translating, Blue spinner = AI proofreading in progress' },
+      { text: 'Click "Stop" to pause translation, "Restart" to resume from where you left off' },
+      { text: 'Click "View Changes" to see what the AI proofreading improved' },
+      { text: 'For Figma JSON, use "Compare" to see original vs translated text nodes side-by-side' },
+      { text: 'Your rich text formatting (bold, italic, lists) is preserved in the output' },
+      { text: 'Rerun individual languages without affecting completed translations' },
     ],
     relatedFeatures: [
       {
@@ -369,12 +377,12 @@ export const welcomeContent: Record<FeatureId, WelcomeContent> = {
     title: 'Welcome to Translate',
     tagline: 'One source, many languages',
     heroIllustration: '/help/illustration-translate-hero.png',
-    description: 'Translate your text into multiple languages simultaneously while preserving rich text formatting.',
+    description: 'Translate your text into multiple languages simultaneously. Supports rich text and Figma JSON with automatic AI proofreading.',
     highlights: [
-      'Translate to multiple languages at once',
-      'Formatting preserved (bold, italic, lists)',
-      'Edit translations after generation',
-      'Export to Google Docs or clipboard',
+      'Translate to multiple languages in parallel',
+      'Rich text and Figma JSON support',
+      'Automatic AI proofreading for quality',
+      'Track progress: Translating → Proofreading → Complete',
     ],
   },
   'image-translate': {

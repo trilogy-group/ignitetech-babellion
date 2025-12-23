@@ -8,6 +8,13 @@
       "when": 1762331277661,
       "tag": "0000_chubby_abomination",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1766483509962,
+      "tag": "0001_add_performance_metrics",
+      "breakpoints": true
     }
   ]
 }

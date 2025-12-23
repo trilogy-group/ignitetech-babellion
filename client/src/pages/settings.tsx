@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { Loader2, Plus, Trash2, Save, Shield, ShieldCheck, ArrowLeft, Pencil, Check, ChevronsUpDown, BarChart3, Languages, FileText, Users, ThumbsUp, ThumbsDown, Bot, TrendingUp, Image } from "lucide-react";
-import { Area, AreaChart, Bar, BarChart, Pie, PieChart, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
+import { Loader2, Plus, Trash2, Save, Shield, ShieldCheck, ArrowLeft, Pencil, Check, ChevronsUpDown, BarChart3, Languages, FileText, Users, ThumbsUp, ThumbsDown, Bot, TrendingUp, Image, Clock, Zap, RefreshCw } from "lucide-react";
+import { Area, AreaChart, Bar, BarChart, Pie, PieChart, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, ScatterChart, Scatter, ZAxis } from "recharts";
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -239,6 +239,76 @@ export default function Settings() {
       return res.json();
     },
   });
+
+  // AI Performance metrics query
+  const { data: aiPerformance, isLoading: aiPerformanceLoading, isFetching: aiPerformanceFetching, refetch: refetchAiPerformance } = useQuery<{
+    dataPoints: Array<{
+      id: string;
+      operationType: 'translation' | 'proofreading' | 'image_translation' | 'image_edit';
+      modelName: string;
+      durationMs: number;
+      outputTokens: number;
+      createdAt: string;
+    }>;
+    summary: Array<{
+      operationType: string;
+      modelName: string;
+      avgDurationMs: number;
+      avgOutputTokens: number;
+      count: number;
+    }>;
+  }>({
+    queryKey: ["/api/admin/analytics/ai-performance", analyticsPeriod],
+    queryFn: async () => {
+      // Calculate start/end dates based on period
+      const endDate = new Date();
+      let startDate = new Date();
+      switch (analyticsPeriod) {
+        case '30d':
+          startDate = new Date(endDate.getTime() - 30 * 24 * 60 * 60 * 1000);
+          break;
+        case '60d':
+          startDate = new Date(endDate.getTime() - 60 * 24 * 60 * 60 * 1000);
+          break;
+        case '90d':
+          startDate = new Date(endDate.getTime() - 90 * 24 * 60 * 60 * 1000);
+          break;
+        case '1y':
+          startDate = new Date(endDate.getFullYear() - 1, endDate.getMonth(), endDate.getDate());
+          break;
+      }
+      const res = await fetch(`/api/admin/analytics/ai-performance?startDate=${startDate.toISOString()}&endDate=${endDate.toISOString()}`);
+      if (!res.ok) throw new Error('Failed to fetch AI performance');
+      return res.json();
+    },
+  });
+
+  // State for AI performance scatter plot filters
+  const [aiPerformanceOperationFilter, setAiPerformanceOperationFilter] = useState<string>("all");
+  const [aiPerformanceModelFilter, setAiPerformanceModelFilter] = useState<string>("all");
+  const [aiPerformanceColorBy, setAiPerformanceColorBy] = useState<"operation" | "model">("model");
+
+  // Get unique models and operation types for filters
+  const aiPerformanceModels = aiPerformance?.dataPoints 
+    ? Array.from(new Set(aiPerformance.dataPoints.map(d => d.modelName))).sort()
+    : [];
+  const aiPerformanceOperations = aiPerformance?.dataPoints
+    ? Array.from(new Set(aiPerformance.dataPoints.map(d => d.operationType))).sort()
+    : [];
+
+  // Filter data points for scatter plot
+  const filteredAiPerformanceData = aiPerformance?.dataPoints?.filter(d => {
+    if (aiPerformanceOperationFilter !== "all" && d.operationType !== aiPerformanceOperationFilter) return false;
+    if (aiPerformanceModelFilter !== "all" && d.modelName !== aiPerformanceModelFilter) return false;
+    return true;
+  }) || [];
+
+  // Filter summary for table
+  const filteredAiPerformanceSummary = aiPerformance?.summary?.filter(s => {
+    if (aiPerformanceOperationFilter !== "all" && s.operationType !== aiPerformanceOperationFilter) return false;
+    if (aiPerformanceModelFilter !== "all" && s.modelName !== aiPerformanceModelFilter) return false;
+    return true;
+  }) || [];
 
   // Save API key mutation
   const saveApiKeyMutation = useMutation({
@@ -966,6 +1036,251 @@ export default function Settings() {
             </Card>
           </div>
 
+          {/* AI Performance Analytics */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Zap className="h-5 w-5" />
+                AI Performance
+              </CardTitle>
+              <CardDescription>
+                Duration vs Output Tokens for AI operations
+              </CardDescription>
+              {/* Filters */}
+              <div className="flex flex-wrap gap-4 pt-2">
+                <div className="flex items-center gap-2">
+                  <Label htmlFor="operation-filter" className="text-sm">Operation:</Label>
+                  <Select
+                    value={aiPerformanceOperationFilter}
+                    onValueChange={setAiPerformanceOperationFilter}
+                  >
+                    <SelectTrigger id="operation-filter" className="w-[160px]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Operations</SelectItem>
+                      {aiPerformanceOperations.map(op => (
+                        <SelectItem key={op} value={op}>
+                          {op.replace(/_/g, ' ').replace(/\b\w/g, (l: string) => l.toUpperCase())}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Label htmlFor="model-filter" className="text-sm">Model:</Label>
+                  <Select
+                    value={aiPerformanceModelFilter}
+                    onValueChange={setAiPerformanceModelFilter}
+                  >
+                    <SelectTrigger id="model-filter" className="w-[160px]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Models</SelectItem>
+                      {aiPerformanceModels.map(model => (
+                        <SelectItem key={model} value={model}>
+                          {model}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Label htmlFor="color-by" className="text-sm">Color by:</Label>
+                  <Select
+                    value={aiPerformanceColorBy}
+                    onValueChange={(v) => setAiPerformanceColorBy(v as "operation" | "model")}
+                  >
+                    <SelectTrigger id="color-by" className="w-[130px]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="operation">Operation</SelectItem>
+                      <SelectItem value="model">Model</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => refetchAiPerformance()}
+                  disabled={aiPerformanceFetching}
+                  className="ml-auto"
+                >
+                  <RefreshCw className={cn("h-4 w-4 mr-2", aiPerformanceFetching && "animate-spin")} />
+                  Refresh
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {aiPerformanceLoading ? (
+                <div className="flex justify-center py-12">
+                  <Loader2 className="h-8 w-8 animate-spin" />
+                </div>
+              ) : filteredAiPerformanceData.length > 0 ? (
+                <div className="space-y-6">
+                  {/* Scatter Plot */}
+                  <div className="h-80">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <ScatterChart margin={{ top: 10, right: 20, bottom: 40, left: 60 }}>
+                        <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                        <XAxis 
+                          type="number" 
+                          dataKey="durationMs" 
+                          name="Duration" 
+                          tickFormatter={(value) => `${(value / 1000).toFixed(1)}`}
+                          className="text-xs"
+                          label={{ value: 'Duration (s)', position: 'bottom', offset: 0, className: 'text-xs fill-muted-foreground' }}
+                        />
+                        <YAxis 
+                          type="number" 
+                          dataKey="outputTokens" 
+                          name="Tokens"
+                          className="text-xs"
+                          label={{ value: 'Output Tokens', angle: -90, position: 'insideLeft', offset: 10, className: 'text-xs fill-muted-foreground' }}
+                        />
+                        <ZAxis type="category" dataKey="modelName" name="Model" />
+                        <Tooltip
+                          content={({ active, payload }) => {
+                            if (active && payload && payload.length) {
+                              const data = payload[0].payload as {
+                                operationType: string;
+                                modelName: string;
+                                durationMs: number;
+                                outputTokens: number;
+                                createdAt: string;
+                              };
+                              return (
+                                <div className="rounded-lg border bg-background p-2 shadow-sm">
+                                  <div className="font-medium">{data.operationType.replace(/_/g, ' ')}</div>
+                                  <div className="text-sm text-muted-foreground">Model: {data.modelName}</div>
+                                  <div className="text-sm text-muted-foreground">
+                                    Duration: {data.durationMs >= 1000 ? `${(data.durationMs / 1000).toFixed(2)}s` : `${data.durationMs}ms`}
+                                  </div>
+                                  <div className="text-sm text-muted-foreground">Tokens: {data.outputTokens.toLocaleString()}</div>
+                                  <div className="text-xs text-muted-foreground mt-1">
+                                    {new Date(data.createdAt).toLocaleString()}
+                                  </div>
+                                </div>
+                              );
+                            }
+                            return null;
+                          }}
+                        />
+                        <Legend verticalAlign="top" height={36} />
+                        {/* Group by operation type or model for different colors */}
+                        {aiPerformanceColorBy === "operation" ? (
+                          ['translation', 'proofreading', 'image_translation', 'image_edit'].map((opType, index) => {
+                            const opData = filteredAiPerformanceData.filter(d => d.operationType === opType);
+                            if (opData.length === 0) return null;
+                            return (
+                              <Scatter
+                                key={opType}
+                                name={opType.replace(/_/g, ' ').replace(/\b\w/g, (l: string) => l.toUpperCase())}
+                                data={opData}
+                                fill={`hsl(var(--chart-${(index % 5) + 1}))`}
+                              />
+                            );
+                          })
+                        ) : (
+                          aiPerformanceModels.map((model, index) => {
+                            const modelData = filteredAiPerformanceData.filter(d => d.modelName === model);
+                            if (modelData.length === 0) return null;
+                            return (
+                              <Scatter
+                                key={model}
+                                name={model}
+                                data={modelData}
+                                fill={`hsl(var(--chart-${(index % 5) + 1}))`}
+                              />
+                            );
+                          })
+                        )}
+                      </ScatterChart>
+                    </ResponsiveContainer>
+                  </div>
+
+                  {/* Summary Table */}
+                  <div>
+                    <h4 className="font-medium mb-3 flex items-center gap-2">
+                      <Clock className="h-4 w-4" />
+                      Summary Statistics
+                    </h4>
+                    {isMobile ? (
+                      <div className="space-y-3">
+                        {filteredAiPerformanceSummary.map((row, index) => (
+                          <Card key={index} className="p-3">
+                            <div className="space-y-2">
+                              <div className="flex justify-between">
+                                <span className="text-sm font-medium">
+                                  {row.operationType.replace(/_/g, ' ').replace(/\b\w/g, (l: string) => l.toUpperCase())}
+                                </span>
+                                <Badge variant="outline">{row.count}</Badge>
+                              </div>
+                              <div className="text-sm text-muted-foreground">{row.modelName}</div>
+                              <div className="flex justify-between text-sm">
+                                <span>Avg Duration:</span>
+                                <span className="font-mono">
+                                  {row.avgDurationMs >= 1000 
+                                    ? `${(row.avgDurationMs / 1000).toFixed(2)}s` 
+                                    : `${row.avgDurationMs}ms`}
+                                </span>
+                              </div>
+                              <div className="flex justify-between text-sm">
+                                <span>Avg Tokens:</span>
+                                <span className="font-mono">{row.avgOutputTokens.toLocaleString()}</span>
+                              </div>
+                            </div>
+                          </Card>
+                        ))}
+                      </div>
+                    ) : (
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>Operation</TableHead>
+                            <TableHead>Model</TableHead>
+                            <TableHead className="text-right">Avg Duration</TableHead>
+                            <TableHead className="text-right">Avg Tokens</TableHead>
+                            <TableHead className="text-right">Count</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {filteredAiPerformanceSummary.map((row, index) => (
+                            <TableRow key={index}>
+                              <TableCell className="font-medium">
+                                {row.operationType.replace(/_/g, ' ').replace(/\b\w/g, (l: string) => l.toUpperCase())}
+                              </TableCell>
+                              <TableCell>{row.modelName}</TableCell>
+                              <TableCell className="text-right font-mono">
+                                {row.avgDurationMs >= 1000 
+                                  ? `${(row.avgDurationMs / 1000).toFixed(2)}s` 
+                                  : `${row.avgDurationMs}ms`}
+                              </TableCell>
+                              <TableCell className="text-right font-mono">
+                                {row.avgOutputTokens.toLocaleString()}
+                              </TableCell>
+                              <TableCell className="text-right">
+                                <Badge variant="secondary">{row.count}</Badge>
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
+                  <Zap className="h-12 w-12 mb-2 opacity-50" />
+                  <p>No AI performance data available for this period</p>
+                  <p className="text-sm">Performance metrics are recorded for successful operations</p>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
           {/* Top Active Users Table */}
           <Card>
             <CardHeader>
@@ -1010,7 +1325,8 @@ export default function Settings() {
                               <p className="font-medium truncate">{displayName}</p>
                               <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
                                 <span>{user.translationCount} translations</span>
-                                <span>{user.imageTranslationCount} image</span>
+                                <span>{user.imageTranslationCount} img trans</span>
+                                <span>{user.imageEditCount} img edits</span>
                                 <span>{user.proofreadingCount} proofreadings</span>
                               </div>
                             </div>
@@ -1027,7 +1343,8 @@ export default function Settings() {
                         <TableHead className="w-12">#</TableHead>
                         <TableHead>User</TableHead>
                         <TableHead className="text-center">Translations</TableHead>
-                        <TableHead className="text-center">Image</TableHead>
+                        <TableHead className="text-center">Img Trans</TableHead>
+                        <TableHead className="text-center">Img Edits</TableHead>
                         <TableHead className="text-center">Proofreadings</TableHead>
                         <TableHead className="text-center">Total</TableHead>
                       </TableRow>
@@ -1065,6 +1382,7 @@ export default function Settings() {
                             </TableCell>
                             <TableCell className="text-center">{user.translationCount}</TableCell>
                             <TableCell className="text-center">{user.imageTranslationCount}</TableCell>
+                            <TableCell className="text-center">{user.imageEditCount}</TableCell>
                             <TableCell className="text-center">{user.proofreadingCount}</TableCell>
                             <TableCell className="text-center">
                               <Badge variant="secondary">{user.totalCount}</Badge>

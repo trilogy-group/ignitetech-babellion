@@ -19,6 +19,12 @@ interface ProofreadingResult {
   status?: 'pending' | 'accepted' | 'rejected';
 }
 
+// Result type with token tracking
+interface ProofreadingServiceResult {
+  results: ProofreadingResult[];
+  outputTokens: number;
+}
+
 export class ProofreadingService {
   // Models that support reasoning - defined by prefixes that the model identifier starts with
   private readonly reasoningModelPrefixes = ['gpt-5', 'o'];
@@ -107,7 +113,7 @@ export class ProofreadingService {
     }
   }
 
-  async proofread(request: ProofreadingRequest): Promise<ProofreadingResult[]> {
+  async proofread(request: ProofreadingRequest): Promise<ProofreadingServiceResult> {
     const { text, rules, modelIdentifier, provider } = request;
 
     // Construct system prompt
@@ -134,15 +140,15 @@ export class ProofreadingService {
     // Construct user prompt
     const userPrompt = `Proof Read the following <text> with the rules given in <rules>\n\n<rules>\n${rulesString}\n</rules>\n\n<text>\n${text}\n</text>`;
 
-    let results: ProofreadingResult[];
+    let serviceResult: { results: ProofreadingResult[]; outputTokens: number };
     if (provider === 'openai') {
-      results = await this.proofreadWithOpenAI(
+      serviceResult = await this.proofreadWithOpenAI(
         userPrompt,
         systemPrompt,
         modelIdentifier
       );
     } else if (provider === 'anthropic') {
-      results = await this.proofreadWithAnthropic(
+      serviceResult = await this.proofreadWithAnthropic(
         userPrompt,
         systemPrompt,
         modelIdentifier
@@ -152,14 +158,17 @@ export class ProofreadingService {
     }
     
     // Set initial status to 'pending' for all results
-    return results.map(result => ({ ...result, status: 'pending' as const }));
+    return {
+      results: serviceResult.results.map(result => ({ ...result, status: 'pending' as const })),
+      outputTokens: serviceResult.outputTokens,
+    };
   }
 
   private async proofreadWithOpenAI(
     userInput: string,
     systemPrompt: string,
     model: string
-  ): Promise<ProofreadingResult[]> {
+  ): Promise<{ results: ProofreadingResult[]; outputTokens: number }> {
     const apiKey = await this.getApiKey('openai');
     
     // Configure OpenAI client with increased timeout for long-running requests (15 minutes)
@@ -237,11 +246,16 @@ export class ProofreadingService {
       
       const duration = Math.round((Date.now() - requestStartTime) / 1000);
       
-      // Extract text from completed response
+      // Extract text and tokens from completed response
       if (completedResponse && completedResponse.output) {
-        console.log(`[AI] Stream completed after ${duration}s`);
+        const usage = completedResponse.usage as Record<string, unknown> | undefined;
+        const outputTokens = (usage?.output_tokens as number) || 0;
+        console.log(`[AI] Stream completed after ${duration}s, tokens: ${outputTokens}`);
         const responseText = this.extractTextFromResponse(completedResponse);
-        return this.parseProofreadingResults(responseText);
+        return {
+          results: this.parseProofreadingResults(responseText),
+          outputTokens,
+        };
       } else if (!completedResponse) {
         throw new Error(`Stream ended without receiving response.completed event (${duration}s elapsed)`);
       } else {
@@ -259,7 +273,7 @@ export class ProofreadingService {
     userInput: string,
     systemPrompt: string,
     model: string
-  ): Promise<ProofreadingResult[]> {
+  ): Promise<{ results: ProofreadingResult[]; outputTokens: number }> {
     const apiKey = await this.getApiKey('anthropic');
     const anthropic = new Anthropic({ apiKey });
 
@@ -272,12 +286,16 @@ export class ProofreadingService {
       ],
     });
 
+    const outputTokens = response.usage?.output_tokens || 0;
     const content = response.content[0];
     if (content.type === 'text') {
-      return this.parseProofreadingResults(content.text);
+      return {
+        results: this.parseProofreadingResults(content.text),
+        outputTokens,
+      };
     }
 
-    return [];
+    return { results: [], outputTokens };
   }
 }
 

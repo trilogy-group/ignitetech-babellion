@@ -268,6 +268,48 @@ export interface IStorage {
     proofreadingCount: number;
     totalCount: number;
   }[]>;
+
+  // AI Performance analytics
+  getAIPerformanceMetrics(startDate: Date, endDate: Date): Promise<{
+    dataPoints: Array<{
+      id: string;
+      operationType: 'translation' | 'proofreading' | 'image_translation' | 'image_edit';
+      modelName: string;
+      durationMs: number;
+      outputTokens: number;
+      createdAt: Date;
+    }>;
+    summary: Array<{
+      operationType: string;
+      modelName: string;
+      avgDurationMs: number;
+      avgOutputTokens: number;
+      count: number;
+    }>;
+  }>;
+
+  // Update methods with metrics
+  updateTranslationOutputMetrics(id: string, data: { 
+    translationDurationMs?: number; 
+    translationOutputTokens?: number;
+    proofreadDurationMs?: number;
+    proofreadOutputTokens?: number;
+  }): Promise<TranslationOutput>;
+  
+  updateProofreadingOutputMetrics(id: string, data: {
+    durationMs?: number;
+    outputTokens?: number;
+  }): Promise<ProofreadingOutput>;
+
+  updateImageTranslationOutputMetrics(id: string, data: {
+    durationMs?: number;
+    outputTokens?: number;
+  }): Promise<ImageTranslationOutput>;
+
+  updateImageEditOutputMetrics(id: string, data: {
+    durationMs?: number;
+    outputTokens?: number;
+  }): Promise<ImageEditOutput>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -1844,6 +1886,7 @@ export class DatabaseStorage implements IStorage {
     translationCount: number;
     imageTranslationCount: number;
     proofreadingCount: number;
+    imageEditCount: number;
     totalCount: number;
   }[]> {
     // Get translation counts per user
@@ -1876,21 +1919,36 @@ export class DatabaseStorage implements IStorage {
       .where(sql`${imageTranslations.createdAt} >= ${startDate}`)
       .groupBy(imageTranslations.userId);
 
+    // Get image edit counts per user
+    const imageEditCounts = await db
+      .select({
+        userId: imageEdits.userId,
+        count: sql<number>`cast(count(*) as integer)`,
+      })
+      .from(imageEdits)
+      .where(sql`${imageEdits.createdAt} >= ${startDate}`)
+      .groupBy(imageEdits.userId);
+
     // Merge counts
-    const userCountMap = new Map<string, { translationCount: number; imageTranslationCount: number; proofreadingCount: number }>();
+    const userCountMap = new Map<string, { translationCount: number; imageTranslationCount: number; proofreadingCount: number; imageEditCount: number }>();
     for (const row of translationCounts) {
-      const existing = userCountMap.get(row.userId) || { translationCount: 0, imageTranslationCount: 0, proofreadingCount: 0 };
+      const existing = userCountMap.get(row.userId) || { translationCount: 0, imageTranslationCount: 0, proofreadingCount: 0, imageEditCount: 0 };
       existing.translationCount += row.count;
       userCountMap.set(row.userId, existing);
     }
     for (const row of imageTranslationCounts) {
-      const existing = userCountMap.get(row.userId) || { translationCount: 0, imageTranslationCount: 0, proofreadingCount: 0 };
+      const existing = userCountMap.get(row.userId) || { translationCount: 0, imageTranslationCount: 0, proofreadingCount: 0, imageEditCount: 0 };
       existing.imageTranslationCount += row.count;
       userCountMap.set(row.userId, existing);
     }
     for (const row of proofreadingCounts) {
-      const existing = userCountMap.get(row.userId) || { translationCount: 0, imageTranslationCount: 0, proofreadingCount: 0 };
+      const existing = userCountMap.get(row.userId) || { translationCount: 0, imageTranslationCount: 0, proofreadingCount: 0, imageEditCount: 0 };
       existing.proofreadingCount += row.count;
+      userCountMap.set(row.userId, existing);
+    }
+    for (const row of imageEditCounts) {
+      const existing = userCountMap.get(row.userId) || { translationCount: 0, imageTranslationCount: 0, proofreadingCount: 0, imageEditCount: 0 };
+      existing.imageEditCount += row.count;
       userCountMap.set(row.userId, existing);
     }
 
@@ -1924,11 +1982,294 @@ export class DatabaseStorage implements IStorage {
           translationCount: counts.translationCount,
           imageTranslationCount: counts.imageTranslationCount,
           proofreadingCount: counts.proofreadingCount,
-          totalCount: counts.translationCount + counts.imageTranslationCount + counts.proofreadingCount,
+          imageEditCount: counts.imageEditCount,
+          totalCount: counts.translationCount + counts.imageTranslationCount + counts.proofreadingCount + counts.imageEditCount,
         };
       })
       .sort((a, b) => b.totalCount - a.totalCount)
       .slice(0, limit);
+  }
+
+  // AI Performance Analytics
+  async getAIPerformanceMetrics(startDate: Date, endDate: Date): Promise<{
+    dataPoints: Array<{
+      id: string;
+      operationType: 'translation' | 'proofreading' | 'image_translation' | 'image_edit';
+      modelName: string;
+      durationMs: number;
+      outputTokens: number;
+      createdAt: Date;
+    }>;
+    summary: Array<{
+      operationType: string;
+      modelName: string;
+      avgDurationMs: number;
+      avgOutputTokens: number;
+      count: number;
+    }>;
+  }> {
+    // Get all models for name lookup
+    const allModels = await db.select().from(aiModels);
+    const modelNameMap = new Map(allModels.map(m => [m.id, m.name]));
+
+    const dataPoints: Array<{
+      id: string;
+      operationType: 'translation' | 'proofreading' | 'image_translation' | 'image_edit';
+      modelName: string;
+      durationMs: number;
+      outputTokens: number;
+      createdAt: Date;
+    }> = [];
+
+    // Get translation outputs with metrics (translations only, not proofreading within translation)
+    const translationData = await db
+      .select({
+        id: translationOutputs.id,
+        modelId: translationOutputs.modelId,
+        durationMs: translationOutputs.translationDurationMs,
+        outputTokens: translationOutputs.translationOutputTokens,
+        createdAt: translationOutputs.createdAt,
+      })
+      .from(translationOutputs)
+      .where(and(
+        sql`${translationOutputs.createdAt} >= ${startDate}`,
+        sql`${translationOutputs.createdAt} <= ${endDate}`,
+        sql`${translationOutputs.translationDurationMs} IS NOT NULL`,
+        sql`${translationOutputs.translationStatus} = 'completed'`
+      ));
+
+    for (const row of translationData) {
+      if (row.durationMs !== null && row.createdAt) {
+        dataPoints.push({
+          id: row.id,
+          operationType: 'translation',
+          modelName: row.modelId ? (modelNameMap.get(row.modelId) || 'Unknown') : 'Unknown',
+          durationMs: row.durationMs,
+          outputTokens: row.outputTokens || 0,
+          createdAt: row.createdAt,
+        });
+      }
+    }
+
+    // Get proofreading within translation (proofread portion)
+    const translationProofreadData = await db
+      .select({
+        id: translationOutputs.id,
+        modelId: translationOutputs.modelId,
+        durationMs: translationOutputs.proofreadDurationMs,
+        outputTokens: translationOutputs.proofreadOutputTokens,
+        createdAt: translationOutputs.createdAt,
+      })
+      .from(translationOutputs)
+      .where(and(
+        sql`${translationOutputs.createdAt} >= ${startDate}`,
+        sql`${translationOutputs.createdAt} <= ${endDate}`,
+        sql`${translationOutputs.proofreadDurationMs} IS NOT NULL`,
+        sql`${translationOutputs.proofreadStatus} = 'completed'`
+      ));
+
+    for (const row of translationProofreadData) {
+      if (row.durationMs !== null && row.createdAt) {
+        dataPoints.push({
+          id: `${row.id}-proofread`,
+          operationType: 'proofreading',
+          modelName: row.modelId ? (modelNameMap.get(row.modelId) || 'Unknown') : 'Unknown',
+          durationMs: row.durationMs,
+          outputTokens: row.outputTokens || 0,
+          createdAt: row.createdAt,
+        });
+      }
+    }
+
+    // Get standalone proofreading outputs
+    const proofreadingData = await db
+      .select({
+        id: proofreadingOutputs.id,
+        modelId: proofreadingOutputs.modelId,
+        durationMs: proofreadingOutputs.durationMs,
+        outputTokens: proofreadingOutputs.outputTokens,
+        createdAt: proofreadingOutputs.createdAt,
+      })
+      .from(proofreadingOutputs)
+      .where(and(
+        sql`${proofreadingOutputs.createdAt} >= ${startDate}`,
+        sql`${proofreadingOutputs.createdAt} <= ${endDate}`,
+        sql`${proofreadingOutputs.durationMs} IS NOT NULL`,
+        sql`${proofreadingOutputs.status} = 'completed'`
+      ));
+
+    for (const row of proofreadingData) {
+      if (row.durationMs !== null && row.createdAt) {
+        dataPoints.push({
+          id: row.id,
+          operationType: 'proofreading',
+          modelName: row.modelId ? (modelNameMap.get(row.modelId) || 'Unknown') : 'Unknown',
+          durationMs: row.durationMs,
+          outputTokens: row.outputTokens || 0,
+          createdAt: row.createdAt,
+        });
+      }
+    }
+
+    // Get image translation outputs
+    const imageTranslationData = await db
+      .select({
+        id: imageTranslationOutputs.id,
+        modelId: imageTranslationOutputs.modelId,
+        durationMs: imageTranslationOutputs.durationMs,
+        outputTokens: imageTranslationOutputs.outputTokens,
+        createdAt: imageTranslationOutputs.createdAt,
+      })
+      .from(imageTranslationOutputs)
+      .where(and(
+        sql`${imageTranslationOutputs.createdAt} >= ${startDate}`,
+        sql`${imageTranslationOutputs.createdAt} <= ${endDate}`,
+        sql`${imageTranslationOutputs.durationMs} IS NOT NULL`,
+        sql`${imageTranslationOutputs.status} = 'completed'`
+      ));
+
+    for (const row of imageTranslationData) {
+      if (row.durationMs !== null && row.createdAt) {
+        dataPoints.push({
+          id: row.id,
+          operationType: 'image_translation',
+          modelName: row.modelId ? (modelNameMap.get(row.modelId) || 'Unknown') : 'Unknown',
+          durationMs: row.durationMs,
+          outputTokens: row.outputTokens || 0,
+          createdAt: row.createdAt,
+        });
+      }
+    }
+
+    // Get image edit outputs
+    const imageEditData = await db
+      .select({
+        id: imageEditOutputs.id,
+        model: imageEditOutputs.model,
+        durationMs: imageEditOutputs.durationMs,
+        outputTokens: imageEditOutputs.outputTokens,
+        createdAt: imageEditOutputs.createdAt,
+      })
+      .from(imageEditOutputs)
+      .where(and(
+        sql`${imageEditOutputs.createdAt} >= ${startDate}`,
+        sql`${imageEditOutputs.createdAt} <= ${endDate}`,
+        sql`${imageEditOutputs.durationMs} IS NOT NULL`,
+        sql`${imageEditOutputs.status} = 'completed'`
+      ));
+
+    for (const row of imageEditData) {
+      if (row.durationMs !== null && row.createdAt) {
+        dataPoints.push({
+          id: row.id,
+          operationType: 'image_edit',
+          modelName: row.model || 'Unknown',
+          durationMs: row.durationMs,
+          outputTokens: row.outputTokens || 0,
+          createdAt: row.createdAt,
+        });
+      }
+    }
+
+    // Calculate summary statistics
+    const summaryMap = new Map<string, { 
+      operationType: string;
+      modelName: string;
+      totalDurationMs: number;
+      totalOutputTokens: number;
+      count: number;
+    }>();
+
+    for (const dp of dataPoints) {
+      const key = `${dp.operationType}|${dp.modelName}`;
+      const existing = summaryMap.get(key);
+      if (existing) {
+        existing.totalDurationMs += dp.durationMs;
+        existing.totalOutputTokens += dp.outputTokens;
+        existing.count++;
+      } else {
+        summaryMap.set(key, {
+          operationType: dp.operationType,
+          modelName: dp.modelName,
+          totalDurationMs: dp.durationMs,
+          totalOutputTokens: dp.outputTokens,
+          count: 1,
+        });
+      }
+    }
+
+    const summary = Array.from(summaryMap.values()).map(s => ({
+      operationType: s.operationType,
+      modelName: s.modelName,
+      avgDurationMs: Math.round(s.totalDurationMs / s.count),
+      avgOutputTokens: Math.round(s.totalOutputTokens / s.count),
+      count: s.count,
+    }));
+
+    return { dataPoints, summary };
+  }
+
+  // Update methods for metrics
+  async updateTranslationOutputMetrics(id: string, data: { 
+    translationDurationMs?: number; 
+    translationOutputTokens?: number;
+    proofreadDurationMs?: number;
+    proofreadOutputTokens?: number;
+  }): Promise<TranslationOutput> {
+    const [updated] = await db
+      .update(translationOutputs)
+      .set({
+        ...data,
+        updatedAt: new Date(),
+      })
+      .where(eq(translationOutputs.id, id))
+      .returning();
+    return updated;
+  }
+
+  async updateProofreadingOutputMetrics(id: string, data: {
+    durationMs?: number;
+    outputTokens?: number;
+  }): Promise<ProofreadingOutput> {
+    const [updated] = await db
+      .update(proofreadingOutputs)
+      .set({
+        ...data,
+        updatedAt: new Date(),
+      })
+      .where(eq(proofreadingOutputs.id, id))
+      .returning();
+    return updated;
+  }
+
+  async updateImageTranslationOutputMetrics(id: string, data: {
+    durationMs?: number;
+    outputTokens?: number;
+  }): Promise<ImageTranslationOutput> {
+    const [updated] = await db
+      .update(imageTranslationOutputs)
+      .set({
+        ...data,
+        updatedAt: new Date(),
+      })
+      .where(eq(imageTranslationOutputs.id, id))
+      .returning();
+    return updated;
+  }
+
+  async updateImageEditOutputMetrics(id: string, data: {
+    durationMs?: number;
+    outputTokens?: number;
+  }): Promise<ImageEditOutput> {
+    const [updated] = await db
+      .update(imageEditOutputs)
+      .set({
+        ...data,
+        updatedAt: new Date(),
+      })
+      .where(eq(imageEditOutputs.id, id))
+      .returning();
+    return updated;
   }
 }
 

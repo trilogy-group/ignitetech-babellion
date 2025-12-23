@@ -12,6 +12,7 @@ interface ImageEditRequest {
 interface ImageEditResult {
   editedImageBase64: string;
   editedMimeType: string;
+  outputTokens: number;
 }
 
 export class ImageEditService {
@@ -66,10 +67,12 @@ export class ImageEditService {
       const result = response.data[0];
 
       // Handle b64_json response
+      // Note: OpenAI image generation doesn't provide token counts, so we use 0
       if (result.b64_json) {
         return {
           editedImageBase64: result.b64_json,
           editedMimeType: 'image/png',
+          outputTokens: 0,
         };
       }
 
@@ -81,6 +84,7 @@ export class ImageEditService {
         return {
           editedImageBase64: base64,
           editedMimeType: 'image/png',
+          outputTokens: 0,
         };
       }
 
@@ -149,12 +153,17 @@ Instructions: ${prompt}`;
         throw new Error('Invalid response structure from Gemini');
       }
 
+      // Extract token usage from response metadata
+      const usageMetadata = response.usageMetadata as Record<string, unknown> | undefined;
+      const outputTokens = (usageMetadata?.candidatesTokenCount as number) || 0;
+
       // Find the image part in the response
       for (const part of content.parts) {
         if (part.inlineData && part.inlineData.data) {
           return {
             editedImageBase64: part.inlineData.data,
             editedMimeType: part.inlineData.mimeType || 'image/png',
+            outputTokens,
           };
         }
       }

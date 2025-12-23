@@ -94,3 +94,4 @@ export function hasVisitedFeature(featureId: FeatureId): boolean {
   return localStorage.getItem(visitedKey) === 'true';
 }
 
+

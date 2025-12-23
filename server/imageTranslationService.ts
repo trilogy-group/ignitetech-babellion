@@ -13,6 +13,7 @@ interface ImageTranslationRequest {
 interface ImageTranslationResult {
   translatedImageBase64: string;
   translatedMimeType: string;
+  outputTokens: number;
 }
 
 export class ImageTranslationService {
@@ -71,12 +72,17 @@ Only translate text that is part of the image content - do not add explanations 
       throw new Error('Invalid response structure from Gemini');
     }
 
+    // Extract token usage from response metadata
+    const usageMetadata = response.usageMetadata as Record<string, unknown> | undefined;
+    const outputTokens = (usageMetadata?.candidatesTokenCount as number) || 0;
+
     // Find the image part in the response
     for (const part of content.parts) {
       if (part.inlineData && part.inlineData.data) {
         return {
           translatedImageBase64: part.inlineData.data,
           translatedMimeType: part.inlineData.mimeType || 'image/png',
+          outputTokens,
         };
       }
     }

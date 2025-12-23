@@ -1,13 +1,14 @@
 import { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation, useInfiniteQuery } from "@tanstack/react-query";
 import { useLocation, useParams } from "wouter";
-import { Plus, Trash2, Loader2, Copy, Check, Lock, Globe, Pencil, FileText, Save, X, RotateCw, ChevronLeft, ChevronRight, Square, Search, Share, Link2, Upload, Zap, Sparkles, ChevronsUpDown, Eye, Wrench } from "lucide-react";
+import { Plus, Trash2, Loader2, Copy, Check, Lock, Globe, Pencil, FileText, Save, X, RotateCw, ChevronLeft, ChevronRight, Square, Search, Share, Link2, Upload, Zap, Sparkles, ChevronsUpDown, Eye, Wrench, FileJson, Type, Download } from "lucide-react";
 import { formatDate, formatRelativeTime } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Card } from "@/components/ui/card";
 import { RichTextEditor } from "@/components/rich-text-editor";
+import { JsonCodeEditor, type JsonCodeEditorRef } from "@/components/json-code-editor";
 import { GoogleDocsPicker } from "@/components/google-docs-picker";
 import { FeedbackModal } from "@/components/feedback-modal";
 import { ProofreadChangesDialog } from "@/components/proofread-changes-dialog";
@@ -84,6 +85,56 @@ import { HelpPanel } from "@/components/help-panel";
 import { useFirstVisit } from "@/hooks/useFirstVisit";
 
 /**
+ * Detect if a string looks like Figma JSON by checking for characteristic structure.
+ * Returns true if it appears to be Figma JSON, false otherwise.
+ */
+function detectFigmaJson(text: string): boolean {
+  if (!text || !text.trim()) return false;
+  
+  // Quick check: must start with { or [ (JSON-like)
+  const trimmed = text.trim();
+  if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) return false;
+  
+  try {
+    const parsed = JSON.parse(trimmed);
+    
+    // Check for Figma-specific structure:
+    // - Has 'nodes' array at top level, OR
+    // - Has objects with 'kind' property (like 'TEXT', 'FRAME', etc.)
+    const hasFigmaStructure = (obj: unknown): boolean => {
+      if (!obj || typeof obj !== 'object') return false;
+      const record = obj as Record<string, unknown>;
+      
+      // Check for nodes array (top-level Figma structure)
+      if (Array.isArray(record.nodes)) return true;
+      
+      // Check for kind property with Figma values
+      if (record.kind === 'TEXT' || record.kind === 'FRAME' || record.kind === 'GROUP' || 
+          record.kind === 'COMPONENT' || record.kind === 'INSTANCE' || record.kind === 'VECTOR' ||
+          record.kind === 'RECTANGLE' || record.kind === 'ELLIPSE' || record.kind === 'LINE') {
+        return true;
+      }
+      
+      // Check children recursively (but limit depth to avoid performance issues)
+      if (Array.isArray(record.children) && record.children.length > 0) {
+        return record.children.some((child) => hasFigmaStructure(child));
+      }
+      
+      return false;
+    };
+    
+    return hasFigmaStructure(parsed);
+  } catch {
+    // Not valid JSON - could still be Figma JSON with unescaped chars
+    // Check for Figma-like patterns in the raw text
+    return (
+      (trimmed.includes('"nodes"') || trimmed.includes('"kind"')) &&
+      (trimmed.includes('"TEXT"') || trimmed.includes('"FRAME"') || trimmed.includes('"children"'))
+    );
+  }
+}
+
+/**
  * Render the Translate page UI for creating, editing, translating, and managing translation projects.
  *
  * Provides the full translation workflow including history, source editor, language and model selection,
@@ -147,6 +198,11 @@ export default function Translate() {
   const [lastSavedContent, setLastSavedContent] = useState<string>("");
   // Store the currently selected translation object to avoid race conditions with list refresh
   const [selectedTranslationData, setSelectedTranslationData] = useState<Translation | null>(null);
+
+  // Input mode: 'richtext' for traditional HTML editor, 'json' for Figma JSON translation
+  const [inputMode, setInputMode] = useState<'richtext' | 'json'>('richtext');
+  const [jsonContent, setJsonContent] = useState<string>("");
+  const jsonEditorRef = useRef<JsonCodeEditorRef>(null);
 
   // Help system state
   const { showWelcome, closeWelcome, dismissWelcomePermanently } = useFirstVisit('translate');
@@ -337,7 +393,19 @@ export default function Translate() {
       setHasUnsavedChanges(false);
       
       setSelectedTranslationData(selectedTranslationFull);
+      
+      // Auto-detect if source is Figma JSON or rich text
+      const isFigmaJson = detectFigmaJson(selectedTranslationFull.sourceText);
+      if (isFigmaJson) {
+        setInputMode('json');
+        setJsonContent(selectedTranslationFull.sourceText);
+        setSourceText(selectedTranslationFull.sourceText); // Keep both in sync for mode toggle
+      } else {
+        setInputMode('richtext');
       setSourceText(selectedTranslationFull.sourceText);
+        setJsonContent(selectedTranslationFull.sourceText); // Keep both in sync for mode toggle
+      }
+      
       setTitle(selectedTranslationFull.title);
       setSelectedLanguages(selectedTranslationFull.selectedLanguages || []);
       setIsPrivate(selectedTranslationFull.isPrivate ?? false);
@@ -448,9 +516,9 @@ export default function Translate() {
     },
   });
 
-  // Individual language translation mutation
+  // Unified translation mutation - handles both rich text and JSON
   const translateSingleMutation = useMutation({
-    mutationFn: async ({ languageCode }: { languageCode: string }) => {
+    mutationFn: async ({ languageCode, sourceType }: { languageCode: string; sourceType?: 'json' | 'richtext' }) => {
       if (!selectedTranslationId || !selectedModel) {
         throw new Error("Missing required fields");
       }
@@ -458,6 +526,7 @@ export default function Translate() {
         translationId: selectedTranslationId,
         languageCode,
         modelId: selectedModel,
+        sourceType, // Optional - backend auto-detects if not provided
       });
       return await response.json();
     },
@@ -764,20 +833,26 @@ export default function Translate() {
 
   const handleSaveSource = () => {
     if (selectedTranslationId) {
+      // Save the appropriate content based on input mode
+      const contentToSave = inputMode === 'json' ? jsonContent : sourceText;
       updateMutation.mutate({
         id: selectedTranslationId,
-        data: { sourceText, title, selectedLanguages, isPrivate },
+        data: { sourceText: contentToSave, title, selectedLanguages, isPrivate },
       });
       
       // Update last saved content and clear unsaved changes flag
-      setLastSavedContent(sourceText);
+      setLastSavedContent(contentToSave);
       setHasUnsavedChanges(false);
     }
   };
 
   const handleDiscardChanges = () => {
-    // Reset editor content to last saved state
+    // Reset editor content to last saved state based on input mode
+    if (inputMode === 'json') {
+      setJsonContent(lastSavedContent);
+    } else {
     setSourceText(lastSavedContent);
+    }
     setHasUnsavedChanges(false);
   };
 
@@ -1025,15 +1100,9 @@ export default function Translate() {
       // Trigger translation - backend will automatically handle proofreading
       await translateSingleMutation.mutateAsync({ languageCode: langCode });
       
-      // Remove from translating set - polling will update the real status
-      setTranslatingLanguages(prev => {
-        const newSet = new Set(prev[currentTranslationId] || []);
-        newSet.delete(langCode);
-        return {
-          ...prev,
-          [currentTranslationId]: newSet
-        };
-      });
+      // DON'T clear optimistic state here - let the query refetch complete first
+      // The server state will take over once the output exists with translationStatus: 'translating'
+      // The optimistic state only affects rendering when !jsonOutput (no output yet)
 
       toast({
         title: "Translation started",
@@ -1059,6 +1128,7 @@ export default function Translate() {
     }
   };
 
+  // Unified translate handler - works for both rich text and JSON modes
   const handleTranslate = async () => {
     if (!selectedTranslationId) {
       toast({
@@ -1085,7 +1155,49 @@ export default function Translate() {
       return;
     }
 
-    // Autosave if there are unsaved changes before translating
+    // Determine source type based on input mode
+    const sourceType: 'json' | 'richtext' = inputMode === 'json' ? 'json' : 'richtext';
+
+    // Handle JSON mode: validate and save JSON content
+    if (inputMode === 'json') {
+      if (!jsonContent.trim()) {
+        toast({
+          title: "No JSON content",
+          description: "Please import or paste Figma JSON to translate.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      // Get the valid (potentially sanitized) JSON from the editor
+      const validJsonString = jsonEditorRef.current?.getValidJson();
+      if (!validJsonString) {
+        toast({
+          title: "Invalid JSON",
+          description: "The JSON content is not valid. Please check your input.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      // Save the JSON content before translating
+      try {
+        await apiRequest("PATCH", `/api/translations/${selectedTranslationId}`, {
+          sourceText: validJsonString,
+          lastUsedModelId: selectedModel,
+        });
+        setLastSavedContent(validJsonString);
+        setHasUnsavedChanges(false);
+      } catch (error) {
+        toast({
+          title: "Failed to save JSON",
+          description: "Could not save JSON content before translation.",
+          variant: "destructive",
+        });
+        return;
+      }
+    } else {
+      // Rich text mode: Autosave if there are unsaved changes
     if (hasUnsavedChanges) {
       await updateMutation.mutateAsync({
         id: selectedTranslationId,
@@ -1099,6 +1211,7 @@ export default function Translate() {
         id: selectedTranslationId,
         data: { lastUsedModelId: selectedModel },
       });
+      }
     }
 
     const currentTranslationId = selectedTranslationId;
@@ -1125,11 +1238,11 @@ export default function Translate() {
       [currentTranslationId]: {}
     }));
 
-    // Translate all languages in parallel
+    // Translate all languages in parallel - unified mutation handles both types
     const promises = selectedLanguages.map(async (langCode) => {
       try {
-        // Trigger translation - backend will automatically handle proofreading
-        await translateSingleMutation.mutateAsync({ languageCode: langCode });
+        // Trigger translation with sourceType - backend handles both rich text and JSON
+        await translateSingleMutation.mutateAsync({ languageCode: langCode, sourceType });
         
         // Remove from translating set - polling will update the real status
         setTranslatingLanguages(prev => {
@@ -1156,7 +1269,6 @@ export default function Translate() {
 
     try {
       await Promise.all(promises);
-      const translation = translations.find(t => t.id === currentTranslationId);
       toast({
         title: "Translation started",
         description: `Translation and proofreading started for ${selectedLanguages.length} language${selectedLanguages.length > 1 ? 's' : ''}.`,
@@ -1178,6 +1290,30 @@ export default function Translate() {
         variant: "destructive",
       });
     }
+  };
+
+  // Download translated JSON (uses edited content if available)
+  const handleDownloadTranslatedJson = () => {
+    const jsonOutput = outputs.find(o => o.languageCode === selectedLanguages[0]);
+    if (!jsonOutput?.translatedText) return;
+    
+    // Use edited content if available, otherwise use saved content
+    const contentToDownload = editedOutputs[jsonOutput.id] ?? jsonOutput.translatedText;
+    
+    const blob = new Blob([contentToDownload], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `translated-figma-${selectedLanguages[0] || 'output'}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    
+    toast({
+      title: "Download started",
+      description: "Your translated JSON file is being downloaded.",
+    });
   };
 
   const handleCopyOutput = async (html: string, outputId: string) => {
@@ -1815,11 +1951,44 @@ export default function Translate() {
                 </Popover>
           </div>
 
-          {/* Translate Button */}
+          {/* Translate Button - different behavior for richtext vs JSON mode */}
           {(() => {
             const currentTranslating = selectedTranslationId ? translatingLanguages[selectedTranslationId] : undefined;
             const isTranslating = (currentTranslating?.size ?? 0) > 0;
             
+            // JSON mode: separate translate button with status display
+            if (inputMode === 'json') {
+              // Check if any JSON output is in progress
+              const jsonOutput = outputs.find(o => o.languageCode === selectedLanguages[0]);
+              const isJsonTranslating = jsonOutput && (
+                jsonOutput.translationStatus === 'translating' ||
+                jsonOutput.proofreadStatus === 'proof_reading' ||
+                jsonOutput.proofreadStatus === 'applying_proofread'
+              );
+
+              // Map status to user-friendly text
+              const getStatusText = () => {
+                if (!jsonOutput) return 'Processing...';
+                if (jsonOutput.translationStatus === 'translating') return 'Translating...';
+                if (jsonOutput.proofreadStatus === 'proof_reading') return 'Proofreading...';
+                if (jsonOutput.proofreadStatus === 'applying_proofread') return 'Applying changes...';
+                return 'Processing...';
+              };
+
+              return (
+                <Button
+                  onClick={handleTranslate}
+                  disabled={!jsonContent.trim() || isJsonTranslating || selectedLanguages.length === 0 || !selectedModel || !selectedTranslationId}
+                  className="flex-shrink-0"
+                  data-testid="button-translate-json"
+                >
+                  {isJsonTranslating && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                  {isJsonTranslating ? getStatusText() : 'Translate'}
+                </Button>
+              );
+            }
+            
+            // Rich text mode: original behavior
             if (selectedLanguages.length === 0 && selectedTranslationId) {
               return (
                 <Tooltip>
@@ -1865,20 +2034,64 @@ export default function Translate() {
         <div className={`flex flex-1 flex-col min-w-0 overflow-hidden ${isMobile && mobileActivePanel !== 'source' ? 'hidden' : ''}`}>
 
         <div className="flex-1 overflow-y-auto md:overflow-hidden flex flex-col">
-          {/* Row 1: Source Text label - matches TabsList height on right */}
+          {/* Row 1: Source Text label with mode toggle - matches TabsList height on right */}
           {!isMobile && (
-            <div className="border-b px-4 md:px-6 py-3 flex-shrink-0">
+            <div className="border-b px-4 md:px-6 py-3 flex-shrink-0 flex items-center justify-between">
               <h2 className="text-lg font-semibold">Source Text</h2>
+              <div className="flex items-center gap-1 bg-muted rounded-lg p-1">
+                <Button
+                  variant={inputMode === 'richtext' ? 'secondary' : 'ghost'}
+                  size="sm"
+                  onClick={() => setInputMode('richtext')}
+                  className="h-7 px-3 text-xs"
+                >
+                  <Type className="h-3.5 w-3.5 mr-1.5" />
+                  Rich Text
+                </Button>
+                <Button
+                  variant={inputMode === 'json' ? 'secondary' : 'ghost'}
+                  size="sm"
+                  onClick={() => setInputMode('json')}
+                  className="h-7 px-3 text-xs"
+                >
+                  <FileJson className="h-3.5 w-3.5 mr-1.5" />
+                  Figma JSON
+                </Button>
+              </div>
             </div>
           )}
           
           <div className="flex-1 overflow-y-auto md:overflow-hidden p-4 md:p-6">
           <div className="flex h-full flex-col gap-3 md:gap-4">
             <div className="flex flex-1 flex-col min-h-0">
-              {/* Row 2: Import (left) | chars + share (right) */}
+              {/* Row 2: Import (left) | chars + share (right) - only for richtext mode */}
               <div className="mb-2 flex items-center justify-between flex-shrink-0">
                 <div className="flex items-center gap-2">
-                  {/* Unified Import Dropdown */}
+                  {/* Mobile mode toggle - compact icon buttons */}
+                  {isMobile && (
+                    <div className="flex items-center gap-0.5 bg-muted rounded-md p-0.5">
+                      <Button
+                        variant={inputMode === 'richtext' ? 'secondary' : 'ghost'}
+                        size="sm"
+                        onClick={() => setInputMode('richtext')}
+                        className="h-6 w-6 p-0"
+                        title="Rich Text"
+                      >
+                        <Type className="h-3.5 w-3.5" />
+                      </Button>
+                      <Button
+                        variant={inputMode === 'json' ? 'secondary' : 'ghost'}
+                        size="sm"
+                        onClick={() => setInputMode('json')}
+                        className="h-6 w-6 p-0"
+                        title="Figma JSON"
+                      >
+                        <FileJson className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                  )}
+                  {/* Unified Import Dropdown - only shown in richtext mode */}
+                  {inputMode === 'richtext' && (
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
                       <Button
@@ -1933,11 +2146,30 @@ export default function Translate() {
                       </DropdownMenuItem>
                     </DropdownMenuContent>
                   </DropdownMenu>
+                  )}
+                  {/* JSON mode - Import button matching rich text layout */}
+                  {inputMode === 'json' && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => jsonEditorRef.current?.triggerFileInput?.()}
+                      disabled={!selectedTranslationId || !canEditSelected}
+                      className="h-7"
+                    >
+                      <Upload className="mr-1 h-3 w-3" />
+                      Import
+                    </Button>
+                  )}
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="text-xs text-muted-foreground">
-                    {sourceText ? new DOMParser().parseFromString(sourceText, 'text/html').body.textContent?.length || 0 : 0} characters
+                    {inputMode === 'richtext' 
+                      ? `${sourceText ? new DOMParser().parseFromString(sourceText, 'text/html').body.textContent?.length || 0 : 0} characters`
+                      : `${jsonContent.length} bytes`
+                    }
                   </span>
+                  {/* Share dropdown - richtext mode */}
+                  {inputMode === 'richtext' && (
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
                       <Button
@@ -1987,12 +2219,61 @@ export default function Translate() {
                       </DropdownMenuItem>
                     </DropdownMenuContent>
                   </DropdownMenu>
+                  )}
+                  {/* Share dropdown - JSON mode */}
+                  {inputMode === 'json' && (
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          disabled={!selectedTranslationId || !jsonContent}
+                          className="h-7 w-7 p-0"
+                        >
+                          <Share className="h-3 w-3" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem
+                          onClick={() => {
+                            navigator.clipboard.writeText(jsonContent);
+                            setCopiedSource(true);
+                            setTimeout(() => setCopiedSource(false), 2000);
+                            toast({ title: "Copied!", description: "JSON copied to clipboard." });
+                          }}
+                          disabled={!selectedTranslationId || !jsonContent}
+                        >
+                          {copiedSource ? (
+                            <Check className="mr-2 h-4 w-4" />
+                          ) : (
+                            <Copy className="mr-2 h-4 w-4" />
+                          )}
+                          Copy JSON
+                        </DropdownMenuItem>
+                        
+                        <DropdownMenuItem
+                          onClick={handleShareLink}
+                          disabled={!selectedTranslationId}
+                        >
+                          {copiedLink ? (
+                            <Check className="mr-2 h-4 w-4" />
+                          ) : (
+                            <Link2 className="mr-2 h-4 w-4" />
+                          )}
+                          Share Link
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  )}
                 </div>
               </div>
+              {/* Conditional editor based on input mode */}
+              {inputMode === 'richtext' ? (
               <RichTextEditor
                 content={sourceText}
                 onChange={(value) => {
                   setSourceText(value);
+                    setJsonContent(value); // Keep both in sync for mode toggle
                   // Check if content has changed from last saved
                   setHasUnsavedChanges(value !== lastSavedContent);
                 }}
@@ -2001,6 +2282,23 @@ export default function Translate() {
                 className="flex-1 overflow-auto"
                 editorKey={`source-${selectedTranslationId || 'none'}`}
               />
+              ) : (
+                <JsonCodeEditor
+                  ref={jsonEditorRef}
+                  content={jsonContent}
+                  onChange={(value) => {
+                    setJsonContent(value);
+                    setSourceText(value); // Keep both in sync for mode toggle
+                    // Check if content has changed from last saved (same as rich text editor)
+                    setHasUnsavedChanges(value !== lastSavedContent);
+                  }}
+                  placeholder="Paste Figma JSON here or drag & drop a .json file..."
+                  editable={!!selectedTranslationId && canEditSelected}
+                  className="flex-1 overflow-auto"
+                  translatedContent={outputs.find(o => o.languageCode === activeLanguageTab)?.translatedText ?? undefined}
+                  hideLineNumbers={isMobile}
+                />
+              )}
               <div className="mt-2 flex justify-end gap-2 flex-shrink-0">
                 {hasUnsavedChanges && (
                   <Button
@@ -2031,7 +2329,486 @@ export default function Translate() {
 
         {/* Right Panel - Output */}
         <div className={`flex flex-1 flex-col min-w-0 border-t md:border-t-0 md:border-l overflow-hidden ${isMobile && mobileActivePanel !== 'output' ? 'hidden' : ''}`}>
-          {!selectedTranslationId ? (
+          {/* JSON Mode Output - with language tabs like rich text */}
+          {inputMode === 'json' ? (
+            !selectedTranslationId ? (
+              <div className="flex h-full items-center justify-center p-8 text-center">
+                <div>
+                  <p className="mb-2 text-sm font-medium">No translation selected</p>
+                  <p className="text-xs text-muted-foreground">
+                    Select or create a translation to view results
+                  </p>
+                </div>
+              </div>
+            ) : selectedLanguages.length === 0 ? (
+              <div className="flex h-full items-center justify-center p-8 text-center">
+                <div>
+                  <p className="mb-2 text-sm font-medium">No languages selected</p>
+                  <p className="text-xs text-muted-foreground">
+                    Select languages and click "Translate JSON" to generate translations
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <Tabs value={activeLanguageTab} onValueChange={setActiveLanguageTab} className="flex h-full flex-col">
+                {/* Language tabs header - like rich text */}
+                {!isMobile && (
+                  <div className="border-b px-4 md:px-6 py-2 flex-shrink-0">
+                    <TabsList className="w-auto justify-start overflow-x-auto overflow-y-hidden scrollbar-hide h-auto p-0 bg-transparent">
+                      {selectedLanguages.map((langCode) => {
+                        const language = activeLanguages.find(l => l.code === langCode);
+                        const output = outputs.find(o => o.languageCode === langCode);
+                        const isPollingStopped = output && stoppedPollingOutputs.has(output.id);
+                        // Check both server status AND optimistic UI state for immediate feedback
+                        const isTranslatingOptimistic = selectedTranslationId && translatingLanguages[selectedTranslationId]?.has(langCode);
+                        const isProofreading = output?.proofreadStatus === 'proof_reading' || output?.proofreadStatus === 'applying_proofread';
+                        // Only show translating if NOT in proofreading phase (proofreading takes precedence)
+                        const isTranslating = !isProofreading && (
+                          output?.translationStatus === 'translating' || 
+                          (isTranslatingOptimistic && !output)
+                        );
+                        const isCompleted = output?.translationStatus === 'completed' && output?.proofreadStatus === 'completed';
+                        const isFailed = output?.translationStatus === 'failed' || output?.proofreadStatus === 'failed';
+                        
+                        return (
+                          <TabsTrigger key={langCode} value={langCode} data-testid={`json-tab-${langCode}`} className="gap-1 whitespace-nowrap data-[state=active]:bg-background">
+                            {language?.name || langCode}
+                            {isTranslating && !isPollingStopped && <Loader2 className="h-3 w-3 animate-spin" />}
+                            {isProofreading && !isPollingStopped && <Loader2 className="h-3 w-3 animate-spin text-blue-500" />}
+                            {isCompleted && <Check className="h-3 w-3 text-green-600" />}
+                            {isFailed && <X className="h-3 w-3 text-red-600" />}
+                          </TabsTrigger>
+                        );
+                      })}
+                    </TabsList>
+                  </div>
+                )}
+
+                {/* Mobile tabs */}
+                {isMobile && (
+                  <TabsList className="mx-2 mt-2 w-auto justify-start overflow-x-auto overflow-y-hidden flex-shrink-0 scrollbar-hide">
+                    {selectedLanguages.map((langCode) => {
+                      const language = activeLanguages.find(l => l.code === langCode);
+                      const output = outputs.find(o => o.languageCode === langCode);
+                      // Check both server status AND optimistic UI state for immediate feedback
+                      const isTranslatingOptimistic = selectedTranslationId && translatingLanguages[selectedTranslationId]?.has(langCode);
+                      const isProofreading = output?.proofreadStatus === 'proof_reading' || output?.proofreadStatus === 'applying_proofread';
+                      // Only show translating if NOT in proofreading phase (proofreading takes precedence)
+                      const isTranslating = !isProofreading && (
+                        output?.translationStatus === 'translating' || 
+                        (isTranslatingOptimistic && !output)
+                      );
+                      const isCompleted = output?.translationStatus === 'completed' && output?.proofreadStatus === 'completed';
+                      const isFailed = output?.translationStatus === 'failed' || output?.proofreadStatus === 'failed';
+                      
+                      return (
+                        <TabsTrigger key={langCode} value={langCode} className="gap-1 whitespace-nowrap">
+                          {language?.name || langCode}
+                          {isTranslating && <Loader2 className="h-3 w-3 animate-spin" />}
+                          {isProofreading && <Loader2 className="h-3 w-3 animate-spin text-blue-500" />}
+                          {isCompleted && <Check className="h-3 w-3 text-green-600" />}
+                          {isFailed && <X className="h-3 w-3 text-red-600" />}
+                        </TabsTrigger>
+                      );
+                    })}
+                  </TabsList>
+                )}
+
+                {/* Tab content for each language */}
+                {selectedLanguages.map((langCode) => {
+                  const jsonOutput = outputs.find(o => o.languageCode === langCode);
+                  const language = activeLanguages.find(l => l.code === langCode);
+                  // Check both server status AND optimistic UI state for immediate feedback
+                  // But prioritize server-side status once we have proofreading/applying states
+                  const isTranslatingOptimistic = selectedTranslationId && translatingLanguages[selectedTranslationId]?.has(langCode);
+                  const isProofreading = jsonOutput?.proofreadStatus === 'proof_reading';
+                  const isApplyingChanges = jsonOutput?.proofreadStatus === 'applying_proofread';
+                  // Only show translating if NOT in proofreading phase (proofreading takes precedence)
+                  const isTranslating = !isProofreading && !isApplyingChanges && (
+                    jsonOutput?.translationStatus === 'translating' || 
+                    (isTranslatingOptimistic && !jsonOutput)
+                  );
+                  const isInProgress = isTranslating || isProofreading || isApplyingChanges;
+                  const isCompleted = jsonOutput?.translationStatus === 'completed' && jsonOutput?.proofreadStatus === 'completed';
+                  const isFailed = jsonOutput?.translationStatus === 'failed' || jsonOutput?.proofreadStatus === 'failed';
+                  const translatedContent = jsonOutput?.translatedText;
+
+                  // Check if polling was stopped for this output
+                  const isPollingStopped = jsonOutput && stoppedPollingOutputs.has(jsonOutput.id);
+
+                  return (
+                    <TabsContent key={langCode} value={langCode} className="flex-1 overflow-hidden m-0 data-[state=inactive]:hidden">
+                      <div className="h-full p-4 md:p-6 flex flex-col">
+                        {/* Use single ternary chain like rich text version */}
+                        {isTranslating && jsonOutput && stoppedPollingOutputs.has(jsonOutput.id) ? (
+                          /* Translating but stopped */
+                          <div className="flex h-full items-center justify-center">
+                            <div className="text-center space-y-4">
+                              <p className="text-sm font-medium">Translation stopped</p>
+                              <Button
+                                onClick={() => {
+                                  setStoppedPollingOutputs(prev => {
+                                    const newSet = new Set(prev);
+                                    newSet.delete(jsonOutput.id);
+                                    return newSet;
+                                  });
+                                  handleRerunLanguage(langCode);
+                                }}
+                                variant="outline"
+                                size="sm"
+                                className="mt-4"
+                              >
+                                <RotateCw className="h-4 w-4 mr-2" />
+                                Restart
+                              </Button>
+                            </div>
+                          </div>
+                        ) : isTranslating ? (
+                          /* Translating state - spinner */
+                          <div className="flex h-full items-center justify-center">
+                            <div className="text-center space-y-4">
+                              <Loader2 className="h-8 w-8 animate-spin text-primary mx-auto mb-4" />
+                              <p className="text-sm font-medium">Translating to {language?.name || langCode}...</p>
+                              <p className="text-xs text-muted-foreground mt-1">Please wait</p>
+                              {jsonOutput && (
+                                <Button
+                                  onClick={() => {
+                                    setStoppedPollingOutputs(prev => new Set(prev).add(jsonOutput.id));
+                                    if (selectedTranslationId) {
+                                      setTranslatingLanguages(prev => {
+                                        const newSet = new Set(prev[selectedTranslationId] || []);
+                                        newSet.delete(langCode);
+                                        return { ...prev, [selectedTranslationId]: newSet };
+                                      });
+                                    }
+                                    toast({
+                                      title: "Polling stopped",
+                                      description: "You can restart the translation if needed.",
+                                    });
+                                  }}
+                                  variant="outline"
+                                  size="sm"
+                                  className="mt-4"
+                                >
+                                  <Square className="h-4 w-4 mr-2 fill-current" />
+                                  Stop
+                                </Button>
+                              )}
+                            </div>
+                          </div>
+                        ) : (isProofreading || isApplyingChanges) && jsonOutput?.translatedText ? (() => {
+                          const currentJsonContent = editedOutputs[jsonOutput.id] ?? jsonOutput.translatedText;
+                          const hasJsonEdits = editedOutputs[jsonOutput.id] !== undefined && 
+                                               editedOutputs[jsonOutput.id] !== jsonOutput.translatedText;
+
+                          return (
+                            <div className="h-full flex flex-col">
+                              <div className="flex items-center justify-between mb-2 gap-2 flex-wrap">
+                                <div className="flex items-center gap-2">
+                                  <Label className="text-sm font-medium">
+                                    {language?.name || langCode}
+                                  </Label>
+                                  <span className="inline-flex items-center gap-1 text-green-600">
+                                    <Check className="h-3 w-3" />
+                                    <span className="text-xs">Translated</span>
+                                  </span>
+                                  <Badge variant="outline" className="text-xs">
+                                    <Loader2 className="h-3 w-3 animate-spin mr-1" />
+                                    {isApplyingChanges ? 'Applying changes...' : 'Generating changes...'}
+                                  </Badge>
+                                  {hasJsonEdits && (
+                                    <Badge variant="outline" className="text-amber-600 border-amber-600">
+                                      Unsaved changes
+                                    </Badge>
+                                  )}
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => {
+                                      setStoppedPollingOutputs(prev => new Set(prev).add(jsonOutput.id));
+                                      // Also clear optimistic translating state
+                                      if (selectedTranslationId) {
+                                        setTranslatingLanguages(prev => {
+                                          const newSet = new Set(prev[selectedTranslationId] || []);
+                                          newSet.delete(langCode);
+                                          return { ...prev, [selectedTranslationId]: newSet };
+                                        });
+                                      }
+                                      toast({
+                                        title: "Polling stopped",
+                                        description: "You can restart the translation if needed.",
+                                      });
+                                    }}
+                                    className="h-6 px-2 text-xs"
+                                    title="Stop polling"
+                                  >
+                                    <Square className="h-3 w-3 mr-1 fill-current" />
+                                    Stop
+                                  </Button>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => {
+                                      navigator.clipboard.writeText(currentJsonContent);
+                                      toast({ title: "Copied!", description: `JSON (${language?.name || langCode}) copied to clipboard.` });
+                                    }}
+                                    className="h-7"
+                                  >
+                                    <Copy className="h-3.5 w-3.5 mr-1.5" />
+                                    Copy
+                                  </Button>
+                                </div>
+                              </div>
+                              <textarea
+                                value={currentJsonContent}
+                                onChange={(e) => {
+                                  setEditedOutputs(prev => ({
+                                    ...prev,
+                                    [jsonOutput.id]: e.target.value
+                                  }));
+                                }}
+                                className="flex-1 w-full p-4 font-mono text-sm bg-muted/30 dark:bg-muted/10 rounded-md border resize-none focus:outline-none focus:ring-2 focus:ring-primary"
+                                style={{ tabSize: 2 }}
+                              />
+                            </div>
+                          );
+                        })() : isFailed ? (
+                          /* Failed State */
+                          <div className="flex h-full items-center justify-center">
+                            <div className="text-center text-destructive p-8">
+                              <X className="h-16 w-16 mx-auto mb-4 opacity-50" />
+                              <p className="text-lg font-medium mb-2">Translation Failed</p>
+                              <p className="text-sm text-muted-foreground mb-4">
+                                An error occurred translating to {language?.name || langCode}. Please try again.
+                              </p>
+                              <Button onClick={() => handleRerunLanguage(langCode)} variant="outline">
+                                <RotateCw className="mr-2 h-4 w-4" />
+                                Retry Translation
+                              </Button>
+                            </div>
+                          </div>
+                        ) : jsonOutput && stoppedPollingOutputs.has(jsonOutput.id) ? (
+                          /* Completed but polling stopped */
+                          <div className="flex items-center justify-center py-4 border-y">
+                            <div className="text-center space-y-2">
+                              <p className="text-sm text-muted-foreground">Polling stopped</p>
+                              <Button
+                                onClick={() => handleRerunLanguage(langCode)}
+                                variant="outline"
+                                size="sm"
+                              >
+                                <RotateCw className="h-4 w-4 mr-2" />
+                                Restart
+                              </Button>
+                            </div>
+                          </div>
+                        ) : isCompleted && translatedContent ? (() => {
+                          const currentJsonContent = editedOutputs[jsonOutput!.id] ?? translatedContent;
+                          const hasJsonEdits = editedOutputs[jsonOutput!.id] !== undefined && 
+                                               editedOutputs[jsonOutput!.id] !== translatedContent;
+
+                          return (
+                            <div className="h-full flex flex-col">
+                              {/* Header matching rich text editor style */}
+                              <div className="flex items-center justify-between mb-2 gap-2 flex-wrap">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <span className="text-xs text-muted-foreground">
+                                    {currentJsonContent.length} bytes
+                                  </span>
+                                  {/* Status indicators */}
+                                  {jsonOutput!.translationStatus === 'completed' && (
+                                    <span className="inline-flex items-center gap-1 text-green-600">
+                                      <Check className="h-3 w-3" />
+                                      <span className="text-xs">Translated</span>
+                                    </span>
+                                  )}
+                                  {jsonOutput!.proofreadStatus === 'completed' && (
+                                    <span className="inline-flex items-center gap-1 text-green-600">
+                                      <Check className="h-3 w-3" />
+                                      <span className="text-xs">Proof read</span>
+                                    </span>
+                                  )}
+                                  {/* View Changes badge */}
+                                  {jsonOutput!.proofreadProposedChanges && (
+                                    <Badge 
+                                      variant="secondary" 
+                                      className="cursor-pointer hover:bg-secondary/80"
+                                      onClick={() => {
+                                        setProofreadChangesOutputId(jsonOutput!.id);
+                                        setProofreadChangesDialogOpen(true);
+                                      }}
+                                    >
+                                      View Changes
+                                    </Badge>
+                                  )}
+                                  {/* Compare badge - next to View Changes */}
+                                  <Badge 
+                                    variant="secondary" 
+                                    className="cursor-pointer hover:bg-secondary/80"
+                                    onClick={() => jsonEditorRef.current?.showCompare()}
+                                  >
+                                    Compare
+                                  </Badge>
+                                  {/* Unsaved changes badge */}
+                                  {hasJsonEdits && (
+                                    <Badge variant="outline" className="text-amber-600 border-amber-600">
+                                      Unsaved changes
+                                    </Badge>
+                                  )}
+                                </div>
+                                {/* Right side icons */}
+                                <div className="flex items-center gap-1">
+                                  {/* Save/Discard if edits */}
+                                  {hasJsonEdits && (
+                                    <>
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        onClick={() => {
+                                          setEditedOutputs(prev => {
+                                            const newEdits = { ...prev };
+                                            delete newEdits[jsonOutput!.id];
+                                            return newEdits;
+                                          });
+                                        }}
+                                        className="h-7 px-2"
+                                        title="Discard changes"
+                                      >
+                                        <X className="h-4 w-4" />
+                                      </Button>
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        onClick={() => handleSaveOutput(jsonOutput!.id)}
+                                        disabled={updateOutputMutation.isPending}
+                                        className="h-7 px-2"
+                                        title="Save changes"
+                                      >
+                                        {updateOutputMutation.isPending ? (
+                                          <Loader2 className="h-4 w-4 animate-spin" />
+                                        ) : (
+                                          <Save className="h-4 w-4" />
+                                        )}
+                                      </Button>
+                                    </>
+                                  )}
+                                  {/* Rerun button */}
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => handleRerunLanguage(langCode)}
+                                    className="h-7 px-2"
+                                    title="Rerun translation"
+                                  >
+                                    <RotateCw className="h-4 w-4" />
+                                  </Button>
+                                  {/* Share dropdown */}
+                                  <DropdownMenu>
+                                    <DropdownMenuTrigger asChild>
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        className="h-7 px-2"
+                                      >
+                                        <Share className="h-4 w-4" />
+                                      </Button>
+                                    </DropdownMenuTrigger>
+                                    <DropdownMenuContent align="end">
+                                      <DropdownMenuItem
+                                        onClick={() => {
+                                          navigator.clipboard.writeText(currentJsonContent);
+                                          toast({ title: "Copied!", description: `Translated JSON (${language?.name || langCode}) copied to clipboard.` });
+                                        }}
+                                      >
+                                        <Copy className="mr-2 h-4 w-4" />
+                                        Copy
+                                      </DropdownMenuItem>
+                                      <DropdownMenuItem
+                                        onClick={() => {
+                                          const contentToDownload = editedOutputs[jsonOutput!.id] ?? translatedContent;
+                                          const blob = new Blob([contentToDownload], { type: 'application/json' });
+                                          const url = URL.createObjectURL(blob);
+                                          const a = document.createElement('a');
+                                          a.href = url;
+                                          a.download = `translated-figma-${langCode}.json`;
+                                          document.body.appendChild(a);
+                                          a.click();
+                                          document.body.removeChild(a);
+                                          URL.revokeObjectURL(url);
+                                          toast({ title: "Download started", description: `Your ${language?.name || langCode} JSON file is being downloaded.` });
+                                        }}
+                                      >
+                                        <Download className="mr-2 h-4 w-4" />
+                                        Download
+                                      </DropdownMenuItem>
+                                      <DropdownMenuItem
+                                        onClick={() => handleShareOutput(jsonOutput!.id)}
+                                      >
+                                        {sharedOutputId === jsonOutput!.id ? (
+                                          <Check className="mr-2 h-4 w-4" />
+                                        ) : (
+                                          <Link2 className="mr-2 h-4 w-4" />
+                                        )}
+                                        Share Link
+                                      </DropdownMenuItem>
+                                    </DropdownMenuContent>
+                                  </DropdownMenu>
+                                </div>
+                              </div>
+                              <textarea
+                                value={currentJsonContent}
+                                onChange={(e) => {
+                                  setEditedOutputs(prev => ({
+                                    ...prev,
+                                    [jsonOutput!.id]: e.target.value
+                                  }));
+                                }}
+                                className="flex-1 w-full p-4 font-mono text-sm bg-muted/30 dark:bg-muted/10 rounded-md border resize-none focus:outline-none focus:ring-2 focus:ring-primary"
+                                style={{ tabSize: 2 }}
+                              />
+                            </div>
+                          );
+                        })() : (
+                          /* No output yet state - final else like rich text */
+                          <div className="flex h-full items-center justify-center p-8">
+                            <div className="text-center">
+                              <p className="mb-4 text-sm font-medium text-muted-foreground">
+                                No translation for {language?.name || langCode}
+                              </p>
+                              <Button
+                                onClick={() => handleRerunLanguage(langCode)}
+                                disabled={isTranslating || !selectedModel || !selectedTranslationId}
+                                data-testid={`button-translate-json-${langCode}`}
+                              >
+                                {isTranslating ? (
+                                  <>
+                                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                    Translating...
+                                  </>
+                                ) : (
+                                  <>
+                                    <FileJson className="h-4 w-4 mr-2" />
+                                    Translate
+                                  </>
+                                )}
+                              </Button>
+                              {(!selectedModel || !selectedTranslationId) && (
+                                <p className="mt-2 text-xs text-muted-foreground">
+                                  {!selectedModel ? "Please select a model first" : "Please select a translation first"}
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </TabsContent>
+                  );
+                })}
+              </Tabs>
+            )
+          ) : !selectedTranslationId ? (
             <div className="flex h-full items-center justify-center p-8 text-center">
               <div>
                 <p className="mb-2 text-sm font-medium">No translation selected</p>
@@ -2058,12 +2835,17 @@ export default function Translate() {
                 {selectedLanguages.map((langCode) => {
                   const language = activeLanguages.find(l => l.code === langCode);
                   const output = outputs.find(o => o.languageCode === langCode);
-                  // Use server-side status as source of truth
-                  const isTranslating = output?.translationStatus === 'translating';
+                  const isPollingStopped = output && stoppedPollingOutputs.has(output.id);
+                  // Check both server status AND optimistic UI state for immediate feedback
+                  const isTranslatingOptimistic = selectedTranslationId && translatingLanguages[selectedTranslationId]?.has(langCode);
                   const isProofreading = output?.proofreadStatus === 'proof_reading' || output?.proofreadStatus === 'applying_proofread';
+                  // Only show translating if NOT in proofreading phase (proofreading takes precedence)
+                  const isTranslating = !isProofreading && (
+                    output?.translationStatus === 'translating' || 
+                    (isTranslatingOptimistic && !output)
+                  );
                   const isCompleted = output?.translationStatus === 'completed' && output?.proofreadStatus === 'completed';
                   const isFailed = output?.translationStatus === 'failed' || output?.proofreadStatus === 'failed';
-                  const isPollingStopped = output && stoppedPollingOutputs.has(output.id);
                   
                   return (
                     <TabsTrigger key={langCode} value={langCode} data-testid={`tab-${langCode}`} className="gap-1 whitespace-nowrap data-[state=active]:bg-background">
@@ -2085,11 +2867,17 @@ export default function Translate() {
                   {selectedLanguages.map((langCode) => {
                     const language = activeLanguages.find(l => l.code === langCode);
                     const output = outputs.find(o => o.languageCode === langCode);
-                    const isTranslating = output?.translationStatus === 'translating';
+                    const isPollingStopped = output && stoppedPollingOutputs.has(output.id);
+                    // Check both server status AND optimistic UI state for immediate feedback
+                    const isTranslatingOptimistic = selectedTranslationId && translatingLanguages[selectedTranslationId]?.has(langCode);
                     const isProofreading = output?.proofreadStatus === 'proof_reading' || output?.proofreadStatus === 'applying_proofread';
+                    // Only show translating if NOT in proofreading phase (proofreading takes precedence)
+                    const isTranslating = !isProofreading && (
+                      output?.translationStatus === 'translating' || 
+                      (isTranslatingOptimistic && !output)
+                    );
                     const isCompleted = output?.translationStatus === 'completed' && output?.proofreadStatus === 'completed';
                     const isFailed = output?.translationStatus === 'failed' || output?.proofreadStatus === 'failed';
-                    const isPollingStopped = output && stoppedPollingOutputs.has(output.id);
                     
                     return (
                       <TabsTrigger key={langCode} value={langCode} data-testid={`tab-mobile-${langCode}`} className="gap-1 whitespace-nowrap">
@@ -2107,9 +2895,14 @@ export default function Translate() {
               {selectedLanguages.map((langCode) => {
                 const output = outputs.find(o => o.languageCode === langCode);
                 const language = activeLanguages.find(l => l.code === langCode);
-                // Use server-side status as source of truth
-                const isTranslating = output?.translationStatus === 'translating';
+                // Check both server status AND optimistic UI state for immediate feedback
+                const isTranslatingOptimistic = selectedTranslationId && translatingLanguages[selectedTranslationId]?.has(langCode);
                 const isProofreading = output?.proofreadStatus === 'proof_reading' || output?.proofreadStatus === 'applying_proofread';
+                // Only show translating if NOT in proofreading phase (proofreading takes precedence)
+                const isTranslating = !isProofreading && (
+                  output?.translationStatus === 'translating' || 
+                  (isTranslatingOptimistic && !output)
+                );
                 
                 return <TabsContent
                   key={langCode}
@@ -2141,6 +2934,14 @@ export default function Translate() {
                           <Button
                             onClick={() => {
                               setStoppedPollingOutputs(prev => new Set(prev).add(output.id));
+                              // Also clear optimistic translating state
+                              if (selectedTranslationId) {
+                                setTranslatingLanguages(prev => {
+                                  const newSet = new Set(prev[selectedTranslationId] || []);
+                                  newSet.delete(langCode);
+                                  return { ...prev, [selectedTranslationId]: newSet };
+                                });
+                              }
                               toast({
                                 title: "Polling stopped",
                                 description: "You can restart the translation if needed.",
@@ -2207,6 +3008,14 @@ export default function Translate() {
                                   size="sm"
                                   onClick={() => {
                                     setStoppedPollingOutputs(prev => new Set(prev).add(output.id));
+                                    // Also clear optimistic translating state
+                                    if (selectedTranslationId) {
+                                      setTranslatingLanguages(prev => {
+                                        const newSet = new Set(prev[selectedTranslationId] || []);
+                                        newSet.delete(langCode);
+                                        return { ...prev, [selectedTranslationId]: newSet };
+                                      });
+                                    }
                                     toast({
                                       title: "Polling stopped",
                                       description: "You can restart the translation if needed.",
@@ -2286,6 +3095,14 @@ export default function Translate() {
                                   className="h-7 w-7 p-0"
                                   onClick={() => {
                                     setStoppedPollingOutputs(prev => new Set(prev).add(output.id));
+                                    // Also clear optimistic translating state
+                                    if (selectedTranslationId) {
+                                      setTranslatingLanguages(prev => {
+                                        const newSet = new Set(prev[selectedTranslationId] || []);
+                                        newSet.delete(langCode);
+                                        return { ...prev, [selectedTranslationId]: newSet };
+                                      });
+                                    }
                                     toast({
                                       title: "Polling stopped",
                                       description: "You can restart the translation if needed.",

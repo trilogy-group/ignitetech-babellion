@@ -3,6 +3,7 @@ import OpenAI from 'openai';
 import Anthropic from '@anthropic-ai/sdk';
 import { storage } from './storage';
 import { decrypt } from './encryption';
+import { logInfo, logError } from './vite';
 
 interface TranslationRequest {
   text: string;
@@ -20,6 +21,19 @@ interface ProofreadResult {
 interface ProofreadStep1Result {
   proposedChanges: string; // JSON string of proposed changes
   userInputStep1: string; // User input for step 1 (needed for step 2)
+  outputTokens: number; // Output tokens used
+}
+
+// Result type for translation with token tracking
+interface TranslationResult {
+  text: string;
+  outputTokens: number;
+}
+
+// Result type for proofread step 2 with token tracking  
+interface ProofreadStep2Result {
+  text: string;
+  outputTokens: number;
 }
 
 export class TranslationService {
@@ -150,7 +164,7 @@ export class TranslationService {
     return text;
   }
 
-  async translate(request: TranslationRequest): Promise<string> {
+  async translate(request: TranslationRequest): Promise<TranslationResult> {
     const { text, targetLanguage, modelIdentifier, provider, systemPrompt } = request;
 
     const defaultSystemPrompt = `You are a professional translator. Maintain the tone, style, and formatting of the original text. Only return the translated text, without any explanations or additional commentary.`;
@@ -202,7 +216,7 @@ export class TranslationService {
     
     return {
       proposedChanges: step1Result.proposedChanges,
-      finalTranslation: step2Result,
+      finalTranslation: step2Result.text,
     };
   }
 
@@ -219,15 +233,15 @@ export class TranslationService {
     You will then output a proof read version of the translated content (that only) in the format it's given, preserving the html and any kind of formatting given in the translated content`;
     const userInputStep1 = `Language: ${language}\n\nOriginal content:\n\n${originalText}\n\nTranslated content:\n\n${translatedText}`;
 
-    let proposedChanges: string;
+    let result: { proposedChanges: string; outputTokens: number };
     if (provider === 'openai') {
-      proposedChanges = await this.proofreadStep1WithOpenAI(
+      result = await this.proofreadStep1WithOpenAI(
         userInputStep1,
         modelIdentifier,
         systemPrompt || defaultSystemPrompt
       );
     } else if (provider === 'anthropic') {
-      proposedChanges = await this.proofreadStep1WithAnthropic(
+      result = await this.proofreadStep1WithAnthropic(
         userInputStep1,
         modelIdentifier,
         systemPrompt || defaultSystemPrompt
@@ -237,8 +251,9 @@ export class TranslationService {
     }
 
     return {
-      proposedChanges,
+      proposedChanges: result.proposedChanges,
       userInputStep1,
+      outputTokens: result.outputTokens,
     };
   }
 
@@ -248,7 +263,7 @@ export class TranslationService {
     modelIdentifier: string,
     provider: 'openai' | 'anthropic',
     systemPrompt?: string
-  ): Promise<string> {
+  ): Promise<ProofreadStep2Result> {
     const defaultSystemPrompt = `You are a linguistic expert in proof reading an original text vs the translated text. 
     You are to understand the original content, and then review the translated content. 
     You will then output a proof read version of the translated content (that only) in the format it's given, preserving the html and any kind of formatting given in the translated content`;
@@ -277,7 +292,7 @@ export class TranslationService {
     targetLanguage: string,
     model: string,
     systemPrompt: string
-  ): Promise<string> {
+  ): Promise<TranslationResult> {
     const apiKey = await this.getApiKey('openai');
     
     // Reference: javascript_openai blueprint
@@ -356,10 +371,14 @@ export class TranslationService {
       
       const duration = Math.round((Date.now() - requestStartTime) / 1000);
       
-      // Extract text from completed response
+      // Extract text and token usage from completed response
       if (completedResponse && completedResponse.output) {
         console.log(`[AI] Stream completed after ${duration}s`);
-        return this.extractTextFromResponse(completedResponse);
+        const outputTokens = completedResponse.usage?.output_tokens || 0;
+        return {
+          text: this.extractTextFromResponse(completedResponse),
+          outputTokens,
+        };
       } else if (!completedResponse) {
         throw new Error(`Stream ended without receiving response.completed event (${duration}s elapsed)`);
       } else {
@@ -377,7 +396,7 @@ export class TranslationService {
     targetLanguage: string,
     model: string,
     systemPrompt: string
-  ): Promise<string> {
+  ): Promise<TranslationResult> {
     const apiKey = await this.getApiKey('anthropic');
     
     // Reference: javascript_anthropic blueprint
@@ -395,19 +414,23 @@ export class TranslationService {
       ],
     });
 
+    const outputTokens = response.usage?.output_tokens || 0;
     const content = response.content[0];
     if (content.type === 'text') {
-      return content.text;
+      return {
+        text: content.text,
+        outputTokens,
+      };
     }
 
-    return '';
+    return { text: '', outputTokens };
   }
 
   private async proofreadStep1WithOpenAI(
     userInputStep1: string,
     model: string,
     systemPrompt: string
-  ): Promise<string> {
+  ): Promise<{ proposedChanges: string; outputTokens: number }> {
     const apiKey = await this.getApiKey('openai');
     // Configure OpenAI client with increased timeout for long-running requests (15 minutes)
     // The SDK uses undici (Node's fetch) which handles keep-alive automatically
@@ -482,9 +505,10 @@ You must output this in a valid JSON format only.`;
       const rawResponse = this.extractTextFromResponse(step1CompletedResponse);
       console.log(`[AI] Step 1 raw response length: ${rawResponse.length} characters`);
       const proposedChanges = this.extractJsonFromText(rawResponse, `[AI] OpenAI Step 1`);
-      console.log(`[AI] Step 1 completed after ${step1Duration}s, proposedChanges length: ${proposedChanges.length} characters`);
+      const outputTokens = step1CompletedResponse.usage?.output_tokens || 0;
+      console.log(`[AI] Step 1 completed after ${step1Duration}s, proposedChanges length: ${proposedChanges.length} characters, tokens: ${outputTokens}`);
       
-      return proposedChanges;
+      return { proposedChanges, outputTokens };
     } catch (error: unknown) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       const requestDuration = Math.round((Date.now() - step1StartTime) / 1000);
@@ -498,7 +522,7 @@ You must output this in a valid JSON format only.`;
     proposedChanges: string,
     model: string,
     systemPrompt: string
-  ): Promise<string> {
+  ): Promise<ProofreadStep2Result> {
     const apiKey = await this.getApiKey('openai');
     const openai = new OpenAI({ 
       apiKey,
@@ -582,9 +606,10 @@ You must output this in a valid JSON format only.`;
       }
       
       const finalTranslation = this.extractTextFromResponse(step2CompletedResponse);
-      console.log(`[AI] Step 2 completed after ${step2Duration}s`);
+      const outputTokens = step2CompletedResponse.usage?.output_tokens || 0;
+      console.log(`[AI] Step 2 completed after ${step2Duration}s, tokens: ${outputTokens}`);
       
-      return finalTranslation;
+      return { text: finalTranslation, outputTokens };
     } catch (error: unknown) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       const requestDuration = Math.round((Date.now() - step2StartTime) / 1000);
@@ -597,7 +622,7 @@ You must output this in a valid JSON format only.`;
     userInputStep1: string,
     model: string,
     systemPrompt: string
-  ): Promise<string> {
+  ): Promise<{ proposedChanges: string; outputTokens: number }> {
     const apiKey = await this.getApiKey('anthropic');
     const anthropic = new Anthropic({ apiKey });
 
@@ -615,6 +640,7 @@ You must output this in a valid JSON format only.`;
       ],
     });
 
+    const outputTokens = step1Response.usage?.output_tokens || 0;
     const step1Content = step1Response.content[0];
     if (step1Content.type !== 'text') {
       throw new Error('Step 1 response is not text');
@@ -622,9 +648,9 @@ You must output this in a valid JSON format only.`;
     const rawResponse = step1Content.text;
     console.log(`[AI] Anthropic Step 1 raw response length: ${rawResponse.length} characters`);
     const proposedChanges = this.extractJsonFromText(rawResponse, `[AI] Anthropic Step 1`);
-    console.log(`[AI] Anthropic Step 1 completed, proposedChanges length: ${proposedChanges.length} characters`);
+    console.log(`[AI] Anthropic Step 1 completed, proposedChanges length: ${proposedChanges.length} characters, tokens: ${outputTokens}`);
 
-    return proposedChanges;
+    return { proposedChanges, outputTokens };
   }
 
   private async proofreadStep2WithAnthropic(
@@ -632,7 +658,7 @@ You must output this in a valid JSON format only.`;
     proposedChanges: string,
     model: string,
     systemPrompt: string
-  ): Promise<string> {
+  ): Promise<ProofreadStep2Result> {
     const apiKey = await this.getApiKey('anthropic');
     const anthropic = new Anthropic({ apiKey });
 
@@ -653,15 +679,910 @@ You must output this in a valid JSON format only.`;
       ],
     });
 
+    const outputTokens = step2Response.usage?.output_tokens || 0;
     const step2Content = step2Response.content[0];
     if (step2Content.type !== 'text') {
       throw new Error('Step 2 response is not text');
     }
     const finalTranslation = step2Content.text;
 
-    return finalTranslation;
+    return { text: finalTranslation, outputTokens };
+  }
+}
+
+// ============================================
+// Figma JSON Translation Types and Methods
+// ============================================
+
+/**
+ * Represents a text node extracted from Figma JSON with its path for reconstruction
+ */
+interface TextNodeInfo {
+  path: string[];
+  text: string;
+  index: number;
+}
+
+/**
+ * Recursively extracts all TEXT nodes from Figma JSON
+ */
+function extractTextNodes(
+  node: unknown,
+  path: string[] = [],
+  results: TextNodeInfo[] = []
+): TextNodeInfo[] {
+  if (!node || typeof node !== 'object') {
+    return results;
   }
 
+  const obj = node as Record<string, unknown>;
+
+  // Check if this is a TEXT node
+  if (obj.kind === 'TEXT' && typeof obj.text === 'string') {
+    results.push({
+      path: [...path, 'text'],
+      text: obj.text,
+      index: results.length,
+    });
+  }
+
+  // Recursively process children array
+  if (Array.isArray(obj.children)) {
+    (obj.children as unknown[]).forEach((child, idx) => {
+      extractTextNodes(child, [...path, 'children', String(idx)], results);
+    });
+  }
+
+  // Recursively process nodes array (top-level)
+  if (Array.isArray(obj.nodes)) {
+    (obj.nodes as unknown[]).forEach((child, idx) => {
+      extractTextNodes(child, [...path, 'nodes', String(idx)], results);
+    });
+  }
+
+  return results;
+}
+
+/**
+ * Sets a value at a specific path in an object
+ */
+function setValueAtPath(obj: unknown, path: string[], value: string): void {
+  if (!obj || typeof obj !== 'object' || path.length === 0) {
+    return;
+  }
+
+  let current: Record<string, unknown> = obj as Record<string, unknown>;
+  
+  for (let i = 0; i < path.length - 1; i++) {
+    const key = path[i];
+    if (current[key] === undefined || current[key] === null) {
+      return; // Path doesn't exist
+    }
+    current = current[key] as Record<string, unknown>;
+  }
+
+  const finalKey = path[path.length - 1];
+  current[finalKey] = value;
+}
+
+/**
+ * Job status for Figma JSON translation
+ */
+export type FigmaJsonJobStatus = 
+  | 'pending'
+  | 'translating'
+  | 'proofreading'
+  | 'applying_changes'
+  | 'completed'
+  | 'failed';
+
+/**
+ * Figma JSON translation job
+ */
+export interface FigmaJsonJob {
+  id: string;
+  status: FigmaJsonJobStatus;
+  textNodeCount: number;
+  translatedJson?: unknown;
+  proposedChanges?: string;
+  error?: string;
+  startedAt: Date;
+  completedAt?: Date;
+  targetLanguage: string;
+  modelUsed: string;
+}
+
+/**
+ * Figma JSON Translation Service - handles translation of Figma JSON exports
+ */
+export class FigmaJsonTranslationService {
+  private translationService: TranslationService;
+  
+  // In-memory job store for async translation jobs
+  private jobs: Map<string, FigmaJsonJob> = new Map();
+
+  constructor(translationServiceInstance: TranslationService) {
+    this.translationService = translationServiceInstance;
+  }
+
+  /**
+   * Generate a unique job ID
+   */
+  private generateJobId(): string {
+    return `figma-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+  }
+
+  /**
+   * Get job by ID
+   */
+  getJob(jobId: string): FigmaJsonJob | undefined {
+    return this.jobs.get(jobId);
+  }
+
+  /**
+   * Start an async translation job - returns immediately with job ID
+   */
+  startTranslationJob(request: {
+    json: unknown;
+    targetLanguage: string;
+    modelIdentifier: string;
+    provider: 'openai' | 'anthropic';
+    systemPrompt?: string;
+    proofreadSystemPrompt?: string;
+    modelName: string;
+  }): string {
+    const jobId = this.generateJobId();
+    
+    // Extract text nodes to get count
+    const textNodes = extractTextNodes(request.json);
+    
+    // Create job record
+    const job: FigmaJsonJob = {
+      id: jobId,
+      status: 'pending',
+      textNodeCount: textNodes.length,
+      startedAt: new Date(),
+      targetLanguage: request.targetLanguage,
+      modelUsed: request.modelName,
+    };
+    
+    this.jobs.set(jobId, job);
+    
+    // Start async processing (fire and forget)
+    this.processTranslationJob(jobId, request, textNodes).catch(error => {
+      console.error(`[Figma JSON] Job ${jobId} failed:`, error);
+      const failedJob = this.jobs.get(jobId);
+      if (failedJob) {
+        failedJob.status = 'failed';
+        failedJob.error = error instanceof Error ? error.message : 'Unknown error';
+        failedJob.completedAt = new Date();
+      }
+    });
+    
+    return jobId;
+  }
+
+  /**
+   * Process translation job asynchronously
+   */
+  private async processTranslationJob(
+    jobId: string,
+    request: {
+      json: unknown;
+      targetLanguage: string;
+      modelIdentifier: string;
+      provider: 'openai' | 'anthropic';
+      systemPrompt?: string;
+      proofreadSystemPrompt?: string;
+    },
+    textNodes: TextNodeInfo[]
+  ): Promise<void> {
+    const job = this.jobs.get(jobId);
+    if (!job) return;
+
+    const { json, targetLanguage, modelIdentifier, provider, systemPrompt, proofreadSystemPrompt } = request;
+
+    if (textNodes.length === 0) {
+      job.status = 'completed';
+      job.translatedJson = json;
+      job.completedAt = new Date();
+      console.log(`[Figma JSON] Job ${jobId}: No TEXT nodes found`);
+      return;
+    }
+
+    console.log(`[Figma JSON] Job ${jobId}: Found ${textNodes.length} TEXT nodes`);
+
+    // Prepare texts for batch translation
+    const translationInput = textNodes.map((node, idx) => ({
+      id: idx,
+      original: node.text,
+    }));
+
+    // ========== STEP 1: TRANSLATING ==========
+    job.status = 'translating';
+    console.log(`[Figma JSON] Job ${jobId}: Step 1 - Translating...`);
+
+    const defaultTranslateSystemPrompt = `You are a professional translator. You will receive a JSON array of text items to translate.
+Translate each "original" text to ${targetLanguage}.
+Maintain the tone, style, and any formatting within each text.
+Return ONLY a valid JSON array with the same structure, where you add a "translated" field containing the translated text.
+Do not add any explanations or additional content.`;
+
+    const translateUserPrompt = `Translate the following texts to ${targetLanguage}. Return a JSON array with the same structure, adding a "translated" field:
+
+${JSON.stringify(translationInput, null, 2)}`;
+
+    let translatedTextsJson: string;
+    
+    if (provider === 'openai') {
+      translatedTextsJson = await this.translateBatchWithOpenAI(
+        translateUserPrompt,
+        modelIdentifier,
+        systemPrompt || defaultTranslateSystemPrompt
+      );
+    } else {
+      translatedTextsJson = await this.translateBatchWithAnthropic(
+        translateUserPrompt,
+        modelIdentifier,
+        systemPrompt || defaultTranslateSystemPrompt
+      );
+    }
+
+    // Parse translated texts
+    const extractedTranslatedJson = this.extractJsonFromText(translatedTextsJson, '[Figma JSON Translate]');
+    
+    let translatedItems: Array<{ id: number; original: string; translated: string }>;
+    try {
+      translatedItems = JSON.parse(extractedTranslatedJson) as Array<{ id: number; original: string; translated: string }>;
+    } catch (error) {
+      throw new Error('Failed to parse AI translation response');
+    }
+
+    console.log(`[Figma JSON] Job ${jobId}: Translation complete - ${translatedItems.length} items`);
+
+    // ========== STEP 2: PROOFREADING ==========
+    job.status = 'proofreading';
+    console.log(`[Figma JSON] Job ${jobId}: Step 2 - Proofreading...`);
+
+    const defaultProofreadSystemPrompt = `You are a linguistic expert in proofreading original text vs translated text. 
+You will review the original content and the translated content, then output proposed changes to improve accuracy and fluency.`;
+
+    const proofreadStep1UserPrompt = `Language: ${targetLanguage}
+
+Review these translations and list all changes required for 100% fluency and accuracy.
+Return ONLY a valid JSON array with this structure:
+[{"id": <number>, "original": "<original text>", "translated": "<current translation>", "improved": "<improved translation>", "reason": "<reason for change in English>"}]
+
+Only include items that need changes. If a translation is perfect, do not include it.
+
+${JSON.stringify(translatedItems, null, 2)}`;
+
+    let proposedChangesJson: string;
+    
+    if (provider === 'openai') {
+      proposedChangesJson = await this.translateBatchWithOpenAI(
+        proofreadStep1UserPrompt,
+        modelIdentifier,
+        proofreadSystemPrompt || defaultProofreadSystemPrompt
+      );
+    } else {
+      proposedChangesJson = await this.translateBatchWithAnthropic(
+        proofreadStep1UserPrompt,
+        modelIdentifier,
+        proofreadSystemPrompt || defaultProofreadSystemPrompt
+      );
+    }
+
+    // Parse proposed changes
+    const extractedChangesJson = this.extractJsonFromText(proposedChangesJson, '[Figma JSON Proofread]');
+    
+    let proposedChanges: Array<{ id: number; original: string; translated: string; improved: string; reason: string }>;
+    try {
+      proposedChanges = JSON.parse(extractedChangesJson) as Array<{ id: number; original: string; translated: string; improved: string; reason: string }>;
+    } catch (error) {
+      console.error(`[Figma JSON] Job ${jobId}: Failed to parse proposed changes, using translations as-is`);
+      proposedChanges = [];
+    }
+
+    job.proposedChanges = extractedChangesJson;
+    console.log(`[Figma JSON] Job ${jobId}: Proofread complete - ${proposedChanges.length} changes proposed`);
+
+    // ========== STEP 3: APPLYING CHANGES ==========
+    job.status = 'applying_changes';
+    console.log(`[Figma JSON] Job ${jobId}: Step 3 - Applying final changes...`);
+
+    // Create a map of improvements by ID
+    const improvementsMap = new Map<number, string>();
+    for (const change of proposedChanges) {
+      improvementsMap.set(change.id, change.improved);
+    }
+
+    // Build final items: use improved version if available, otherwise use original translation
+    const finalItems = translatedItems.map(item => ({
+      id: item.id,
+      text: improvementsMap.get(item.id) || item.translated,
+    }));
+
+    // Deep clone the original JSON and apply final translations
+    const translatedJson = JSON.parse(JSON.stringify(json)) as unknown;
+    
+    for (const item of finalItems) {
+      const textNode = textNodes.find(n => n.index === item.id);
+      if (textNode) {
+        setValueAtPath(translatedJson, textNode.path, item.text);
+      }
+    }
+
+    // ========== COMPLETED ==========
+    job.status = 'completed';
+    job.translatedJson = translatedJson;
+    job.completedAt = new Date();
+    
+    console.log(`[Figma JSON] Job ${jobId}: Completed - ${finalItems.length} text nodes translated and proofread`);
+    
+    // Clean up old jobs after 1 hour
+    setTimeout(() => {
+      this.jobs.delete(jobId);
+    }, 60 * 60 * 1000);
+  }
+
+  /**
+   * Translate Figma JSON and save progress to database (like rich text flow)
+   */
+  async translateAndSaveToDb(request: {
+    outputId: string;
+    json: unknown;
+    targetLanguage: string;
+    modelIdentifier: string;
+    provider: 'openai' | 'anthropic';
+    systemPrompt?: string;
+    proofreadSystemPrompt?: string;
+  }): Promise<void> {
+    const { outputId, json, targetLanguage, modelIdentifier, provider, systemPrompt, proofreadSystemPrompt } = request;
+
+    // Extract text nodes
+    const textNodes = extractTextNodes(json);
+    
+    if (textNodes.length === 0) {
+      logInfo(`[Figma JSON] Output ${outputId}: No TEXT nodes found`, "AI");
+      // Mark as completed with original JSON
+      await storage.updateTranslationOutput(outputId, JSON.stringify(json, null, 2));
+      await storage.updateTranslationOutputStatus(outputId, { 
+        translationStatus: 'completed',
+        proofreadStatus: 'completed'
+      });
+      return;
+    }
+
+    logInfo(`[Figma JSON] Output ${outputId}: Found ${textNodes.length} TEXT nodes`, "AI");
+
+    // Prepare texts for batch translation
+    const translationInput = textNodes.map((node, idx) => ({
+      id: idx,
+      original: node.text,
+    }));
+
+    // ========== STEP 1: TRANSLATING ==========
+    // Status is already 'translating' from route
+    logInfo(`[Figma JSON] Output ${outputId}: Step 1 - Translating...`, "AI");
+
+    const defaultTranslateSystemPrompt = `You are a professional translator. You will receive a JSON array of text items to translate.
+Translate each "original" text to ${targetLanguage}.
+Maintain the tone, style, and any formatting within each text.
+Return ONLY a valid JSON array with the same structure, where you add a "translated" field containing the translated text.
+Do not add any explanations or additional content.`;
+
+    const translateUserPrompt = `Translate the following texts to ${targetLanguage}. Return a JSON array with the same structure, adding a "translated" field:
+
+${JSON.stringify(translationInput, null, 2)}`;
+
+    let translatedTextsJson: string;
+    
+    if (provider === 'openai') {
+      translatedTextsJson = await this.translateBatchWithOpenAI(
+        translateUserPrompt,
+        modelIdentifier,
+        systemPrompt || defaultTranslateSystemPrompt
+      );
+    } else {
+      translatedTextsJson = await this.translateBatchWithAnthropic(
+        translateUserPrompt,
+        modelIdentifier,
+        systemPrompt || defaultTranslateSystemPrompt
+      );
+    }
+
+    // Parse translated texts
+    const extractedTranslatedJson = this.extractJsonFromText(translatedTextsJson, '[Figma JSON DB Translate]');
+    
+    let translatedItems: Array<{ id: number; original: string; translated: string }>;
+    try {
+      translatedItems = JSON.parse(extractedTranslatedJson) as Array<{ id: number; original: string; translated: string }>;
+    } catch (error) {
+      throw new Error('Failed to parse AI translation response');
+    }
+
+    logInfo(`[Figma JSON] Output ${outputId}: Translation complete - ${translatedItems.length} items`, "AI");
+
+    // Build intermediate translation JSON (so UI can display it during proofreading)
+    const intermediateTranslatedJson = JSON.parse(JSON.stringify(json)) as unknown;
+    for (const item of translatedItems) {
+      const textNode = textNodes.find(n => n.index === item.id);
+      if (textNode) {
+        setValueAtPath(intermediateTranslatedJson, textNode.path, item.translated);
+      }
+    }
+
+    // Save intermediate translated text BEFORE proofreading starts (like rich text flow)
+    // This allows the UI to show the translation during the proofreading phase
+    await storage.updateTranslationOutput(outputId, JSON.stringify(intermediateTranslatedJson, null, 2));
+
+    // Update status: translation completed, start proofreading
+    await storage.updateTranslationOutputStatus(outputId, { 
+      translationStatus: 'completed',
+      proofreadStatus: 'proof_reading'  // Match rich text status
+    });
+
+    // ========== STEP 2: PROOFREADING ==========
+    logInfo(`[Figma JSON] Output ${outputId}: Step 2 - Proofreading...`, "AI");
+
+    const defaultProofreadSystemPrompt = `You are a linguistic expert in proofreading original text vs translated text. 
+You will review the original content and the translated content, then output proposed changes to improve accuracy and fluency.`;
+
+    const proofreadStep1UserPrompt = `Language: ${targetLanguage}
+
+Review these translations and list all changes required for 100% fluency and accuracy.
+Return ONLY a valid JSON array with this structure:
+[{"id": <number>, "original": "<original text>", "translated": "<current translation>", "improved": "<improved translation>", "reason": "<reason for change in English>"}]
+
+Only include items that need changes. If a translation is perfect, do not include it.
+
+${JSON.stringify(translatedItems, null, 2)}`;
+
+    let proposedChangesJson: string;
+    
+    if (provider === 'openai') {
+      proposedChangesJson = await this.translateBatchWithOpenAI(
+        proofreadStep1UserPrompt,
+        modelIdentifier,
+        proofreadSystemPrompt || defaultProofreadSystemPrompt
+      );
+    } else {
+      proposedChangesJson = await this.translateBatchWithAnthropic(
+        proofreadStep1UserPrompt,
+        modelIdentifier,
+        proofreadSystemPrompt || defaultProofreadSystemPrompt
+      );
+    }
+
+    // Parse proposed changes
+    const extractedChangesJson = this.extractJsonFromText(proposedChangesJson, '[Figma JSON DB Proofread]');
+    
+    let proposedChanges: Array<{ id: number; original: string; translated: string; improved: string; reason: string }>;
+    try {
+      proposedChanges = JSON.parse(extractedChangesJson) as Array<{ id: number; original: string; translated: string; improved: string; reason: string }>;
+    } catch (error) {
+      logError(`[Figma JSON] Output ${outputId}: Failed to parse proposed changes, using translations as-is`, "AI");
+      proposedChanges = [];
+    }
+
+    logInfo(`[Figma JSON] Output ${outputId}: Proofread complete - ${proposedChanges.length} changes proposed`, "AI");
+
+    // Save proposed changes and original translation (like rich text)
+    // Note: intermediateTranslatedJson was already built and saved to translatedText before proofreading started
+    await storage.updateTranslationOutputProofreadData(outputId, {
+      proofreadProposedChanges: extractedChangesJson,
+      proofreadOriginalTranslation: JSON.stringify(intermediateTranslatedJson, null, 2),
+    });
+
+    // Update status: applying proofread
+    await storage.updateTranslationOutputStatus(outputId, { 
+      proofreadStatus: 'applying_proofread'  // Match rich text status
+    });
+
+    // ========== STEP 3: APPLYING CHANGES ==========
+    logInfo(`[Figma JSON] Output ${outputId}: Step 3 - Applying final changes...`, "AI");
+
+    // Create a map of improvements by ID
+    const improvementsMap = new Map<number, string>();
+    for (const change of proposedChanges) {
+      improvementsMap.set(change.id, change.improved);
+    }
+
+    // Build final items: use improved version if available, otherwise use original translation
+    const finalItems = translatedItems.map(item => ({
+      id: item.id,
+      text: improvementsMap.get(item.id) || item.translated,
+    }));
+
+    // Deep clone the original JSON and apply final translations
+    const finalTranslatedJson = JSON.parse(JSON.stringify(json)) as unknown;
+    
+    for (const item of finalItems) {
+      const textNode = textNodes.find(n => n.index === item.id);
+      if (textNode) {
+        setValueAtPath(finalTranslatedJson, textNode.path, item.text);
+      }
+    }
+
+    // ========== COMPLETED ==========
+    // Save final translated JSON
+    await storage.updateTranslationOutput(outputId, JSON.stringify(finalTranslatedJson, null, 2));
+    
+    // Mark as completed
+    await storage.updateTranslationOutputStatus(outputId, { 
+      proofreadStatus: 'completed'
+    });
+
+    logInfo(`[Figma JSON] Output ${outputId}: Completed - ${finalItems.length} text nodes translated and proofread`, "AI");
+  }
+
+  private async getApiKey(provider: string): Promise<string> {
+    const apiKeyRecord = await storage.getApiKey(provider);
+    if (!apiKeyRecord) {
+      throw new Error(`${provider} API key not configured`);
+    }
+    return decrypt(apiKeyRecord.encryptedKey);
+  }
+
+  private shouldUseReasoning(modelIdentifier: string): boolean {
+    const reasoningModelPrefixes = ['gpt-5', 'o'];
+    return reasoningModelPrefixes.some(prefix => modelIdentifier.startsWith(prefix));
+  }
+
+  /**
+   * Extract text from OpenAI response structure
+   */
+  private extractTextFromResponse(response: Record<string, unknown>): string {
+    const output = response.output as Array<Record<string, unknown>> | undefined;
+    if (output && Array.isArray(output) && output.length > 0) {
+      const messageItem = output.find((item) => item.type === 'message');
+      
+      if (messageItem) {
+        const content = messageItem.content as Array<Record<string, unknown>> | undefined;
+        if (content && Array.isArray(content) && content.length > 0) {
+          const contentItem = content[0];
+          if (contentItem.type === 'output_text' && typeof contentItem.text === 'string') {
+            return contentItem.text;
+          }
+        }
+      }
+    }
+    return '';
+  }
+
+  /**
+   * Extracts and validates JSON from text response
+   */
+  private extractJsonFromText(text: string, logPrefix: string = '[AI]'): string {
+    if (!text) {
+      console.log(`${logPrefix} JSON extraction: No text provided`);
+      return '';
+    }
+    
+    // Try to find JSON array in the text
+    const jsonBlockMatch = text.match(/```(?:json)?\s*(\[[\s\S]*?\])\s*```/);
+    if (jsonBlockMatch) {
+      try {
+        JSON.parse(jsonBlockMatch[1]);
+        console.log(`${logPrefix} JSON extraction: SUCCESS - Extracted JSON from markdown code block`);
+        return jsonBlockMatch[1];
+      } catch {
+        // Continue to try other methods
+      }
+    }
+    
+    // Try to find JSON array directly
+    const arrayStartIndex = text.indexOf('[');
+    if (arrayStartIndex !== -1) {
+      let bracketCount = 0;
+      let inString = false;
+      let escapeNext = false;
+      
+      for (let i = arrayStartIndex; i < text.length; i++) {
+        const char = text[i];
+        
+        if (escapeNext) {
+          escapeNext = false;
+          continue;
+        }
+        
+        if (char === '\\') {
+          escapeNext = true;
+          continue;
+        }
+        
+        if (char === '"' && !escapeNext) {
+          inString = !inString;
+          continue;
+        }
+        
+        if (!inString) {
+          if (char === '[') {
+            bracketCount++;
+          } else if (char === ']') {
+            bracketCount--;
+            if (bracketCount === 0) {
+              const jsonString = text.substring(arrayStartIndex, i + 1);
+              try {
+                JSON.parse(jsonString);
+                console.log(`${logPrefix} JSON extraction: SUCCESS - Extracted JSON array directly`);
+                return jsonString;
+              } catch {
+                // Continue
+              }
+            }
+          }
+        }
+      }
+    }
+    
+    console.log(`${logPrefix} JSON extraction: UNSUCCESSFUL - No valid JSON found`);
+    return text;
+  }
+
+  /**
+   * Translates Figma JSON by extracting TEXT nodes, translating them, proofreading, and reconstructing the JSON.
+   * Uses the same translate → proofread flow as rich text translation.
+   */
+  async translateFigmaJson(request: {
+    json: unknown;
+    targetLanguage: string;
+    modelIdentifier: string;
+    provider: 'openai' | 'anthropic';
+    systemPrompt?: string;
+    proofreadSystemPrompt?: string;
+  }): Promise<{ translatedJson: unknown; textNodeCount: number; proposedChanges?: string }> {
+    const { json, targetLanguage, modelIdentifier, provider, systemPrompt, proofreadSystemPrompt } = request;
+
+    // Step 1: Extract all TEXT nodes
+    const textNodes = extractTextNodes(json);
+    
+    if (textNodes.length === 0) {
+      console.log('[Figma JSON] No TEXT nodes found in JSON');
+      return { translatedJson: json, textNodeCount: 0 };
+    }
+
+    console.log(`[Figma JSON] Found ${textNodes.length} TEXT nodes to translate`);
+
+    // Step 2: Prepare texts for batch translation
+    const translationInput = textNodes.map((node, idx) => ({
+      id: idx,
+      original: node.text,
+    }));
+
+    // ========== TRANSLATION STEP ==========
+    const defaultTranslateSystemPrompt = `You are a professional translator. You will receive a JSON array of text items to translate.
+Translate each "original" text to ${targetLanguage}.
+Maintain the tone, style, and any formatting within each text.
+Return ONLY a valid JSON array with the same structure, where you add a "translated" field containing the translated text.
+Do not add any explanations or additional content.`;
+
+    const translateUserPrompt = `Translate the following texts to ${targetLanguage}. Return a JSON array with the same structure, adding a "translated" field:
+
+${JSON.stringify(translationInput, null, 2)}`;
+
+    console.log('[Figma JSON] Step 1: Translating...');
+    let translatedTextsJson: string;
+    
+    if (provider === 'openai') {
+      translatedTextsJson = await this.translateBatchWithOpenAI(
+        translateUserPrompt,
+        modelIdentifier,
+        systemPrompt || defaultTranslateSystemPrompt
+      );
+    } else {
+      translatedTextsJson = await this.translateBatchWithAnthropic(
+        translateUserPrompt,
+        modelIdentifier,
+        systemPrompt || defaultTranslateSystemPrompt
+      );
+    }
+
+    // Parse translated texts
+    const extractedTranslatedJson = this.extractJsonFromText(translatedTextsJson, '[Figma JSON Translate]');
+    
+    let translatedItems: Array<{ id: number; original: string; translated: string }>;
+    try {
+      translatedItems = JSON.parse(extractedTranslatedJson) as Array<{ id: number; original: string; translated: string }>;
+    } catch (error) {
+      console.error('[Figma JSON] Failed to parse translated JSON:', error);
+      throw new Error('Failed to parse AI translation response');
+    }
+
+    console.log(`[Figma JSON] Translation complete: ${translatedItems.length} items`);
+
+    // ========== PROOFREAD STEP 1: Generate proposed changes ==========
+    const defaultProofreadSystemPrompt = `You are a linguistic expert in proofreading original text vs translated text. 
+You will review the original content and the translated content, then output proposed changes to improve accuracy and fluency.`;
+
+    const proofreadStep1UserPrompt = `Language: ${targetLanguage}
+
+Review these translations and list all changes required for 100% fluency and accuracy.
+Return ONLY a valid JSON array with this structure:
+[{"id": <number>, "original": "<original text>", "translated": "<current translation>", "improved": "<improved translation>", "reason": "<reason for change in English>"}]
+
+Only include items that need changes. If a translation is perfect, do not include it.
+
+${JSON.stringify(translatedItems, null, 2)}`;
+
+    console.log('[Figma JSON] Step 2: Proofreading (proposing changes)...');
+    let proposedChangesJson: string;
+    
+    if (provider === 'openai') {
+      proposedChangesJson = await this.translateBatchWithOpenAI(
+        proofreadStep1UserPrompt,
+        modelIdentifier,
+        proofreadSystemPrompt || defaultProofreadSystemPrompt
+      );
+    } else {
+      proposedChangesJson = await this.translateBatchWithAnthropic(
+        proofreadStep1UserPrompt,
+        modelIdentifier,
+        proofreadSystemPrompt || defaultProofreadSystemPrompt
+      );
+    }
+
+    // Parse proposed changes
+    const extractedChangesJson = this.extractJsonFromText(proposedChangesJson, '[Figma JSON Proofread]');
+    
+    let proposedChanges: Array<{ id: number; original: string; translated: string; improved: string; reason: string }>;
+    try {
+      proposedChanges = JSON.parse(extractedChangesJson) as Array<{ id: number; original: string; translated: string; improved: string; reason: string }>;
+    } catch (error) {
+      console.error('[Figma JSON] Failed to parse proposed changes, using translations as-is:', error);
+      proposedChanges = [];
+    }
+
+    console.log(`[Figma JSON] Proofread complete: ${proposedChanges.length} changes proposed`);
+
+    // ========== PROOFREAD STEP 2: Apply changes ==========
+    // Create a map of improvements by ID
+    const improvementsMap = new Map<number, string>();
+    for (const change of proposedChanges) {
+      improvementsMap.set(change.id, change.improved);
+    }
+
+    // Build final items: use improved version if available, otherwise use original translation
+    const finalItems = translatedItems.map(item => ({
+      id: item.id,
+      text: improvementsMap.get(item.id) || item.translated,
+    }));
+
+    // ========== RECONSTRUCT JSON ==========
+    // Deep clone the original JSON and apply final translations
+    const translatedJson = JSON.parse(JSON.stringify(json)) as unknown;
+    
+    for (const item of finalItems) {
+      const textNode = textNodes.find(n => n.index === item.id);
+      if (textNode) {
+        setValueAtPath(translatedJson, textNode.path, item.text);
+      }
+    }
+
+    console.log(`[Figma JSON] Successfully translated and proofread ${finalItems.length} text nodes`);
+    
+    return {
+      translatedJson,
+      textNodeCount: textNodes.length,
+      proposedChanges: extractedChangesJson,
+    };
+  }
+
+  /**
+   * Batch translate texts using OpenAI
+   */
+  private async translateBatchWithOpenAI(
+    userPrompt: string,
+    model: string,
+    systemPrompt: string
+  ): Promise<string> {
+    const apiKey = await this.getApiKey('openai');
+    const openai = new OpenAI({
+      apiKey,
+      timeout: 900000,
+      maxRetries: 2,
+    });
+
+    const requestParams: Record<string, unknown> = {
+      model,
+      input: userPrompt,
+      instructions: systemPrompt,
+      metadata: {
+        app: 'babellion',
+        service: 'figma-json-translation',
+      },
+    };
+
+    if (this.shouldUseReasoning(model)) {
+      requestParams.reasoning = {
+        effort: 'medium',
+        summary: 'detailed',
+      };
+    }
+
+    const requestStartTime = Date.now();
+    console.log(`[Figma JSON] Starting OpenAI batch translation, model: ${model}`);
+
+    try {
+      const stream = await openai.responses.create({
+        ...requestParams,
+        stream: true,
+      } as Parameters<typeof openai.responses.create>[0]) as unknown as AsyncIterable<Record<string, unknown>>;
+
+      let completedResponse: Record<string, unknown> | null = null;
+
+      for await (const event of stream) {
+        if (event.response) {
+          const response = event.response as Record<string, unknown>;
+          if (event.type === 'response.completed' && response.status === 'completed') {
+            completedResponse = response;
+            break;
+          } else if (response.status === 'failed' || response.status === 'cancelled') {
+            const error = response.error as Record<string, unknown> | undefined;
+            const errorMsg = error?.message || 'Unknown error';
+            throw new Error(`Response ${response.id} ${response.status}: ${errorMsg}`);
+          }
+        }
+      }
+
+      const duration = Math.round((Date.now() - requestStartTime) / 1000);
+      
+      if (completedResponse && completedResponse.output) {
+        console.log(`[Figma JSON] OpenAI batch translation completed after ${duration}s`);
+        return this.extractTextFromResponse(completedResponse);
+      } else {
+        throw new Error(`Stream ended without receiving response.completed event (${duration}s elapsed)`);
+      }
+    } catch (error: unknown) {
+      const requestDuration = Math.round((Date.now() - requestStartTime) / 1000);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      console.error(`[Figma JSON] OpenAI batch translation failed after ${requestDuration}s:`, errorMessage);
+      throw error;
+    }
+  }
+
+  /**
+   * Batch translate texts using Anthropic
+   */
+  private async translateBatchWithAnthropic(
+    userPrompt: string,
+    model: string,
+    systemPrompt: string
+  ): Promise<string> {
+    const apiKey = await this.getApiKey('anthropic');
+    const anthropic = new Anthropic({ apiKey });
+
+    console.log(`[Figma JSON] Starting Anthropic batch translation, model: ${model}`);
+    const requestStartTime = Date.now();
+
+    try {
+      const response = await anthropic.messages.create({
+        model,
+        max_tokens: 30000,
+        system: systemPrompt,
+        messages: [
+          { role: 'user', content: userPrompt },
+        ],
+      });
+
+      const duration = Math.round((Date.now() - requestStartTime) / 1000);
+      console.log(`[Figma JSON] Anthropic batch translation completed after ${duration}s`);
+
+      const content = response.content[0];
+      if (content.type === 'text') {
+        return content.text;
+      }
+
+      return '';
+    } catch (error: unknown) {
+      const requestDuration = Math.round((Date.now() - requestStartTime) / 1000);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      console.error(`[Figma JSON] Anthropic batch translation failed after ${requestDuration}s:`, errorMessage);
+      throw error;
+    }
+  }
 }
 
 export const translationService = new TranslationService();
+export const figmaJsonTranslationService = new FigmaJsonTranslationService(translationService);
